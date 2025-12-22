@@ -44,18 +44,18 @@ class TestConfigFromEnv:
         assert config.sonarr.url == "http://sonarr:8989"
         assert config.sonarr.api_key == "sonarr-key"
 
-    def test_partial_env_vars_ignored(self) -> None:
+    def test_partial_env_vars_ignored(self, tmp_path: Path) -> None:
         """Should ignore partial config (only URL, no key)."""
-        with patch.dict(
-            os.environ,
-            {"FINDARR_RADARR_URL": "http://radarr:7878"},
-            clear=False,
+        # Use tmp_path for home to avoid loading real config file
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FINDARR_RADARR_URL": "http://radarr:7878"},
+                clear=True,
+            ),
         ):
-            # Remove API key if it exists
-            env = os.environ.copy()
-            env.pop("FINDARR_RADARR_API_KEY", None)
-            with patch.dict(os.environ, env, clear=True):
-                config = Config.load()
+            config = Config.load()
 
         assert config.radarr is None
 
