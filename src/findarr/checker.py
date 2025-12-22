@@ -100,6 +100,7 @@ class FourKChecker:
         radarr_api_key: str | None = None,
         sonarr_url: str | None = None,
         sonarr_api_key: str | None = None,
+        timeout: float = 120.0,
     ) -> None:
         """Initialize the 4K checker.
 
@@ -108,6 +109,7 @@ class FourKChecker:
             radarr_api_key: The Radarr API key
             sonarr_url: The base URL of the Sonarr instance
             sonarr_api_key: The Sonarr API key
+            timeout: Request timeout in seconds (default 120.0)
         """
         self._radarr_config = (
             (radarr_url, radarr_api_key)
@@ -119,6 +121,7 @@ class FourKChecker:
             if sonarr_url and sonarr_api_key
             else None
         )
+        self._timeout = timeout
 
     async def check_movie(self, movie_id: int) -> FourKResult:
         """Check if a movie has 4K releases available.
@@ -136,7 +139,7 @@ class FourKChecker:
             raise ValueError("Radarr is not configured")
 
         url, api_key = self._radarr_config
-        async with RadarrClient(url, api_key) as client:
+        async with RadarrClient(url, api_key, timeout=self._timeout) as client:
             releases = await client.get_movie_releases(movie_id)
             return FourKResult(
                 item_id=movie_id,
@@ -161,7 +164,7 @@ class FourKChecker:
             raise ValueError("Radarr is not configured")
 
         url, api_key = self._radarr_config
-        async with RadarrClient(url, api_key) as client:
+        async with RadarrClient(url, api_key, timeout=self._timeout) as client:
             movie = await client.find_movie_by_name(name)
             if movie is None:
                 raise ValueError(f"Movie not found: {name}")
@@ -189,7 +192,7 @@ class FourKChecker:
             raise ValueError("Radarr is not configured")
 
         url, api_key = self._radarr_config
-        async with RadarrClient(url, api_key) as client:
+        async with RadarrClient(url, api_key, timeout=self._timeout) as client:
             movies = await client.search_movies(term)
             return [(m.id, m.title, m.year) for m in movies]
 
@@ -221,7 +224,7 @@ class FourKChecker:
             raise ValueError("Sonarr is not configured")
 
         url, api_key = self._sonarr_config
-        async with SonarrClient(url, api_key) as client:
+        async with SonarrClient(url, api_key, timeout=self._timeout) as client:
             # Get all episodes for the series
             episodes = await client.get_episodes(series_id)
             today = date.today()
@@ -324,7 +327,7 @@ class FourKChecker:
             raise ValueError("Sonarr is not configured")
 
         url, api_key = self._sonarr_config
-        async with SonarrClient(url, api_key) as client:
+        async with SonarrClient(url, api_key, timeout=self._timeout) as client:
             series = await client.find_series_by_name(name)
             if series is None:
                 raise ValueError(f"Series not found: {name}")
@@ -352,6 +355,6 @@ class FourKChecker:
             raise ValueError("Sonarr is not configured")
 
         url, api_key = self._sonarr_config
-        async with SonarrClient(url, api_key) as client:
+        async with SonarrClient(url, api_key, timeout=self._timeout) as client:
             series_list = await client.search_series(term)
             return [(s.id, s.title, s.year) for s in series_list]

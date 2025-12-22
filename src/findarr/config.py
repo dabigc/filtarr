@@ -29,12 +29,16 @@ class SonarrConfig:
     api_key: str
 
 
+DEFAULT_TIMEOUT = 120.0
+
+
 @dataclass
 class Config:
     """Application configuration."""
 
     radarr: RadarrConfig | None = None
     sonarr: SonarrConfig | None = None
+    timeout: float = DEFAULT_TIMEOUT
 
     @classmethod
     def load(cls) -> Self:
@@ -49,6 +53,7 @@ class Config:
         - FINDARR_RADARR_API_KEY
         - FINDARR_SONARR_URL
         - FINDARR_SONARR_API_KEY
+        - FINDARR_TIMEOUT (request timeout in seconds)
 
         Returns:
             Config instance with loaded values
@@ -106,7 +111,11 @@ class Config:
                     api_key=sonarr_data["api_key"],
                 )
 
-        return cls(radarr=radarr, sonarr=sonarr)
+        timeout = DEFAULT_TIMEOUT
+        if "timeout" in data:
+            timeout = float(data["timeout"])
+
+        return cls(radarr=radarr, sonarr=sonarr, timeout=timeout)
 
     @classmethod
     def _load_from_env(cls, base: Self) -> Self:
@@ -120,6 +129,7 @@ class Config:
         """
         radarr = base.radarr
         sonarr = base.sonarr
+        timeout = base.timeout
 
         # Check for Radarr env vars
         radarr_url = os.environ.get("FINDARR_RADARR_URL")
@@ -133,7 +143,12 @@ class Config:
         if sonarr_url and sonarr_key:
             sonarr = SonarrConfig(url=sonarr_url, api_key=sonarr_key)
 
-        return cls(radarr=radarr, sonarr=sonarr)
+        # Check for timeout env var
+        timeout_str = os.environ.get("FINDARR_TIMEOUT")
+        if timeout_str:
+            timeout = float(timeout_str)
+
+        return cls(radarr=radarr, sonarr=sonarr, timeout=timeout)
 
     def require_radarr(self) -> RadarrConfig:
         """Get Radarr config, raising if not configured.

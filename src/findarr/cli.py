@@ -111,6 +111,7 @@ def get_checker(config: Config, need_radarr: bool = False, need_sonarr: bool = F
         radarr_api_key=radarr_key,
         sonarr_url=sonarr_url,
         sonarr_api_key=sonarr_key,
+        timeout=config.timeout,
     )
 
 

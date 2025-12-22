@@ -37,7 +37,7 @@ class BaseArrClient:
         base_url: str,
         api_key: str,
         *,
-        timeout: float = 30.0,
+        timeout: float = 120.0,
         cache_ttl: int = 300,
         max_retries: int = 3,
     ) -> None:
@@ -46,7 +46,7 @@ class BaseArrClient:
         Args:
             base_url: The base URL of the arr instance (e.g., http://localhost:7878)
             api_key: The API key for authentication
-            timeout: Request timeout in seconds (default 30.0)
+            timeout: Request timeout in seconds (default 120.0)
             cache_ttl: Cache time-to-live in seconds (default 300)
             max_retries: Maximum number of retry attempts (default 3)
         """
