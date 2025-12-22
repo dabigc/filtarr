@@ -1,47 +1,19 @@
 """Radarr API client."""
 
-from typing import Any
-
-import httpx
-
+from findarr.clients.base import BaseArrClient
 from findarr.models.common import Quality, Release
 
 
-class RadarrClient:
-    """Client for interacting with the Radarr API."""
+class RadarrClient(BaseArrClient):
+    """Client for interacting with the Radarr API.
 
-    def __init__(self, base_url: str, api_key: str) -> None:
-        """Initialize the Radarr client.
+    Inherits retry and caching functionality from BaseArrClient.
 
-        Args:
-            base_url: The base URL of the Radarr instance (e.g., http://localhost:7878)
-            api_key: The Radarr API key
-        """
-        self.base_url = base_url.rstrip("/")
-        self.api_key = api_key
-        self._client: httpx.AsyncClient | None = None
-
-    async def __aenter__(self) -> "RadarrClient":
-        """Enter async context manager."""
-        self._client = httpx.AsyncClient(
-            base_url=self.base_url,
-            headers={"X-Api-Key": self.api_key},
-            timeout=30.0,
-        )
-        return self
-
-    async def __aexit__(self, *args: Any) -> None:
-        """Exit async context manager."""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
-
-    @property
-    def client(self) -> httpx.AsyncClient:
-        """Get the HTTP client, raising if not in context."""
-        if self._client is None:
-            raise RuntimeError("Client must be used within async context manager")
-        return self._client
+    Example:
+        async with RadarrClient("http://localhost:7878", "api-key") as client:
+            releases = await client.get_movie_releases(123)
+            has_4k = await client.has_4k_releases(123)
+    """
 
     async def get_movie_releases(self, movie_id: int) -> list[Release]:
         """Search for releases for a specific movie.
@@ -52,9 +24,7 @@ class RadarrClient:
         Returns:
             List of releases found by indexers
         """
-        response = await self.client.get("/api/v3/release", params={"movieId": movie_id})
-        response.raise_for_status()
-        data = response.json()
+        data = await self._get("/api/v3/release", params={"movieId": movie_id})
 
         releases = []
         for item in data:
