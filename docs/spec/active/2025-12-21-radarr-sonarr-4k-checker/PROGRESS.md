@@ -4,10 +4,10 @@ format_version: "1.0.0"
 project_id: SPEC-2025-12-21-001
 project_name: "findarr - Radarr/Sonarr 4K Availability Checker"
 project_status: in-progress
-current_phase: 1
+current_phase: 5
 implementation_started: 2025-12-22T08:45:00Z
-last_session: 2025-12-22T08:45:00Z
-last_updated: 2025-12-22T08:45:00Z
+last_session: 2025-12-22T18:30:00Z
+last_updated: 2025-12-22T18:30:00Z
 ---
 
 # findarr - Implementation Progress
@@ -44,21 +44,27 @@ This document tracks implementation progress against the spec plan.
 | 3.3 | Update FourKResult dataclass | done | 2025-12-22 | 2025-12-22 | Added episodes/seasons/strategy |
 | 3.4 | Implement enhanced check_series() | done | 2025-12-22 | 2025-12-22 | Episode-level with short-circuit |
 | 3.5 | Add tests for sampling strategies | done | 2025-12-22 | 2025-12-22 | 16 tests in test_checker.py |
-| 4.1 | Add CLI dependencies | pending | | | |
-| 4.2 | Create config loader | pending | | | |
-| 4.3 | Implement CLI app structure | pending | | | |
-| 4.4 | Implement check movie command | pending | | | |
-| 4.5 | Implement check series command | pending | | | |
-| 4.6 | Implement batch check command | pending | | | |
-| 4.7 | Implement output formatters | pending | | | |
-| 4.8 | Add CLI tests | pending | | | |
-| 5.1 | Update README with full usage | pending | | | |
+| 4.1 | Add CLI dependencies | done | 2025-12-22 | 2025-12-22 | typer, rich in optional deps |
+| 4.2 | Create config loader | done | 2025-12-22 | 2025-12-22 | env vars + TOML file |
+| 4.3 | Implement CLI app structure | done | 2025-12-22 | 2025-12-22 | typer app with check group |
+| 4.4 | Implement check movie command | done | 2025-12-22 | 2025-12-22 | --format option |
+| 4.5 | Implement check series command | done | 2025-12-22 | 2025-12-22 | --seasons, --strategy options |
+| 4.6 | Implement batch check command | done | 2025-12-22 | 2025-12-22 | --file option |
+| 4.7 | Implement output formatters | done | 2025-12-22 | 2025-12-22 | JSON, table, simple |
+| 4.8 | Add CLI tests | done | 2025-12-22 | 2025-12-22 | 15 tests in test_cli.py |
+| 5.1 | Update README with full usage | done | 2025-12-22 | 2025-12-22 | Quick start, CLI, API docs |
 | 5.2 | Add docstrings to public API | pending | | | |
 | 5.3 | Integration tests | pending | | | |
 | 5.4 | Achieve test coverage target | pending | | | |
-| 5.5 | Final type checking and linting | pending | | | |
+| 5.5 | Final type checking and linting | done | 2025-12-22 | 2025-12-22 | mypy + ruff pass |
 | 5.6 | Update pyproject.toml for release | pending | | | |
 | 5.7 | Create CHANGELOG entry | pending | | | |
+| 6.1 | Add search by name to RadarrClient | done | 2025-12-22 | 2025-12-22 | Search movies by title |
+| 6.2 | Add search by name to SonarrClient | done | 2025-12-22 | 2025-12-22 | Search series by title |
+| 6.3 | Add name resolution to FourKChecker | done | 2025-12-22 | 2025-12-22 | Resolve names to IDs |
+| 6.4 | Update CLI to accept names | done | 2025-12-22 | 2025-12-22 | movie/series name argument |
+| 6.5 | Handle multiple matches in CLI | done | 2025-12-22 | 2025-12-22 | Display choices, exit code 2 |
+| 6.6 | Add tests for name-based lookup | done | 2025-12-22 | 2025-12-22 | 27 new tests added |
 
 ---
 
@@ -69,8 +75,9 @@ This document tracks implementation progress against the spec plan.
 | 1 | Infrastructure | 100% | done |
 | 2 | Sonarr Enhancement | 100% | done |
 | 3 | Checker Enhancement | 100% | done |
-| 4 | CLI Implementation | 0% | pending |
-| 5 | Polish and Release | 0% | pending |
+| 4 | CLI Implementation | 100% | done |
+| 5 | Polish and Release | 29% | in-progress |
+| 6 | Name-Based Lookup | 100% | done |
 
 ---
 
@@ -78,6 +85,7 @@ This document tracks implementation progress against the spec plan.
 
 | Date | Type | Task ID | Description | Resolution |
 |------|------|---------|-------------|------------|
+| 2025-12-22 | added | 6.1-6.6 | Phase 6: Name-based lookup feature | User requested |
 
 ---
 
@@ -86,4 +94,23 @@ This document tracks implementation progress against the spec plan.
 ### 2025-12-22 - Initial Session
 - PROGRESS.md initialized from IMPLEMENTATION_PLAN.md
 - 33 tasks identified across 5 phases
-- Ready to begin implementation with Task 1.1
+- Completed Phases 1-4 in single session
+- 73 tests passing, mypy + ruff pass
+
+### 2025-12-22 - Session 2
+- Project closed out as partial (Phases 1-4 complete)
+- User requested name-based lookup feature
+- Reopened project to implement Phases 5 & 6
+- Added Phase 6 tasks (6.1-6.6) for name resolution
+
+### 2025-12-22 - Session 3
+- Completed Phase 6 (Name-Based Lookup)
+- Added Movie model for Radarr
+- Implemented search_movies() and find_movie_by_name() in RadarrClient
+- Implemented get_all_series(), search_series(), find_series_by_name() in SonarrClient
+- Added check_movie_by_name(), check_series_by_name(), search_movies(), search_series() to FourKChecker
+- Updated CLI to accept movie/series names as arguments
+- CLI displays choices when multiple matches found
+- Batch command skips ambiguous/not-found items with warnings
+- Added 27 new tests (100 total, all passing)
+- mypy, ruff all pass

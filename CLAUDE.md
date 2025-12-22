@@ -72,3 +72,11 @@ mypy src
 - Fixtures for sample API responses in `tests/fixtures/`
 - Test both success and error paths
 - Integration tests marked with `@pytest.mark.integration`
+
+## Completed Spec Projects
+
+- `docs/spec/completed/2025-12-21-radarr-sonarr-4k-checker/` - findarr - Radarr/Sonarr 4K Availability Checker
+  - Completed: 2025-12-22
+  - Outcome: Partial (Phases 1-4 complete, v0.1.0 ready)
+  - Key docs: REQUIREMENTS.md, ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, RETROSPECTIVE.md
+  - Status: Library and CLI complete, polish phase pending

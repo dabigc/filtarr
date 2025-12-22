@@ -2,13 +2,15 @@
 project_id: SPEC-2025-12-21-001
 project_name: "findarr - Radarr/Sonarr 4K Availability Checker"
 slug: radarr-sonarr-4k-checker
-status: in-review
+status: in-progress
 created: 2025-12-21T23:30:00Z
-approved: null
-started: null
+approved: 2025-12-22T08:45:00Z
+started: 2025-12-22T08:45:00Z
 completed: null
 expires: 2026-03-21T23:30:00Z
 superseded_by: null
+final_effort: ~5 hours
+outcome: partial
 tags: [radarr, sonarr, 4k, media-management, python, library, cli]
 stakeholders: []
 worktree:
