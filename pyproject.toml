@@ -5,16 +5,22 @@ description = "A Python library to check 4K availability via Radarr/Sonarr searc
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-keywords = ["radarr", "sonarr", "4k", "media", "automation"]
+keywords = ["radarr", "sonarr", "4k", "media", "automation", "plex", "jellyfin"]
+authors = [
+    { name = "dabigc" },
+]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Multimedia :: Video",
+    "Topic :: Home Automation",
     "Typing :: Typed",
 ]
 dependencies = [
@@ -23,6 +29,11 @@ dependencies = [
     "tenacity>=8.2.0",
     "cachetools>=5.3.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/dabigc/4k-findarr"
+Repository = "https://github.com/dabigc/4k-findarr"
+Issues = "https://github.com/dabigc/4k-findarr/issues"
 
 [project.optional-dependencies]
 cli = [
@@ -85,3 +96,6 @@ warn_unused_configs = true
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+]
