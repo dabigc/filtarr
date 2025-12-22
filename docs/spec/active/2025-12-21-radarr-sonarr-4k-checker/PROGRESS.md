@@ -3,11 +3,11 @@ document_type: progress
 format_version: "1.0.0"
 project_id: SPEC-2025-12-21-001
 project_name: "findarr - Radarr/Sonarr 4K Availability Checker"
-project_status: in-progress
-current_phase: 5
+project_status: completed
+current_phase: 6
 implementation_started: 2025-12-22T08:45:00Z
-last_session: 2025-12-22T18:30:00Z
-last_updated: 2025-12-22T18:30:00Z
+last_session: 2025-12-22T19:00:00Z
+last_updated: 2025-12-22T19:00:00Z
 ---
 
 # findarr - Implementation Progress
@@ -53,12 +53,12 @@ This document tracks implementation progress against the spec plan.
 | 4.7 | Implement output formatters | done | 2025-12-22 | 2025-12-22 | JSON, table, simple |
 | 4.8 | Add CLI tests | done | 2025-12-22 | 2025-12-22 | 15 tests in test_cli.py |
 | 5.1 | Update README with full usage | done | 2025-12-22 | 2025-12-22 | Quick start, CLI, API docs |
-| 5.2 | Add docstrings to public API | pending | | | |
-| 5.3 | Integration tests | pending | | | |
-| 5.4 | Achieve test coverage target | pending | | | |
+| 5.2 | Add docstrings to public API | done | 2025-12-22 | 2025-12-22 | Enhanced __init__.py |
+| 5.3 | Integration tests | done | 2025-12-22 | 2025-12-22 | 9 integration tests |
+| 5.4 | Achieve test coverage target | done | 2025-12-22 | 2025-12-22 | 91% coverage, 109 tests |
 | 5.5 | Final type checking and linting | done | 2025-12-22 | 2025-12-22 | mypy + ruff pass |
-| 5.6 | Update pyproject.toml for release | pending | | | |
-| 5.7 | Create CHANGELOG entry | pending | | | |
+| 5.6 | Update pyproject.toml for release | done | 2025-12-22 | 2025-12-22 | URLs, authors, classifiers |
+| 5.7 | Create CHANGELOG entry | done | 2025-12-22 | 2025-12-22 | CHANGELOG.md created |
 | 6.1 | Add search by name to RadarrClient | done | 2025-12-22 | 2025-12-22 | Search movies by title |
 | 6.2 | Add search by name to SonarrClient | done | 2025-12-22 | 2025-12-22 | Search series by title |
 | 6.3 | Add name resolution to FourKChecker | done | 2025-12-22 | 2025-12-22 | Resolve names to IDs |
@@ -76,7 +76,7 @@ This document tracks implementation progress against the spec plan.
 | 2 | Sonarr Enhancement | 100% | done |
 | 3 | Checker Enhancement | 100% | done |
 | 4 | CLI Implementation | 100% | done |
-| 5 | Polish and Release | 29% | in-progress |
+| 5 | Polish and Release | 100% | done |
 | 6 | Name-Based Lookup | 100% | done |
 
 ---
@@ -114,3 +114,13 @@ This document tracks implementation progress against the spec plan.
 - Batch command skips ambiguous/not-found items with warnings
 - Added 27 new tests (100 total, all passing)
 - mypy, ruff all pass
+
+### 2025-12-22 - Session 4
+- Completed Phase 5 (Polish and Release)
+- Enhanced __init__.py with comprehensive module docstring and examples
+- Added FourKResult and SamplingStrategy to public exports
+- Created 9 integration tests covering full flows
+- 91% test coverage with 109 total tests
+- Updated pyproject.toml: added URLs, authors, improved classifiers
+- Created CHANGELOG.md with v0.1.0 release notes
+- All 6 phases complete - project ready for release
