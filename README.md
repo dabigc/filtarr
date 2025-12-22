@@ -216,12 +216,16 @@ asyncio.run(main())
 | `FINDARR_RADARR_API_KEY` | Radarr API key |
 | `FINDARR_SONARR_URL` | Sonarr instance URL (e.g., `http://localhost:8989`) |
 | `FINDARR_SONARR_API_KEY` | Sonarr API key |
+| `FINDARR_TIMEOUT` | Request timeout in seconds (default: `120`) |
 
 ### Config File
 
 Location: `~/.config/findarr/config.toml`
 
 ```toml
+# Request timeout in seconds (default: 120)
+timeout = 120
+
 [radarr]
 url = "http://localhost:7878"
 api_key = "your-radarr-api-key"
@@ -229,6 +233,61 @@ api_key = "your-radarr-api-key"
 [sonarr]
 url = "http://localhost:8989"
 api_key = "your-sonarr-api-key"
+```
+
+### Timeout Considerations
+
+Searching for releases on popular media (e.g., "The Matrix") can take significant time as Radarr/Sonarr queries multiple indexers. The default timeout is 120 seconds.
+
+**If you're behind a reverse proxy** (nginx, Caddy, Traefik, Nginx Proxy Manager, etc.), you may need to increase the proxy timeout as well. The findarr client timeout won't help if your reverse proxy times out first.
+
+#### Nginx Proxy Manager
+
+Add to the **Advanced** tab of your proxy host:
+
+```nginx
+proxy_connect_timeout 300;
+proxy_send_timeout 300;
+proxy_read_timeout 300;
+send_timeout 300;
+```
+
+#### Nginx
+
+```nginx
+location / {
+    proxy_connect_timeout 300;
+    proxy_send_timeout 300;
+    proxy_read_timeout 300;
+    send_timeout 300;
+    # ... other proxy settings
+}
+```
+
+#### Caddy
+
+```
+reverse_proxy localhost:7878 {
+    transport http {
+        read_timeout 300s
+        write_timeout 300s
+    }
+}
+```
+
+#### Traefik
+
+```yaml
+http:
+  middlewares:
+    slow-timeout:
+      forwardedHeaders:
+        trustedIPs: []
+  serversTransports:
+    slow-transport:
+      forwardingTimeouts:
+        dialTimeout: 300s
+        responseHeaderTimeout: 300s
 ```
 
 ## Development
