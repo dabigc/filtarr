@@ -320,3 +320,159 @@ class TestCheckSeriesWithSampling:
 
         with pytest.raises(ValueError, match="Radarr is not configured"):
             await checker.check_movie(456)
+
+
+class TestNameBasedLookup:
+    """Tests for name-based lookup functionality."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_search_movies_returns_tuples(self) -> None:
+        """Should return list of (id, title, year) tuples."""
+        respx.get("http://radarr:7878/api/v3/movie").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": 1, "title": "The Matrix", "year": 1999},
+                    {"id": 2, "title": "The Matrix Reloaded", "year": 2003},
+                ],
+            )
+        )
+
+        checker = FourKChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        results = await checker.search_movies("Matrix")
+
+        assert len(results) == 2
+        assert results[0] == (1, "The Matrix", 1999)
+        assert results[1] == (2, "The Matrix Reloaded", 2003)
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_search_series_returns_tuples(self) -> None:
+        """Should return list of (id, title, year) tuples."""
+        respx.get("http://sonarr:8989/api/v3/series").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": 1, "title": "Breaking Bad", "year": 2008, "seasons": []},
+                ],
+            )
+        )
+
+        checker = FourKChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        results = await checker.search_series("Breaking")
+
+        assert len(results) == 1
+        assert results[0] == (1, "Breaking Bad", 2008)
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_movie_by_name(self) -> None:
+        """Should check movie by name."""
+        # Mock search
+        respx.get("http://radarr:7878/api/v3/movie").mock(
+            return_value=Response(
+                200,
+                json=[{"id": 123, "title": "The Matrix", "year": 1999}],
+            )
+        )
+        # Mock releases
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"guid": "rel-1", "title": "The.Matrix.2160p.UHD",
+                     "indexer": "Test", "size": 5000,
+                     "quality": {"quality": {"id": 31, "name": "Bluray-2160p"}}}
+                ],
+            )
+        )
+
+        checker = FourKChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        result = await checker.check_movie_by_name("The Matrix")
+
+        assert result.has_4k is True
+        assert result.item_id == 123
+        assert result.item_type == "movie"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_movie_by_name_not_found(self) -> None:
+        """Should raise ValueError when movie not found."""
+        respx.get("http://radarr:7878/api/v3/movie").mock(
+            return_value=Response(200, json=[])
+        )
+
+        checker = FourKChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+
+        with pytest.raises(ValueError, match="Movie not found"):
+            await checker.check_movie_by_name("Nonexistent Movie")
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_series_by_name(self) -> None:
+        """Should check series by name."""
+        # Mock search
+        respx.get("http://sonarr:8989/api/v3/series").mock(
+            return_value=Response(
+                200,
+                json=[{"id": 456, "title": "Breaking Bad", "year": 2008, "seasons": []}],
+            )
+        )
+        # Mock episodes
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "456"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": 1001, "seriesId": 456, "seasonNumber": 1, "episodeNumber": 1,
+                     "airDate": "2008-01-20", "monitored": True},
+                ],
+            )
+        )
+        # Mock releases
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "1001"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"guid": "rel-1", "title": "Breaking.Bad.S01E01.2160p",
+                     "indexer": "Test", "size": 3000,
+                     "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}}}
+                ],
+            )
+        )
+
+        checker = FourKChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        result = await checker.check_series_by_name("Breaking Bad")
+
+        assert result.has_4k is True
+        assert result.item_id == 456
+        assert result.item_type == "series"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_series_by_name_not_found(self) -> None:
+        """Should raise ValueError when series not found."""
+        respx.get("http://sonarr:8989/api/v3/series").mock(
+            return_value=Response(200, json=[])
+        )
+
+        checker = FourKChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+
+        with pytest.raises(ValueError, match="Series not found"):
+            await checker.check_series_by_name("Nonexistent Series")
+
+    @pytest.mark.asyncio
+    async def test_search_movies_raises_when_not_configured(self) -> None:
+        """Should raise ValueError when Radarr not configured."""
+        checker = FourKChecker()
+
+        with pytest.raises(ValueError, match="Radarr is not configured"):
+            await checker.search_movies("Test")
+
+    @pytest.mark.asyncio
+    async def test_search_series_raises_when_not_configured(self) -> None:
+        """Should raise ValueError when Sonarr not configured."""
+        checker = FourKChecker()
+
+        with pytest.raises(ValueError, match="Sonarr is not configured"):
+            await checker.search_series("Test")

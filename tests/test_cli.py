@@ -232,6 +232,242 @@ class TestVersionCommand:
         assert "findarr version" in result.stdout
 
 
+class TestCheckMovieByName:
+    """Tests for 'findarr check movie' with name lookup."""
+
+    def test_check_movie_by_name_single_match(self) -> None:
+        """Should use single match when searching by name."""
+        mock_result = FourKResult(item_id=123, item_type="movie", has_4k=True)
+        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+
+        async def mock_search_movies(_term: str) -> list[tuple[int, str, int]]:
+            return [(123, "The Matrix", 1999)]
+
+        async def mock_check_movie(_movie_id: int) -> FourKResult:
+            return mock_result
+
+        mock_checker = MagicMock()
+        mock_checker.search_movies = mock_search_movies
+        mock_checker.check_movie = mock_check_movie
+
+        with (
+            patch("findarr.cli.Config.load", return_value=mock_config),
+            patch("findarr.cli.get_checker", return_value=mock_checker),
+        ):
+            result = runner.invoke(
+                app, ["check", "movie", "The Matrix", "--format", "simple"]
+            )
+
+        assert result.exit_code == 0
+        assert "4K available" in result.output
+        assert "Found: The Matrix" in result.output
+
+    def test_check_movie_by_name_multiple_matches(self) -> None:
+        """Should display choices when multiple matches found."""
+        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+
+        async def mock_search_movies(_term: str) -> list[tuple[int, str, int]]:
+            return [(1, "The Matrix", 1999), (2, "The Matrix Reloaded", 2003)]
+
+        mock_checker = MagicMock()
+        mock_checker.search_movies = mock_search_movies
+
+        with (
+            patch("findarr.cli.Config.load", return_value=mock_config),
+            patch("findarr.cli.get_checker", return_value=mock_checker),
+        ):
+            result = runner.invoke(app, ["check", "movie", "Matrix", "--format", "simple"])
+
+        assert result.exit_code == 2
+        assert "Multiple movies found" in result.output
+        assert "1: The Matrix (1999)" in result.output
+        assert "2: The Matrix Reloaded (2003)" in result.output
+
+    def test_check_movie_by_name_not_found(self) -> None:
+        """Should exit 2 when movie not found by name."""
+        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+
+        async def mock_search_movies(_term: str) -> list[tuple[int, str, int]]:
+            return []
+
+        mock_checker = MagicMock()
+        mock_checker.search_movies = mock_search_movies
+
+        with (
+            patch("findarr.cli.Config.load", return_value=mock_config),
+            patch("findarr.cli.get_checker", return_value=mock_checker),
+        ):
+            result = runner.invoke(
+                app, ["check", "movie", "Nonexistent", "--format", "simple"]
+            )
+
+        assert result.exit_code == 2
+        assert "Movie not found" in result.output
+
+
+class TestCheckSeriesByName:
+    """Tests for 'findarr check series' with name lookup."""
+
+    def test_check_series_by_name_single_match(self) -> None:
+        """Should use single match when searching by name."""
+        mock_result = FourKResult(
+            item_id=456,
+            item_type="series",
+            has_4k=True,
+            strategy_used=SamplingStrategy.RECENT,
+        )
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        async def mock_search_series(_term: str) -> list[tuple[int, str, int]]:
+            return [(456, "Breaking Bad", 2008)]
+
+        async def mock_check_series(
+            _series_id: int, **_kwargs: object
+        ) -> FourKResult:
+            return mock_result
+
+        mock_checker = MagicMock()
+        mock_checker.search_series = mock_search_series
+        mock_checker.check_series = mock_check_series
+
+        with (
+            patch("findarr.cli.Config.load", return_value=mock_config),
+            patch("findarr.cli.get_checker", return_value=mock_checker),
+        ):
+            result = runner.invoke(
+                app, ["check", "series", "Breaking Bad", "--format", "simple"]
+            )
+
+        assert result.exit_code == 0
+        assert "4K available" in result.output
+        assert "Found: Breaking Bad" in result.output
+
+    def test_check_series_by_name_multiple_matches(self) -> None:
+        """Should display choices when multiple matches found."""
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        async def mock_search_series(_term: str) -> list[tuple[int, str, int]]:
+            return [(1, "Breaking Bad", 2008), (2, "Breaking Bad: El Camino", 2019)]
+
+        mock_checker = MagicMock()
+        mock_checker.search_series = mock_search_series
+
+        with (
+            patch("findarr.cli.Config.load", return_value=mock_config),
+            patch("findarr.cli.get_checker", return_value=mock_checker),
+        ):
+            result = runner.invoke(
+                app, ["check", "series", "Breaking", "--format", "simple"]
+            )
+
+        assert result.exit_code == 2
+        assert "Multiple series found" in result.output
+        assert "1: Breaking Bad (2008)" in result.output
+
+    def test_check_series_by_name_not_found(self) -> None:
+        """Should exit 2 when series not found by name."""
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        async def mock_search_series(_term: str) -> list[tuple[int, str, int]]:
+            return []
+
+        mock_checker = MagicMock()
+        mock_checker.search_series = mock_search_series
+
+        with (
+            patch("findarr.cli.Config.load", return_value=mock_config),
+            patch("findarr.cli.get_checker", return_value=mock_checker),
+        ):
+            result = runner.invoke(
+                app, ["check", "series", "Nonexistent", "--format", "simple"]
+            )
+
+        assert result.exit_code == 2
+        assert "Series not found" in result.output
+
+
+class TestBatchWithNames:
+    """Tests for batch command with name-based lookups."""
+
+    def test_batch_with_movie_names(self, tmp_path: Path) -> None:
+        """Should process movies by name in batch."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("movie:The Matrix\n")
+
+        mock_result = FourKResult(item_id=123, item_type="movie", has_4k=True)
+        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+
+        with (
+            patch("findarr.cli.Config.load", return_value=mock_config),
+            patch("findarr.cli.get_checker") as mock_get_checker,
+        ):
+            mock_checker = AsyncMock()
+            mock_checker.search_movies.return_value = [(123, "The Matrix", 1999)]
+            mock_checker.check_movie.return_value = mock_result
+            mock_get_checker.return_value = mock_checker
+
+            result = runner.invoke(
+                app,
+                ["check", "batch", "--file", str(batch_file), "--format", "simple"],
+            )
+
+        assert "Found: The Matrix" in result.stdout
+        assert "movie:123: 4K available" in result.stdout
+
+    def test_batch_skips_multiple_matches(self, tmp_path: Path) -> None:
+        """Should skip items with multiple matches in batch mode."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("movie:Matrix\n")
+
+        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+
+        with (
+            patch("findarr.cli.Config.load", return_value=mock_config),
+            patch("findarr.cli.get_checker") as mock_get_checker,
+        ):
+            mock_checker = AsyncMock()
+            mock_checker.search_movies.return_value = [
+                (1, "The Matrix", 1999),
+                (2, "The Matrix Reloaded", 2003),
+            ]
+            mock_get_checker.return_value = mock_checker
+
+            result = runner.invoke(
+                app,
+                ["check", "batch", "--file", str(batch_file), "--format", "simple"],
+                catch_exceptions=False,
+            )
+
+        # Warning goes to stderr, check in combined output
+        assert "Multiple movies match" in result.output
+        # Should show the summary with 0/0
+        assert "Summary:" in result.stdout
+
+    def test_batch_skips_not_found(self, tmp_path: Path) -> None:
+        """Should skip items that are not found in batch mode."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("movie:Nonexistent\n")
+
+        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+
+        with (
+            patch("findarr.cli.Config.load", return_value=mock_config),
+            patch("findarr.cli.get_checker") as mock_get_checker,
+        ):
+            mock_checker = AsyncMock()
+            mock_checker.search_movies.return_value = []
+            mock_get_checker.return_value = mock_checker
+
+            result = runner.invoke(
+                app,
+                ["check", "batch", "--file", str(batch_file), "--format", "simple"],
+                catch_exceptions=False,
+            )
+
+        # Warning goes to stderr, check in combined output
+        assert "Movie not found" in result.output
+
+
 class TestHelpOutput:
     """Tests for help output."""
 
