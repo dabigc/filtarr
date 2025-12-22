@@ -1,20 +1,145 @@
 # findarr
 
-A Python library for checking 4K availability of media via Radarr/Sonarr search results.
+A Python library and CLI for checking 4K availability of media via Radarr/Sonarr search results.
 
-## Installation
+## Quick Start
 
-```bash
-pip install findarr
-```
-
-Or for development:
+### 1. Install
 
 ```bash
+# Install with CLI support
+pip install findarr[cli]
+
+# Or for development
 pip install -e ".[dev]"
 ```
 
-## Usage
+### 2. Configure
+
+Set environment variables:
+
+```bash
+# Radarr (for movies)
+export FINDARR_RADARR_URL="http://localhost:7878"
+export FINDARR_RADARR_API_KEY="your-radarr-api-key"
+
+# Sonarr (for TV series)
+export FINDARR_SONARR_URL="http://localhost:8989"
+export FINDARR_SONARR_API_KEY="your-sonarr-api-key"
+```
+
+Or create a config file at `~/.config/findarr/config.toml`:
+
+```toml
+[radarr]
+url = "http://localhost:7878"
+api_key = "your-radarr-api-key"
+
+[sonarr]
+url = "http://localhost:8989"
+api_key = "your-sonarr-api-key"
+```
+
+> Environment variables take precedence over the config file.
+
+### 3. Check 4K Availability
+
+```bash
+# Check a movie by Radarr ID
+findarr check movie 123
+
+# Check a TV series by Sonarr ID
+findarr check series 456
+
+# Check multiple items from a file
+findarr check batch --file items.txt
+```
+
+## CLI Usage
+
+### Check Movie
+
+```bash
+findarr check movie <MOVIE_ID> [OPTIONS]
+
+Options:
+  -f, --format [json|table|simple]  Output format (default: table)
+```
+
+Example:
+```bash
+$ findarr check movie 123 --format simple
+movie:123: 4K available
+```
+
+### Check Series
+
+```bash
+findarr check series <SERIES_ID> [OPTIONS]
+
+Options:
+  -s, --seasons INTEGER             Seasons to check (default: 3)
+  --strategy [recent|distributed|all]  Sampling strategy (default: recent)
+  -f, --format [json|table|simple]  Output format (default: table)
+```
+
+Strategies:
+- `recent` - Check most recent N seasons (fastest)
+- `distributed` - Sample across all seasons evenly
+- `all` - Check every season (slowest, most thorough)
+
+Example:
+```bash
+$ findarr check series 456 --strategy recent --seasons 2 --format json
+{
+  "item_id": 456,
+  "item_type": "series",
+  "has_4k": true,
+  "releases_count": 42,
+  "four_k_releases_count": 8,
+  "seasons_checked": [3, 4],
+  "strategy_used": "recent"
+}
+```
+
+### Batch Check
+
+```bash
+findarr check batch --file <FILE> [OPTIONS]
+
+Options:
+  -f, --file PATH                   File with items to check (required)
+  --format [json|table|simple]      Output format (default: simple)
+  -s, --seasons INTEGER             Seasons to check for series (default: 3)
+  --strategy [recent|distributed|all]  Strategy for series (default: recent)
+```
+
+Batch file format (one item per line):
+```
+# Comments start with #
+movie:123
+movie:456
+series:789
+```
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0    | 4K releases found |
+| 1    | No 4K releases found |
+| 2    | Error (config, API, etc.) |
+
+Use exit codes in scripts:
+```bash
+if findarr check movie 123 --format simple; then
+  echo "4K is available!"
+else
+  echo "No 4K found"
+fi
+```
+
+## Python API
 
 ### Check movie 4K availability (Radarr)
 
@@ -55,7 +180,7 @@ asyncio.run(main())
 
 ```python
 import asyncio
-from findarr import FourKChecker
+from findarr import FourKChecker, SamplingStrategy
 
 async def main():
     checker = FourKChecker(
@@ -70,11 +195,40 @@ async def main():
     print(f"Movie has 4K: {result.has_4k}")
     print(f"4K releases: {len(result.four_k_releases)}")
 
-    # Check a series
-    result = await checker.check_series(series_id=456)
+    # Check a series with sampling strategy
+    result = await checker.check_series(
+        series_id=456,
+        strategy=SamplingStrategy.RECENT,
+        seasons_to_check=3,
+    )
     print(f"Series has 4K: {result.has_4k}")
 
 asyncio.run(main())
+```
+
+## Configuration Reference
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `FINDARR_RADARR_URL` | Radarr instance URL (e.g., `http://localhost:7878`) |
+| `FINDARR_RADARR_API_KEY` | Radarr API key |
+| `FINDARR_SONARR_URL` | Sonarr instance URL (e.g., `http://localhost:8989`) |
+| `FINDARR_SONARR_API_KEY` | Sonarr API key |
+
+### Config File
+
+Location: `~/.config/findarr/config.toml`
+
+```toml
+[radarr]
+url = "http://localhost:7878"
+api_key = "your-radarr-api-key"
+
+[sonarr]
+url = "http://localhost:8989"
+api_key = "your-sonarr-api-key"
 ```
 
 ## Development
