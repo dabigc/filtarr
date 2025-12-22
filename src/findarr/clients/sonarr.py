@@ -18,7 +18,79 @@ class SonarrClient(BaseArrClient):
             episodes = await client.get_episodes(456)
             latest = await client.get_latest_aired_episode(456)
             releases = await client.get_episode_releases(latest.id)
+            matches = await client.search_series("Breaking Bad")
     """
+
+    async def get_all_series(self) -> list[Series]:
+        """Fetch all series in the library.
+
+        Returns:
+            List of Series models
+        """
+        data = await self._get("/api/v3/series")
+        series_list = []
+        for item in data:
+            seasons = []
+            for s in item.get("seasons", []):
+                stats = s.get("statistics", {})
+                seasons.append(
+                    Season(
+                        seasonNumber=s.get("seasonNumber", 0),
+                        monitored=s.get("monitored", True),
+                        **{
+                            "statistics.episodeCount": stats.get("episodeCount", 0),
+                            "statistics.episodeFileCount": stats.get("episodeFileCount", 0),
+                        },
+                    )
+                )
+            series_list.append(
+                Series(
+                    id=item["id"],
+                    title=item.get("title", ""),
+                    year=item.get("year", 0),
+                    seasons=seasons,
+                    monitored=item.get("monitored", True),
+                )
+            )
+        return series_list
+
+    async def search_series(self, term: str) -> list[Series]:
+        """Search for series in the library by title.
+
+        Args:
+            term: Search term to match against series titles
+
+        Returns:
+            List of matching Series models
+        """
+        all_series = await self.get_all_series()
+        term_lower = term.lower()
+        return [s for s in all_series if term_lower in s.title.lower()]
+
+    async def find_series_by_name(self, name: str) -> Series | None:
+        """Find a series by exact or partial name match.
+
+        If multiple series match, returns the one with the closest title match.
+        For exact matches, returns immediately.
+
+        Args:
+            name: Series name to search for
+
+        Returns:
+            Series if found, None otherwise
+        """
+        series_list = await self.search_series(name)
+        if not series_list:
+            return None
+
+        # Check for exact match first (case-insensitive)
+        name_lower = name.lower()
+        for series in series_list:
+            if series.title.lower() == name_lower:
+                return series
+
+        # Return the series with the shortest title (closest match)
+        return min(series_list, key=lambda s: len(s.title))
 
     async def get_series(self, series_id: int) -> Series:
         """Fetch series metadata including seasons.

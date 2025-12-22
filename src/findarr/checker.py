@@ -145,6 +145,54 @@ class FourKChecker:
                 releases=releases,
             )
 
+    async def check_movie_by_name(self, name: str) -> FourKResult:
+        """Check if a movie has 4K releases available by name.
+
+        Args:
+            name: The movie title to search for
+
+        Returns:
+            FourKResult with availability information
+
+        Raises:
+            ValueError: If Radarr is not configured or movie not found
+        """
+        if not self._radarr_config:
+            raise ValueError("Radarr is not configured")
+
+        url, api_key = self._radarr_config
+        async with RadarrClient(url, api_key) as client:
+            movie = await client.find_movie_by_name(name)
+            if movie is None:
+                raise ValueError(f"Movie not found: {name}")
+            releases = await client.get_movie_releases(movie.id)
+            return FourKResult(
+                item_id=movie.id,
+                item_type="movie",
+                has_4k=any(r.is_4k() for r in releases),
+                releases=releases,
+            )
+
+    async def search_movies(self, term: str) -> list[tuple[int, str, int]]:
+        """Search for movies by title.
+
+        Args:
+            term: Search term to match against movie titles
+
+        Returns:
+            List of tuples (id, title, year) for matching movies
+
+        Raises:
+            ValueError: If Radarr is not configured
+        """
+        if not self._radarr_config:
+            raise ValueError("Radarr is not configured")
+
+        url, api_key = self._radarr_config
+        async with RadarrClient(url, api_key) as client:
+            movies = await client.search_movies(term)
+            return [(m.id, m.title, m.year) for m in movies]
+
     async def check_series(
         self,
         series_id: int,
@@ -251,3 +299,59 @@ class FourKChecker:
                 seasons_checked=seasons_checked,
                 strategy_used=strategy,
             )
+
+    async def check_series_by_name(
+        self,
+        name: str,
+        *,
+        strategy: SamplingStrategy = SamplingStrategy.RECENT,
+        seasons_to_check: int = 3,
+    ) -> FourKResult:
+        """Check if a series has 4K releases available by name.
+
+        Args:
+            name: The series title to search for
+            strategy: The sampling strategy for selecting episodes
+            seasons_to_check: Max seasons to check for RECENT strategy
+
+        Returns:
+            FourKResult with availability and checked episode information
+
+        Raises:
+            ValueError: If Sonarr is not configured or series not found
+        """
+        if not self._sonarr_config:
+            raise ValueError("Sonarr is not configured")
+
+        url, api_key = self._sonarr_config
+        async with SonarrClient(url, api_key) as client:
+            series = await client.find_series_by_name(name)
+            if series is None:
+                raise ValueError(f"Series not found: {name}")
+
+        # Now use check_series with the found ID
+        return await self.check_series(
+            series.id,
+            strategy=strategy,
+            seasons_to_check=seasons_to_check,
+        )
+
+    async def search_series(self, term: str) -> list[tuple[int, str, int]]:
+        """Search for series by title.
+
+        Args:
+            term: Search term to match against series titles
+
+        Returns:
+            List of tuples (id, title, year) for matching series
+
+        Raises:
+            ValueError: If Sonarr is not configured
+        """
+        if not self._sonarr_config:
+            raise ValueError("Sonarr is not configured")
+
+        url, api_key = self._sonarr_config
+        async with SonarrClient(url, api_key) as client:
+            series_list = await client.search_series(term)
+            return [(s.id, s.title, s.year) for s in series_list]

@@ -114,18 +114,60 @@ def get_checker(config: Config, need_radarr: bool = False, need_sonarr: bool = F
     )
 
 
+def display_movie_choices(matches: list[tuple[int, str, int]]) -> None:
+    """Display multiple movie matches for user selection."""
+    error_console.print("[yellow]Multiple movies found:[/yellow]")
+    for movie_id, title, year in matches:
+        error_console.print(f"  {movie_id}: {title} ({year})")
+    error_console.print("\n[yellow]Please use the numeric ID to select a specific movie.[/yellow]")
+
+
+def display_series_choices(matches: list[tuple[int, str, int]]) -> None:
+    """Display multiple series matches for user selection."""
+    error_console.print("[yellow]Multiple series found:[/yellow]")
+    for series_id, title, year in matches:
+        error_console.print(f"  {series_id}: {title} ({year})")
+    error_console.print("\n[yellow]Please use the numeric ID to select a specific series.[/yellow]")
+
+
 @check_app.command("movie")
 def check_movie(
-    movie_id: Annotated[int, typer.Argument(help="Radarr movie ID to check")],
+    movie: Annotated[str, typer.Argument(help="Movie ID or name to check")],
     format: Annotated[
         OutputFormat, typer.Option("--format", "-f", help="Output format")
     ] = OutputFormat.TABLE,
 ) -> None:
-    """Check if a movie has 4K releases available."""
+    """Check if a movie has 4K releases available.
+
+    You can specify either a numeric Radarr movie ID or a movie name.
+    If a name matches multiple movies, you'll be shown the options.
+
+    Examples:
+        findarr check movie 123
+        findarr check movie "The Matrix"
+    """
     try:
         config = Config.load()
         checker = get_checker(config, need_radarr=True)
-        result = asyncio.run(checker.check_movie(movie_id))
+
+        # Check if argument is numeric (ID) or name
+        if movie.isdigit():
+            result = asyncio.run(checker.check_movie(int(movie)))
+        else:
+            # Search by name
+            matches = asyncio.run(checker.search_movies(movie))
+            if not matches:
+                error_console.print(f"[red]Movie not found:[/red] {movie}")
+                raise typer.Exit(2)
+            if len(matches) > 1:
+                display_movie_choices(matches)
+                raise typer.Exit(2)
+            # Single match - use it
+            movie_id = matches[0][0]
+            movie_title = matches[0][1]
+            console.print(f"[dim]Found: {movie_title}[/dim]")
+            result = asyncio.run(checker.check_movie(movie_id))
+
         print_result(result, format)
         raise typer.Exit(0 if result.has_4k else 1)
     except typer.Exit:
@@ -140,7 +182,7 @@ def check_movie(
 
 @check_app.command("series")
 def check_series(
-    series_id: Annotated[int, typer.Argument(help="Sonarr series ID to check")],
+    series: Annotated[str, typer.Argument(help="Series ID or name to check")],
     seasons: Annotated[
         int, typer.Option("--seasons", "-s", help="Number of seasons to check (for recent strategy)")
     ] = 3,
@@ -151,7 +193,15 @@ def check_series(
         OutputFormat, typer.Option("--format", "-f", help="Output format")
     ] = OutputFormat.TABLE,
 ) -> None:
-    """Check if a TV series has 4K releases available."""
+    """Check if a TV series has 4K releases available.
+
+    You can specify either a numeric Sonarr series ID or a series name.
+    If a name matches multiple series, you'll be shown the options.
+
+    Examples:
+        findarr check series 456
+        findarr check series "Breaking Bad"
+    """
     try:
         # Parse strategy
         strategy_map = {
@@ -170,13 +220,37 @@ def check_series(
 
         config = Config.load()
         checker = get_checker(config, need_sonarr=True)
-        result = asyncio.run(
-            checker.check_series(
-                series_id,
-                strategy=sampling_strategy,
-                seasons_to_check=seasons,
+
+        # Check if argument is numeric (ID) or name
+        if series.isdigit():
+            result = asyncio.run(
+                checker.check_series(
+                    int(series),
+                    strategy=sampling_strategy,
+                    seasons_to_check=seasons,
+                )
             )
-        )
+        else:
+            # Search by name
+            matches = asyncio.run(checker.search_series(series))
+            if not matches:
+                error_console.print(f"[red]Series not found:[/red] {series}")
+                raise typer.Exit(2)
+            if len(matches) > 1:
+                display_series_choices(matches)
+                raise typer.Exit(2)
+            # Single match - use it
+            series_id = matches[0][0]
+            series_title = matches[0][1]
+            console.print(f"[dim]Found: {series_title}[/dim]")
+            result = asyncio.run(
+                checker.check_series(
+                    series_id,
+                    strategy=sampling_strategy,
+                    seasons_to_check=seasons,
+                )
+            )
+
         print_result(result, format)
         raise typer.Exit(0 if result.has_4k else 1)
     except ConfigurationError as e:
@@ -206,11 +280,12 @@ def check_batch(
 ) -> None:
     """Check multiple items from a file.
 
-    File format: one item per line as 'movie:<id>' or 'series:<id>'.
+    File format: one item per line as 'movie:<id_or_name>' or 'series:<id_or_name>'.
 
     Example file:
         movie:123
-        movie:456
+        movie:The Matrix
+        series:Breaking Bad
         series:789
     """
     if not file.exists():
@@ -233,29 +308,28 @@ def check_batch(
         error_console.print(f"[red]Configuration error:[/red] {e}")
         raise typer.Exit(2) from e
 
-    # Parse items from file
-    items: list[tuple[str, int]] = []
+    # Parse items from file - now supports both IDs and names
+    items: list[tuple[str, str]] = []  # (type, id_or_name)
     with file.open() as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            try:
-                item_type, item_id = line.split(":", 1)
-                item_type = item_type.lower()
-                if item_type not in ("movie", "series"):
-                    error_console.print(
-                        f"[yellow]Warning:[/yellow] Line {line_num}: "
-                        f"Invalid type '{item_type}', skipping"
-                    )
-                    continue
-                items.append((item_type, int(item_id)))
-            except ValueError:
+            if ":" not in line:
                 error_console.print(
                     f"[yellow]Warning:[/yellow] Line {line_num}: "
-                    f"Invalid format '{line}', expected 'movie:<id>' or 'series:<id>'"
+                    f"Invalid format '{line}', expected 'movie:<id_or_name>' or 'series:<id_or_name>'"
                 )
                 continue
+            item_type, item_value = line.split(":", 1)
+            item_type = item_type.lower()
+            if item_type not in ("movie", "series"):
+                error_console.print(
+                    f"[yellow]Warning:[/yellow] Line {line_num}: "
+                    f"Invalid type '{item_type}', skipping"
+                )
+                continue
+            items.append((item_type, item_value.strip()))
 
     if not items:
         error_console.print("[red]No valid items found in file[/red]")
@@ -267,26 +341,64 @@ def check_batch(
 
     async def run_checks() -> None:
         nonlocal has_4k_count
-        for item_type, item_id in items:
+        for item_type, item_value in items:
             try:
                 if item_type == "movie":
                     checker = get_checker(config, need_radarr=True)
-                    result = await checker.check_movie(item_id)
+                    if item_value.isdigit():
+                        result = await checker.check_movie(int(item_value))
+                    else:
+                        # Search by name
+                        matches = await checker.search_movies(item_value)
+                        if not matches:
+                            error_console.print(f"[yellow]Movie not found:[/yellow] {item_value}")
+                            continue
+                        if len(matches) > 1:
+                            error_console.print(
+                                f"[yellow]Multiple movies match '{item_value}':[/yellow] "
+                                f"{', '.join(f'{t} ({y})' for _, t, y in matches[:3])}"
+                                f"{'...' if len(matches) > 3 else ''}"
+                            )
+                            continue
+                        movie_id, movie_title, _ = matches[0]
+                        console.print(f"[dim]Found: {movie_title}[/dim]")
+                        result = await checker.check_movie(movie_id)
                 else:
                     checker = get_checker(config, need_sonarr=True)
-                    result = await checker.check_series(
-                        item_id,
-                        strategy=sampling_strategy,
-                        seasons_to_check=seasons,
-                    )
+                    if item_value.isdigit():
+                        result = await checker.check_series(
+                            int(item_value),
+                            strategy=sampling_strategy,
+                            seasons_to_check=seasons,
+                        )
+                    else:
+                        # Search by name
+                        matches = await checker.search_series(item_value)
+                        if not matches:
+                            error_console.print(f"[yellow]Series not found:[/yellow] {item_value}")
+                            continue
+                        if len(matches) > 1:
+                            error_console.print(
+                                f"[yellow]Multiple series match '{item_value}':[/yellow] "
+                                f"{', '.join(f'{t} ({y})' for _, t, y in matches[:3])}"
+                                f"{'...' if len(matches) > 3 else ''}"
+                            )
+                            continue
+                        series_id, series_title, _ = matches[0]
+                        console.print(f"[dim]Found: {series_title}[/dim]")
+                        result = await checker.check_series(
+                            series_id,
+                            strategy=sampling_strategy,
+                            seasons_to_check=seasons,
+                        )
                 results.append(result)
                 if result.has_4k:
                     has_4k_count += 1
                 print_result(result, format)
             except ConfigurationError as e:
-                error_console.print(f"[red]Config error for {item_type}:{item_id}:[/red] {e}")
+                error_console.print(f"[red]Config error for {item_type}:{item_value}:[/red] {e}")
             except Exception as e:
-                error_console.print(f"[red]Error checking {item_type}:{item_id}:[/red] {e}")
+                error_console.print(f"[red]Error checking {item_type}:{item_value}:[/red] {e}")
 
     asyncio.run(run_checks())
 
