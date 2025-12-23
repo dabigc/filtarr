@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1](https://github.com/dabigc/4k-findarr/compare/v0.1.0...v0.1.1) (2025-12-23)
+
+
+### Bug Fixes
+
+* chain release workflow from release-please to trigger Docker builds ([#14](https://github.com/dabigc/4k-findarr/issues/14)) ([e1d4935](https://github.com/dabigc/4k-findarr/commit/e1d4935ede6e6bb4362547583d1c4d5e4ecd87b3))
+
 ## [0.1.0](https://github.com/dabigc/4k-findarr/compare/v0.0.2...v0.1.0) (2025-12-23)
 
 

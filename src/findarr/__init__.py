@@ -57,7 +57,7 @@ from findarr.checker import FourKChecker, FourKResult, SamplingStrategy
 from findarr.clients.radarr import RadarrClient
 from findarr.clients.sonarr import SonarrClient
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "FourKChecker",
