@@ -505,3 +505,415 @@ class TestNameBasedLookup:
 
         with pytest.raises(ValueError, match="Sonarr is not configured"):
             await checker.search_series("Test")
+
+
+class TestTagApplication:
+    """Tests for tag application logic in FourKChecker."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_movie_creates_and_applies_tag(self) -> None:
+        """Should create tag if not exists and apply to movie via check_movie."""
+        from findarr.config import TagConfig
+
+        # Mock get_movie for name lookup
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
+            )
+        )
+        # Mock releases
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        # Mock get_tags (empty - no existing tags)
+        respx.get("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(200, json=[])
+        )
+        # Mock create_tag
+        respx.post("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-available"})
+        )
+        # Mock update_movie
+        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": [1]},
+            )
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = FourKChecker(
+            radarr_url="http://radarr:7878",
+            radarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        result = await checker.check_movie(123, apply_tags=True, dry_run=False)
+
+        assert result.has_4k is True
+        assert result.tag_result is not None
+        assert result.tag_result.tag_applied == "4k-available"
+        assert result.tag_result.tag_created is True
+        assert result.tag_result.tag_error is None
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_movie_uses_existing_tag(self) -> None:
+        """Should use existing tag without creating new one."""
+        from findarr.config import TagConfig
+
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        # Mock get_tags (tag already exists)
+        respx.get("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": 1, "label": "4k-available"},
+                    {"id": 2, "label": "4k-unavailable"},
+                ],
+            )
+        )
+        # Mock update_movie
+        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": [1]},
+            )
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = FourKChecker(
+            radarr_url="http://radarr:7878",
+            radarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        result = await checker.check_movie(123, apply_tags=True, dry_run=False)
+
+        assert result.tag_result is not None
+        assert result.tag_result.tag_applied == "4k-available"
+        assert result.tag_result.tag_created is False
+        assert result.tag_result.tag_error is None
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_movie_removes_opposite_tag(self) -> None:
+        """Should remove opposite tag when applying new one."""
+        from findarr.config import TagConfig
+
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": [2]},
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": 1, "label": "4k-available"},
+                    {"id": 2, "label": "4k-unavailable"},
+                ],
+            )
+        )
+        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": [1]},
+            )
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = FourKChecker(
+            radarr_url="http://radarr:7878",
+            radarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        result = await checker.check_movie(123, apply_tags=True, dry_run=False)
+
+        assert result.tag_result is not None
+        assert result.tag_result.tag_applied == "4k-available"
+        assert result.tag_result.tag_removed == "4k-unavailable"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_movie_dry_run_no_api_calls(self) -> None:
+        """Should not make tag API calls in dry run mode."""
+        from findarr.config import TagConfig
+
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        # No tag mocks needed - dry run shouldn't call them
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = FourKChecker(
+            radarr_url="http://radarr:7878",
+            radarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        result = await checker.check_movie(123, apply_tags=True, dry_run=True)
+
+        assert result.tag_result is not None
+        assert result.tag_result.tag_applied == "4k-available"
+        assert result.tag_result.tag_removed == "4k-unavailable"
+        assert result.tag_result.dry_run is True
+        assert result.tag_result.tag_created is False
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_movie_unavailable_applies_unavailable_tag(self) -> None:
+        """Should apply unavailable tag when has_4k is False."""
+        from findarr.config import TagConfig
+
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
+            )
+        )
+        # No 4K releases
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie.1080p.BluRay",
+                        "indexer": "Test",
+                        "size": 2000,
+                        "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}},
+                    }
+                ],
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": 1, "label": "4k-available"},
+                    {"id": 2, "label": "4k-unavailable"},
+                ],
+            )
+        )
+        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": [2]},
+            )
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = FourKChecker(
+            radarr_url="http://radarr:7878",
+            radarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        result = await checker.check_movie(123, apply_tags=True, dry_run=False)
+
+        assert result.has_4k is False
+        assert result.tag_result is not None
+        assert result.tag_result.tag_applied == "4k-unavailable"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_movie_no_tags_when_disabled(self) -> None:
+        """Should not apply tags when apply_tags is False."""
+        from findarr.config import TagConfig
+
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        # No tag mocks needed - tagging is disabled
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = FourKChecker(
+            radarr_url="http://radarr:7878",
+            radarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        result = await checker.check_movie(123, apply_tags=False)
+
+        assert result.has_4k is True
+        assert result.tag_result is None
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_movie_tag_error_handling(self) -> None:
+        """Should catch tag errors and return them in result."""
+        from findarr.config import TagConfig
+
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        # Mock get_tags to fail
+        respx.get("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(500, json={"error": "Server error"})
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = FourKChecker(
+            radarr_url="http://radarr:7878",
+            radarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        result = await checker.check_movie(123, apply_tags=True, dry_run=False)
+
+        # Should still return result even if tagging failed
+        assert result.has_4k is True
+        assert result.tag_result is not None
+        assert result.tag_result.tag_error is not None
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_movie_case_insensitive_tag_matching(self) -> None:
+        """Should find tags case-insensitively."""
+        from findarr.config import TagConfig
+
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(
+                200,
+                json=[{"id": 1, "label": "4K-Available"}],  # Different case
+            )
+        )
+        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": [1]},
+            )
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = FourKChecker(
+            radarr_url="http://radarr:7878",
+            radarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        result = await checker.check_movie(123, apply_tags=True, dry_run=False)
+
+        assert result.tag_result is not None
+        assert result.tag_result.tag_applied == "4k-available"
+        assert result.tag_result.tag_created is False  # Used existing tag

@@ -99,10 +99,10 @@ class CheckRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, str | None]) -> CheckRecord:
+    def from_dict(cls, data: dict[str, object]) -> CheckRecord:
         """Create from dictionary."""
         last_checked_str = data.get("last_checked", "")
-        if last_checked_str:
+        if isinstance(last_checked_str, str) and last_checked_str:
             last_checked = datetime.fromisoformat(last_checked_str)
         else:
             last_checked = datetime.now(UTC)
@@ -111,10 +111,14 @@ class CheckRecord:
         if result not in ("available", "unavailable"):
             result = "unavailable"
 
+        tag_applied = data.get("tag_applied")
+        if not isinstance(tag_applied, (str, type(None))):
+            tag_applied = None
+
         return cls(
             last_checked=last_checked,
             result=result,  # type: ignore[arg-type]
-            tag_applied=data.get("tag_applied"),
+            tag_applied=tag_applied,
         )
 
 

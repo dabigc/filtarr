@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 import uuid
 from enum import Enum
 from pathlib import Path  # noqa: TC003 - needed at runtime for typer
@@ -460,8 +459,11 @@ def check_batch(
         batch_type = "mixed"
     elif all_movies:
         batch_type = "movie"
-    else:
+    elif all_series:
         batch_type = "series"
+    else:
+        # File-only mode or no items specified - treat as mixed
+        batch_type = "mixed"
 
     # Check for existing batch progress
     existing_progress: BatchProgress | None = None
@@ -720,14 +722,20 @@ def check_batch(
 
                 except ConfigurationError as e:
                     error_console.print(f"[red]Config error for {item_type}:{item_name}:[/red] {e}")
+                    # Track failed items to avoid infinite retries on resume
+                    if batch_progress and item_id > 0:
+                        state_manager.update_batch_progress(item_id)
                 except Exception as e:
                     error_console.print(f"[red]Error checking {item_type}:{item_name}:[/red] {e}")
+                    # Track failed items to avoid infinite retries on resume
+                    if batch_progress and item_id > 0:
+                        state_manager.update_batch_progress(item_id)
 
                 progress.advance(task)
 
                 # Apply delay between checks
                 if delay > 0:
-                    time.sleep(delay)
+                    await asyncio.sleep(delay)
 
         # Clear batch progress on successful completion (not if stopped by batch size limit)
         if batch_progress and not batch_limit_reached:

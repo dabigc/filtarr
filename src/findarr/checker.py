@@ -224,25 +224,30 @@ class FourKChecker:
                 result.tag_removed = tag_to_remove
                 return result
 
-            # Get or create the tag to apply
-            tag = await client.get_or_create_tag(tag_to_apply)
-            result.tag_applied = tag_to_apply
-
-            # Check if tag was newly created
+            # Get existing tags ONCE to check if tag already exists
             tags = await client.get_tags()
-            existing_labels = {t.label.lower() for t in tags}
-            if tag_to_apply.lower() not in existing_labels:
+            existing_labels = {t.label.lower(): t for t in tags}
+
+            # Check if tag already exists before creating
+            tag_already_exists = tag_to_apply.lower() in existing_labels
+
+            if tag_already_exists:
+                tag = existing_labels[tag_to_apply.lower()]
+            else:
+                # Create the tag since it doesn't exist
+                tag = await client.create_tag(tag_to_apply)
                 result.tag_created = True
+
+            result.tag_applied = tag_to_apply
 
             # Apply the tag
             await client.add_tag_to_movie(movie_id, tag.id)
 
             # Remove the opposite tag if it exists
-            for existing_tag in tags:
-                if existing_tag.label.lower() == tag_to_remove.lower():
-                    await client.remove_tag_from_movie(movie_id, existing_tag.id)
-                    result.tag_removed = tag_to_remove
-                    break
+            if tag_to_remove.lower() in existing_labels:
+                opposite_tag = existing_labels[tag_to_remove.lower()]
+                await client.remove_tag_from_movie(movie_id, opposite_tag.id)
+                result.tag_removed = tag_to_remove
 
         except Exception as e:
             logger.warning("Failed to apply tags to movie %d: %s", movie_id, e)
@@ -284,25 +289,30 @@ class FourKChecker:
                 result.tag_removed = tag_to_remove
                 return result
 
-            # Get or create the tag to apply
-            tag = await client.get_or_create_tag(tag_to_apply)
-            result.tag_applied = tag_to_apply
-
-            # Check if tag was newly created
+            # Get existing tags ONCE to check if tag already exists
             tags = await client.get_tags()
-            existing_labels = {t.label.lower() for t in tags}
-            if tag_to_apply.lower() not in existing_labels:
+            existing_labels = {t.label.lower(): t for t in tags}
+
+            # Check if tag already exists before creating
+            tag_already_exists = tag_to_apply.lower() in existing_labels
+
+            if tag_already_exists:
+                tag = existing_labels[tag_to_apply.lower()]
+            else:
+                # Create the tag since it doesn't exist
+                tag = await client.create_tag(tag_to_apply)
                 result.tag_created = True
+
+            result.tag_applied = tag_to_apply
 
             # Apply the tag
             await client.add_tag_to_series(series_id, tag.id)
 
             # Remove the opposite tag if it exists
-            for existing_tag in tags:
-                if existing_tag.label.lower() == tag_to_remove.lower():
-                    await client.remove_tag_from_series(series_id, existing_tag.id)
-                    result.tag_removed = tag_to_remove
-                    break
+            if tag_to_remove.lower() in existing_labels:
+                opposite_tag = existing_labels[tag_to_remove.lower()]
+                await client.remove_tag_from_series(series_id, opposite_tag.id)
+                result.tag_removed = tag_to_remove
 
         except Exception as e:
             logger.warning("Failed to apply tags to series %d: %s", series_id, e)

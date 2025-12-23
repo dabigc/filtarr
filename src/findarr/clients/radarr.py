@@ -200,7 +200,8 @@ class RadarrClient(BaseArrClient):
             tags.append(tag_id)
             movie_data["tags"] = tags
             return await self.update_movie(movie_data)
-        return Movie.model_validate(movie_data)
+        # Tag already exists - return properly validated Movie from server
+        return await self.get_movie(movie_id)
 
     async def remove_tag_from_movie(self, movie_id: int, tag_id: int) -> Movie:
         """Remove a tag from a movie.
@@ -218,4 +219,5 @@ class RadarrClient(BaseArrClient):
             tags.remove(tag_id)
             movie_data["tags"] = tags
             return await self.update_movie(movie_data)
-        return Movie.model_validate(movie_data)
+        # Tag doesn't exist - return properly validated Movie from server
+        return await self.get_movie(movie_id)
