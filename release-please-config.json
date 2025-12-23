@@ -7,6 +7,12 @@
       "include-component-in-tag": false,
       "include-v-in-tag": true,
       "changelog-path": "CHANGELOG.md",
+      "exclude-paths": [
+        ".github",
+        "docs",
+        "tests",
+        ".serena"
+      ],
       "extra-files": [
         {
           "type": "generic",
