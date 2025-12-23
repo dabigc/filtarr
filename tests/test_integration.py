@@ -21,6 +21,11 @@ class TestMovieCheckIntegration:
     @pytest.mark.asyncio
     async def test_check_movie_with_4k_available(self) -> None:
         """Full flow: check movie by ID, find 4K releases."""
+        # Mock the movie info endpoint
+        respx.get("http://radarr.local:7878/api/v3/movie/123").mock(
+            return_value=Response(200, json={"id": 123, "title": "Test Movie", "year": 2024})
+        )
+
         # Mock the release search endpoint
         respx.get(
             "http://radarr.local:7878/api/v3/release",
@@ -78,6 +83,11 @@ class TestMovieCheckIntegration:
             )
         )
 
+        # Mock movie info for found movie
+        respx.get("http://radarr.local:7878/api/v3/movie/100").mock(
+            return_value=Response(200, json={"id": 100, "title": "The Matrix", "year": 1999})
+        )
+
         # Mock release search for found movie
         respx.get(
             "http://radarr.local:7878/api/v3/release",
@@ -123,6 +133,11 @@ class TestSeriesCheckIntegration:
         """Full flow: check series with RECENT strategy, sampling last 2 seasons."""
         today = date.today()
         last_week = today - timedelta(days=7)
+
+        # Mock series info endpoint
+        respx.get("http://sonarr.local:8989/api/v3/series/456").mock(
+            return_value=Response(200, json={"id": 456, "title": "Test Series", "year": 2020, "seasons": []})
+        )
 
         # Mock episodes endpoint
         respx.get(
@@ -200,6 +215,11 @@ class TestSeriesCheckIntegration:
     @pytest.mark.asyncio
     async def test_check_series_distributed_strategy(self) -> None:
         """Full flow: check series with DISTRIBUTED strategy (first, middle, last)."""
+        # Mock series info endpoint
+        respx.get("http://sonarr.local:8989/api/v3/series/789").mock(
+            return_value=Response(200, json={"id": 789, "title": "Long Series", "year": 2019, "seasons": []})
+        )
+
         # Mock episodes for 5 seasons
         respx.get(
             "http://sonarr.local:8989/api/v3/episode",
@@ -265,6 +285,11 @@ class TestSeriesCheckIntegration:
             )
         )
 
+        # Mock series info for Breaking Bad
+        respx.get("http://sonarr.local:8989/api/v3/series/500").mock(
+            return_value=Response(200, json={"id": 500, "title": "Breaking Bad", "year": 2008, "seasons": []})
+        )
+
         # Mock episodes for Breaking Bad
         respx.get(
             "http://sonarr.local:8989/api/v3/episode",
@@ -317,6 +342,11 @@ class TestCombinedCheckerIntegration:
     @pytest.mark.asyncio
     async def test_checker_with_both_services(self) -> None:
         """Should be able to check both movies and series with same checker."""
+        # Mock movie info
+        respx.get("http://radarr.local:7878/api/v3/movie/10").mock(
+            return_value=Response(200, json={"id": 10, "title": "Some Movie", "year": 2023})
+        )
+
         # Mock movie releases
         respx.get(
             "http://radarr.local:7878/api/v3/release",
@@ -330,6 +360,11 @@ class TestCombinedCheckerIntegration:
                      "quality": {"quality": {"id": 31, "name": "Bluray-2160p"}}},
                 ],
             )
+        )
+
+        # Mock series info
+        respx.get("http://sonarr.local:8989/api/v3/series/20").mock(
+            return_value=Response(200, json={"id": 20, "title": "Some Series", "year": 2023, "seasons": []})
         )
 
         # Mock series episodes
@@ -407,6 +442,11 @@ class TestErrorHandlingIntegration:
     @pytest.mark.asyncio
     async def test_handles_empty_release_response(self) -> None:
         """Should handle case where no releases are found."""
+        # Mock movie info
+        respx.get("http://radarr.local:7878/api/v3/movie/999").mock(
+            return_value=Response(200, json={"id": 999, "title": "Empty Movie", "year": 2024})
+        )
+
         respx.get(
             "http://radarr.local:7878/api/v3/release",
             params={"movieId": "999"},

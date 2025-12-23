@@ -104,14 +104,42 @@ $ findarr check series 456 --strategy recent --seasons 2 --format json
 
 ### Batch Check
 
+Process your entire library or a subset with automatic tagging and resume support.
+
 ```bash
-findarr check batch --file <FILE> [OPTIONS]
+findarr check batch [OPTIONS]
 
 Options:
-  -f, --file PATH                   File with items to check (required)
+  -f, --file PATH                   File with items to check (optional)
+  --all-movies                      Check all movies in Radarr
+  --all-series                      Check all series in Sonarr
+  --batch-size INTEGER              Max items per run (0=unlimited, default: 0)
+  -d, --delay FLOAT                 Delay between checks in seconds (default: 0.5)
+  --skip-tagged/--no-skip-tagged    Skip items with existing 4k tags (default: skip)
+  --resume/--no-resume              Resume interrupted batch run (default: resume)
+  --no-tag                          Disable automatic tagging
+  --dry-run                         Show what would be tagged without making changes
   --format [json|table|simple]      Output format (default: simple)
   -s, --seasons INTEGER             Seasons to check for series (default: 3)
   --strategy [recent|distributed|all]  Strategy for series (default: recent)
+```
+
+Examples:
+```bash
+# Check all movies and tag them
+findarr check batch --all-movies
+
+# Check all movies, 100 at a time (good for large libraries)
+findarr check batch --all-movies --batch-size 100
+
+# Check all series with 1 second delay between checks
+findarr check batch --all-series --delay 1.0
+
+# Check specific items from a file
+findarr check batch --file items.txt
+
+# Preview what would be tagged (no changes made)
+findarr check batch --all-movies --dry-run
 ```
 
 Batch file format (one item per line):
@@ -121,6 +149,26 @@ movie:123
 movie:456
 series:789
 ```
+
+### Automatic Tagging
+
+Batch operations automatically tag items in Radarr/Sonarr based on 4K availability:
+
+| Tag | Meaning |
+|-----|---------|
+| `4k-available` | 4K releases were found |
+| `4k-unavailable` | No 4K releases found |
+
+Tags are created automatically if they don't exist. Use `--no-tag` to disable tagging.
+
+### Resume Support
+
+Batch operations track progress and can resume after interruption:
+
+- Progress is saved to `~/.config/findarr/state.json`
+- Use `--resume` (default) to continue where you left off
+- Use `--no-resume` to start fresh
+- Items are marked with check timestamps to avoid re-checking recently scanned items
 
 ### Exit Codes
 
@@ -233,6 +281,17 @@ api_key = "your-radarr-api-key"
 [sonarr]
 url = "http://localhost:8989"
 api_key = "your-sonarr-api-key"
+
+# Tag configuration (optional)
+[tags]
+available = "4k-available"       # Tag for items with 4K releases
+unavailable = "4k-unavailable"   # Tag for items without 4K releases
+create_if_missing = true         # Create tags if they don't exist
+recheck_days = 30                # Days before rechecking tagged items
+
+# State file location (optional)
+[state]
+path = "~/.config/findarr/state.json"
 ```
 
 ### Timeout Considerations
@@ -292,24 +351,26 @@ http:
 
 ## Development
 
+This project uses [uv](https://github.com/astral-sh/uv) for dependency management.
+
 ```bash
 # Install dev dependencies
-pip install -e ".[dev]"
+uv sync --dev
 
 # Run tests
-pytest
+uv run pytest
 
 # Run tests with coverage
-pytest --cov=findarr --cov-report=term-missing
+uv run pytest --cov=findarr --cov-report=term-missing
 
 # Lint
-ruff check src tests
+uv run ruff check src tests
 
 # Format
-ruff format src tests
+uv run ruff format src tests
 
 # Type check
-mypy src
+uv run mypy src
 ```
 
 ## License

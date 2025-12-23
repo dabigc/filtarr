@@ -32,24 +32,26 @@ src/findarr/
 
 ## Development Commands
 
+**This project uses `uv` for dependency management. Always prefix commands with `uv run`.**
+
 ```bash
 # Install with dev dependencies
-pip install -e ".[dev]"
+uv sync --dev
 
 # Run tests
-pytest
+uv run pytest
 
 # Run tests with coverage
-pytest --cov=findarr --cov-report=term-missing
+uv run pytest --cov=findarr --cov-report=term-missing
 
 # Lint
-ruff check src tests
+uv run ruff check src tests
 
 # Format
-ruff format src tests
+uv run ruff format src tests
 
 # Type check
-mypy src
+uv run mypy src
 ```
 
 ## API Design Principles

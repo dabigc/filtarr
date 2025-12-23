@@ -266,3 +266,37 @@ class BaseArrClient:
             count = len(self._cache)
             self._cache.clear()
             return count
+
+    async def _post(
+        self, endpoint: str, json: dict[str, Any] | None = None
+    ) -> Any:
+        """Make a POST request.
+
+        Args:
+            endpoint: The API endpoint path
+            json: Optional JSON body
+
+        Returns:
+            The JSON response data
+
+        Raises:
+            httpx.HTTPStatusError: On HTTP errors (after retries exhausted)
+        """
+        return await self._request_with_retry("POST", endpoint, json=json)
+
+    async def _put(
+        self, endpoint: str, json: dict[str, Any] | None = None
+    ) -> Any:
+        """Make a PUT request.
+
+        Args:
+            endpoint: The API endpoint path
+            json: Optional JSON body
+
+        Returns:
+            The JSON response data
+
+        Raises:
+            httpx.HTTPStatusError: On HTTP errors (after retries exhausted)
+        """
+        return await self._request_with_retry("PUT", endpoint, json=json)
