@@ -19,6 +19,8 @@ jobs:
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
+    # Skip CI for release-please commits - the Release workflow handles validation
+    if: "${{ startsWith(github.event.head_commit.message, 'chore(main): release') == false }}"
     outputs:
       python: ${{ steps.filter.outputs.python }}
       docker: ${{ steps.filter.outputs.docker }}
