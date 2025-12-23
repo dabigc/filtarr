@@ -762,5 +762,84 @@ def version() -> None:
     console.print(f"findarr version {__version__}")
 
 
+@app.command()
+def serve(
+    host: Annotated[
+        str | None,
+        typer.Option(
+            "--host",
+            "-h",
+            help="Host to bind the webhook server to.",
+        ),
+    ] = None,
+    port: Annotated[
+        int | None,
+        typer.Option(
+            "--port",
+            "-p",
+            help="Port to listen on.",
+        ),
+    ] = None,
+    log_level: Annotated[
+        str,
+        typer.Option(
+            "--log-level",
+            "-l",
+            help="Logging level (debug, info, warning, error).",
+        ),
+    ] = "info",
+) -> None:
+    """Start the webhook server to receive Radarr/Sonarr notifications.
+
+    The server listens for webhook events from Radarr and Sonarr when new
+    movies or series are added. When a webhook is received, findarr will
+    automatically check 4K availability and apply tags based on your config.
+
+    Configure webhooks in Radarr/Sonarr:
+    - URL: http://<host>:<port>/webhook/radarr (or /webhook/sonarr)
+    - Method: POST
+    - Events: On Movie Added (Radarr) or On Series Add (Sonarr)
+    - Add header: X-Api-Key with your Radarr/Sonarr API key
+
+    Example:
+        findarr serve --port 8080
+        findarr serve --host 0.0.0.0 --port 9000 --log-level debug
+    """
+    try:
+        from findarr.webhook import run_server
+    except ImportError:
+        error_console.print(
+            "[red]Error:[/red] Webhook server requires additional dependencies.\n"
+            "Install with: [bold]pip install findarr[webhook][/bold]"
+        )
+        raise typer.Exit(1) from None
+
+    config = Config.load()
+
+    # Use CLI args or fall back to config
+    server_host = host or config.webhook.host
+    server_port = port or config.webhook.port
+
+    console.print("[bold green]Starting findarr webhook server[/bold green]")
+    console.print(f"  Host: {server_host}")
+    console.print(f"  Port: {server_port}")
+    console.print(f"  Radarr configured: {'Yes' if config.radarr else 'No'}")
+    console.print(f"  Sonarr configured: {'Yes' if config.sonarr else 'No'}")
+    console.print()
+    console.print("[dim]Configure webhooks in Radarr/Sonarr to POST to:[/dim]")
+    if config.radarr:
+        console.print(f"  Radarr: http://{server_host}:{server_port}/webhook/radarr")
+    if config.sonarr:
+        console.print(f"  Sonarr: http://{server_host}:{server_port}/webhook/sonarr")
+    console.print()
+
+    run_server(
+        host=server_host,
+        port=server_port,
+        config=config,
+        log_level=log_level,
+    )
+
+
 if __name__ == "__main__":
     app()

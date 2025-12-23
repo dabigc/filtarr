@@ -187,6 +187,130 @@ else
 fi
 ```
 
+## Webhook Server
+
+Run a webhook server to automatically check 4K availability when new movies or series are added to Radarr/Sonarr.
+
+### Installation
+
+```bash
+# Install with webhook support
+pip install findarr[webhook]
+```
+
+### Starting the Server
+
+```bash
+# Start with default settings (port 8080)
+findarr serve
+
+# Custom host and port
+findarr serve --host 0.0.0.0 --port 9000
+
+# With debug logging
+findarr serve --log-level debug
+```
+
+### Configuring Webhooks in Radarr
+
+1. Go to **Settings > Connect > Add > Webhook**
+2. Configure:
+   - **Name**: `findarr`
+   - **URL**: `http://<findarr-host>:8080/webhook/radarr`
+   - **Method**: `POST`
+   - **On Movie Added**: ✓ (enable)
+3. Add custom header:
+   - **Key**: `X-Api-Key`
+   - **Value**: Your Radarr API key (same one in your findarr config)
+4. Save and test
+
+### Configuring Webhooks in Sonarr
+
+1. Go to **Settings > Connect > Add > Webhook**
+2. Configure:
+   - **Name**: `findarr`
+   - **URL**: `http://<findarr-host>:8080/webhook/sonarr`
+   - **Method**: `POST`
+   - **On Series Add**: ✓ (enable)
+3. Add custom header:
+   - **Key**: `X-Api-Key`
+   - **Value**: Your Sonarr API key (same one in your findarr config)
+4. Save and test
+
+### Webhook Configuration
+
+Add to your `~/.config/findarr/config.toml`:
+
+```toml
+[webhook]
+host = "0.0.0.0"  # Listen on all interfaces
+port = 8080       # Default port
+```
+
+Or use environment variables:
+
+```bash
+export FINDARR_WEBHOOK_HOST="0.0.0.0"
+export FINDARR_WEBHOOK_PORT="8080"
+```
+
+### How It Works
+
+1. When you add a movie/series to Radarr/Sonarr, it sends a webhook to findarr
+2. findarr immediately returns `200 OK` and processes the check in the background
+3. After checking, findarr applies the appropriate tag (`4k-available` or `4k-unavailable`)
+
+The webhook uses your existing tag configuration from `[tags]` section.
+
+### Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check (returns `{"status": "healthy"}`) |
+| `/webhook/radarr` | POST | Receive Radarr webhooks |
+| `/webhook/sonarr` | POST | Receive Sonarr webhooks |
+
+### Running as a Service (systemd)
+
+Create `/etc/systemd/system/findarr-webhook.service`:
+
+```ini
+[Unit]
+Description=findarr Webhook Server
+After=network.target
+
+[Service]
+Type=simple
+User=your-user
+ExecStart=/path/to/findarr serve --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable findarr-webhook
+sudo systemctl start findarr-webhook
+```
+
+### Running with Docker Compose
+
+```yaml
+services:
+  findarr:
+    image: python:3.12-slim
+    command: pip install findarr[webhook] && findarr serve
+    ports:
+      - "8080:8080"
+    volumes:
+      - ~/.config/findarr:/root/.config/findarr
+    restart: unless-stopped
+```
+
 ## Python API
 
 ### Check movie 4K availability (Radarr)
