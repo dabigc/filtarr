@@ -486,7 +486,7 @@ class TestStateManager:
         manager = StateManager(state_path)
 
         # Make path unwritable
-        with patch.object(Path, 'write_text', side_effect=PermissionError("denied")):
+        with patch.object(Path, "write_text", side_effect=PermissionError("denied")):
             # Should not raise
             manager.save()
 

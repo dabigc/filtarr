@@ -51,6 +51,14 @@ class StateConfig:
     path: Path = field(default_factory=_default_state_path)
 
 
+@dataclass
+class WebhookConfig:
+    """Configuration for webhook server."""
+
+    host: str = "0.0.0.0"
+    port: int = 8080
+
+
 DEFAULT_TIMEOUT = 120.0
 
 
@@ -63,6 +71,7 @@ class Config:
     timeout: float = DEFAULT_TIMEOUT
     tags: TagConfig = field(default_factory=TagConfig)
     state: StateConfig = field(default_factory=StateConfig)
+    webhook: WebhookConfig = field(default_factory=WebhookConfig)
 
     @classmethod
     def load(cls) -> Self:
@@ -157,7 +166,23 @@ class Config:
             if "path" in state_data:
                 state = StateConfig(path=Path(state_data["path"]).expanduser())
 
-        return cls(radarr=radarr, sonarr=sonarr, timeout=timeout, tags=tags, state=state)
+        # Parse webhook configuration
+        webhook = WebhookConfig()
+        if "webhook" in data:
+            webhook_data = data["webhook"]
+            webhook = WebhookConfig(
+                host=webhook_data.get("host", webhook.host),
+                port=webhook_data.get("port", webhook.port),
+            )
+
+        return cls(
+            radarr=radarr,
+            sonarr=sonarr,
+            timeout=timeout,
+            tags=tags,
+            state=state,
+            webhook=webhook,
+        )
 
     @classmethod
     def _load_from_env(cls, base: Self) -> Self:
@@ -174,6 +199,7 @@ class Config:
         timeout = base.timeout
         tags = base.tags
         state = base.state
+        webhook = base.webhook
 
         # Check for Radarr env vars
         radarr_url = os.environ.get("FINDARR_RADARR_URL")
@@ -208,7 +234,23 @@ class Config:
         if state_path:
             state = StateConfig(path=Path(state_path).expanduser())
 
-        return cls(radarr=radarr, sonarr=sonarr, timeout=timeout, tags=tags, state=state)
+        # Check for webhook env vars
+        webhook_host = os.environ.get("FINDARR_WEBHOOK_HOST")
+        webhook_port = os.environ.get("FINDARR_WEBHOOK_PORT")
+        if webhook_host or webhook_port:
+            webhook = WebhookConfig(
+                host=webhook_host or webhook.host,
+                port=int(webhook_port) if webhook_port else webhook.port,
+            )
+
+        return cls(
+            radarr=radarr,
+            sonarr=sonarr,
+            timeout=timeout,
+            tags=tags,
+            state=state,
+            webhook=webhook,
+        )
 
     def require_radarr(self) -> RadarrConfig:
         """Get Radarr config, raising if not configured.

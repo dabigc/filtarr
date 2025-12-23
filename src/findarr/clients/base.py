@@ -103,9 +103,7 @@ class BaseArrClient:
         key_data = f"{endpoint}:{params_str}"
         return hashlib.sha256(key_data.encode()).hexdigest()[:16]
 
-    async def _get(
-        self, endpoint: str, params: dict[str, Any] | None = None
-    ) -> Any:
+    async def _get(self, endpoint: str, params: dict[str, Any] | None = None) -> Any:
         """Make a cached GET request.
 
         Checks the cache first. If not found, makes the request and caches
@@ -139,9 +137,7 @@ class BaseArrClient:
 
         return data
 
-    async def _get_uncached(
-        self, endpoint: str, params: dict[str, Any] | None = None
-    ) -> Any:
+    async def _get_uncached(self, endpoint: str, params: dict[str, Any] | None = None) -> Any:
         """Make a GET request without caching.
 
         This method includes retry logic for transient failures.
@@ -215,9 +211,7 @@ class BaseArrClient:
 
             # Retry on 429 or 5xx
             if response.status_code == 429 or response.status_code >= 500:
-                logger.warning(
-                    "Retryable HTTP error %d for %s", response.status_code, endpoint
-                )
+                logger.warning("Retryable HTTP error %d for %s", response.status_code, endpoint)
                 response.raise_for_status()
 
             # Other errors - raise without retry
@@ -267,9 +261,7 @@ class BaseArrClient:
             self._cache.clear()
             return count
 
-    async def _post(
-        self, endpoint: str, json: dict[str, Any] | None = None
-    ) -> Any:
+    async def _post(self, endpoint: str, json: dict[str, Any] | None = None) -> Any:
         """Make a POST request.
 
         Args:
@@ -284,9 +276,7 @@ class BaseArrClient:
         """
         return await self._request_with_retry("POST", endpoint, json=json)
 
-    async def _put(
-        self, endpoint: str, json: dict[str, Any] | None = None
-    ) -> Any:
+    async def _put(self, endpoint: str, json: dict[str, Any] | None = None) -> Any:
         """Make a PUT request.
 
         Args:
