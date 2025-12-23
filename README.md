@@ -373,6 +373,168 @@ docker run -d -p 8080:8080 \
   findarr
 ```
 
+## Scheduler
+
+Run batch operations automatically on configurable schedules.
+
+### Installation
+
+```bash
+# Install with scheduler support
+pip install findarr[scheduler]
+
+# Or with everything (CLI, webhook, scheduler)
+pip install findarr[cli,webhook,scheduler]
+```
+
+### Quick Start
+
+Add schedules to your `~/.config/findarr/config.toml`:
+
+```toml
+[scheduler]
+enabled = true
+history_limit = 100  # Keep last 100 run records
+
+[[scheduler.schedules]]
+name = "daily-movies"
+target = "movies"
+trigger = { type = "cron", expression = "0 3 * * *" }  # 3 AM daily
+batch_size = 100
+skip_tagged = true
+
+[[scheduler.schedules]]
+name = "weekly-series"
+target = "series"
+trigger = { type = "interval", hours = 168 }  # Every week
+strategy = "recent"
+seasons = 3
+```
+
+Then start the server with the scheduler:
+
+```bash
+findarr serve  # Scheduler is enabled by default
+findarr serve --no-scheduler  # Webhooks only
+```
+
+### CLI Commands
+
+```bash
+# List all schedules
+findarr schedule list
+
+# Add a dynamic schedule
+findarr schedule add daily-check --target movies --cron "0 3 * * *"
+findarr schedule add hourly-all --target both --interval 6h
+
+# Remove a schedule
+findarr schedule remove daily-check
+
+# Enable/disable a schedule
+findarr schedule enable daily-check
+findarr schedule disable daily-check
+
+# Run a schedule immediately
+findarr schedule run daily-movies
+
+# View run history
+findarr schedule history
+findarr schedule history --name daily-movies --limit 10
+
+# Export to external schedulers
+findarr schedule export --format cron
+findarr schedule export --format systemd --output /etc/systemd/system/
+```
+
+### Schedule Triggers
+
+**Cron expressions** (5 fields: minute hour day month weekday):
+```toml
+trigger = { type = "cron", expression = "0 3 * * *" }     # Daily at 3 AM
+trigger = { type = "cron", expression = "0 */6 * * *" }   # Every 6 hours
+trigger = { type = "cron", expression = "0 3 * * 0" }     # Sundays at 3 AM
+```
+
+**Interval triggers**:
+```toml
+trigger = { type = "interval", hours = 6 }                # Every 6 hours
+trigger = { type = "interval", days = 1 }                 # Daily
+trigger = { type = "interval", hours = 2, minutes = 30 }  # Every 2h 30m
+```
+
+CLI interval format: `6h`, `30m`, `1d`, `1w`, `2h30m`
+
+### Schedule Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `name` | required | Unique schedule identifier |
+| `target` | required | `movies`, `series`, or `both` |
+| `trigger` | required | Cron or interval trigger |
+| `enabled` | `true` | Whether schedule is active |
+| `batch_size` | `0` | Max items per run (0=unlimited) |
+| `delay` | `0.5` | Seconds between checks |
+| `skip_tagged` | `true` | Skip items with existing tags |
+| `include_rechecks` | `true` | Include stale unavailable items |
+| `no_tag` | `false` | Disable automatic tagging |
+| `dry_run` | `false` | Preview mode |
+| `strategy` | `recent` | Series strategy: `recent`, `distributed`, `all` |
+| `seasons` | `3` | Seasons to check for series |
+
+### Behavior
+
+- **Overlap prevention**: If a schedule is still running when the next run is due, the new run is skipped
+- **Error resilience**: Failed runs are logged but don't stop the scheduler
+- **History tracking**: All runs are recorded with timestamps, item counts, and errors
+- **Graceful shutdown**: Completes current run before stopping
+
+### Export to External Schedulers
+
+If you prefer to use cron or systemd instead of the built-in scheduler:
+
+```bash
+# Generate cron configuration
+findarr schedule export --format cron
+# Output:
+# 0 3 * * * /usr/local/bin/findarr check batch --all-movies --batch-size 100
+
+# Generate systemd timers
+findarr schedule export --format systemd --output ./systemd-units/
+# Creates:
+#   findarr-daily-movies.timer
+#   findarr-daily-movies.service
+```
+
+### Monitoring
+
+The `/status` endpoint shows scheduler state:
+
+```bash
+curl http://localhost:8080/status
+```
+
+```json
+{
+  "status": "healthy",
+  "scheduler": {
+    "enabled": true,
+    "running": true,
+    "total_schedules": 2,
+    "enabled_schedules": 2,
+    "currently_running": [],
+    "recent_runs": [
+      {
+        "schedule": "daily-movies",
+        "status": "completed",
+        "items_processed": 150,
+        "items_with_4k": 42
+      }
+    ]
+  }
+}
+```
+
 ## Python API
 
 ### Check movie 4K availability (Radarr)
