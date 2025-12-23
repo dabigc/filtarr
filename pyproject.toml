@@ -1,6 +1,6 @@
 [project]
 name = "findarr"
-version = "0.1.0"
+version = "0.1.1"
 description = "A Python library to check 4K availability via Radarr/Sonarr search results"
 readme = "README.md"
 requires-python = ">=3.11"
