@@ -1,9 +1,10 @@
 """Sonarr API client."""
 
 from datetime import date
+from typing import Any
 
 from findarr.clients.base import BaseArrClient
-from findarr.models.common import Quality, Release
+from findarr.models.common import Quality, Release, Tag
 from findarr.models.sonarr import Episode, Season, Series
 
 
@@ -50,6 +51,7 @@ class SonarrClient(BaseArrClient):
                     year=item.get("year", 0),
                     seasons=seasons,
                     monitored=item.get("monitored", True),
+                    tags=item.get("tags", []),
                 )
             )
         return series_list
@@ -123,6 +125,7 @@ class SonarrClient(BaseArrClient):
             year=data.get("year", 0),
             seasons=seasons,
             monitored=data.get("monitored", True),
+            tags=data.get("tags", []),
         )
 
     async def get_episodes(
@@ -236,3 +239,127 @@ class SonarrClient(BaseArrClient):
         """
         releases = await self.get_series_releases(series_id)
         return any(r.is_4k() for r in releases)
+
+    # Tag management methods
+
+    async def get_tags(self) -> list[Tag]:
+        """Fetch all tags.
+
+        Returns:
+            List of Tag models
+        """
+        data = await self._get("/api/v3/tag")
+        return [Tag.model_validate(item) for item in data]
+
+    async def create_tag(self, label: str) -> Tag:
+        """Create a new tag.
+
+        Args:
+            label: The tag label
+
+        Returns:
+            The created Tag model
+        """
+        data = await self._post("/api/v3/tag", json={"label": label})
+        return Tag.model_validate(data)
+
+    async def get_or_create_tag(self, label: str) -> Tag:
+        """Get an existing tag by label or create it if it doesn't exist.
+
+        Args:
+            label: The tag label
+
+        Returns:
+            The existing or newly created Tag model
+        """
+        tags = await self.get_tags()
+        for tag in tags:
+            if tag.label.lower() == label.lower():
+                return tag
+        return await self.create_tag(label)
+
+    async def get_series_raw(self, series_id: int) -> dict[str, Any]:
+        """Fetch raw series data for updating.
+
+        Args:
+            series_id: The Sonarr series ID
+
+        Returns:
+            Raw series data dictionary
+        """
+        data: dict[str, Any] = await self._get(f"/api/v3/series/{series_id}")
+        return data
+
+    async def update_series(self, series_data: dict[str, Any]) -> Series:
+        """Update a series.
+
+        Args:
+            series_data: The complete series data dictionary with modifications
+
+        Returns:
+            The updated Series model
+        """
+        series_id = series_data["id"]
+        data = await self._put(f"/api/v3/series/{series_id}", json=series_data)
+        # Invalidate cache for this series
+        await self.invalidate_cache(f"/api/v3/series/{series_id}")
+        await self.invalidate_cache("/api/v3/series")
+
+        # Parse the response into a Series model
+        seasons = []
+        for s in data.get("seasons", []):
+            stats = s.get("statistics", {})
+            seasons.append(
+                Season(
+                    seasonNumber=s.get("seasonNumber", 0),
+                    monitored=s.get("monitored", True),
+                    **{
+                        "statistics.episodeCount": stats.get("episodeCount", 0),
+                        "statistics.episodeFileCount": stats.get("episodeFileCount", 0),
+                    },
+                )
+            )
+        return Series(
+            id=data["id"],
+            title=data.get("title", ""),
+            year=data.get("year", 0),
+            seasons=seasons,
+            monitored=data.get("monitored", True),
+            tags=data.get("tags", []),
+        )
+
+    async def add_tag_to_series(self, series_id: int, tag_id: int) -> Series:
+        """Add a tag to a series.
+
+        Args:
+            series_id: The Sonarr series ID
+            tag_id: The tag ID to add
+
+        Returns:
+            The updated Series model
+        """
+        series_data = await self.get_series_raw(series_id)
+        tags: list[int] = series_data.get("tags", [])
+        if tag_id not in tags:
+            tags.append(tag_id)
+            series_data["tags"] = tags
+            return await self.update_series(series_data)
+        return await self.get_series(series_id)
+
+    async def remove_tag_from_series(self, series_id: int, tag_id: int) -> Series:
+        """Remove a tag from a series.
+
+        Args:
+            series_id: The Sonarr series ID
+            tag_id: The tag ID to remove
+
+        Returns:
+            The updated Series model
+        """
+        series_data = await self.get_series_raw(series_id)
+        tags: list[int] = series_data.get("tags", [])
+        if tag_id in tags:
+            tags.remove(tag_id)
+            series_data["tags"] = tags
+            return await self.update_series(series_data)
+        return await self.get_series(series_id)

@@ -13,6 +13,14 @@ from findarr.config import Config, RadarrConfig, SonarrConfig
 runner = CliRunner()
 
 
+def _create_mock_state_manager() -> MagicMock:
+    """Create a mock StateManager for testing."""
+    mock = MagicMock()
+    mock.record_check = MagicMock()
+    mock.get_stale_unavailable_items = MagicMock(return_value=[])
+    return mock
+
+
 class TestOutputFormatters:
     """Tests for output formatting functions."""
 
@@ -57,15 +65,19 @@ class TestCheckMovieCommand:
         mock_result = FourKResult(item_id=123, item_type="movie", has_4k=True)
         mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
 
-        async def mock_check_movie(_movie_id: int) -> FourKResult:
+        async def mock_check_movie(
+            _movie_id: int, **_kwargs: object
+        ) -> FourKResult:
             return mock_result
 
         mock_checker = MagicMock()
         mock_checker.check_movie = mock_check_movie
+        mock_state_manager = _create_mock_state_manager()
 
         with (
             patch("findarr.cli.Config.load", return_value=mock_config),
             patch("findarr.cli.get_checker", return_value=mock_checker),
+            patch("findarr.cli.get_state_manager", return_value=mock_state_manager),
         ):
             result = runner.invoke(app, ["check", "movie", "123", "--format", "simple"])
 
@@ -77,15 +89,19 @@ class TestCheckMovieCommand:
         mock_result = FourKResult(item_id=123, item_type="movie", has_4k=False)
         mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
 
-        async def mock_check_movie(_movie_id: int) -> FourKResult:
+        async def mock_check_movie(
+            _movie_id: int, **_kwargs: object
+        ) -> FourKResult:
             return mock_result
 
         mock_checker = MagicMock()
         mock_checker.check_movie = mock_check_movie
+        mock_state_manager = _create_mock_state_manager()
 
         with (
             patch("findarr.cli.Config.load", return_value=mock_config),
             patch("findarr.cli.get_checker", return_value=mock_checker),
+            patch("findarr.cli.get_state_manager", return_value=mock_state_manager),
         ):
             result = runner.invoke(app, ["check", "movie", "123", "--format", "simple"])
 
@@ -243,16 +259,20 @@ class TestCheckMovieByName:
         async def mock_search_movies(_term: str) -> list[tuple[int, str, int]]:
             return [(123, "The Matrix", 1999)]
 
-        async def mock_check_movie(_movie_id: int) -> FourKResult:
+        async def mock_check_movie(
+            _movie_id: int, **_kwargs: object
+        ) -> FourKResult:
             return mock_result
 
         mock_checker = MagicMock()
         mock_checker.search_movies = mock_search_movies
         mock_checker.check_movie = mock_check_movie
+        mock_state_manager = _create_mock_state_manager()
 
         with (
             patch("findarr.cli.Config.load", return_value=mock_config),
             patch("findarr.cli.get_checker", return_value=mock_checker),
+            patch("findarr.cli.get_state_manager", return_value=mock_state_manager),
         ):
             result = runner.invoke(
                 app, ["check", "movie", "The Matrix", "--format", "simple"]
@@ -271,10 +291,12 @@ class TestCheckMovieByName:
 
         mock_checker = MagicMock()
         mock_checker.search_movies = mock_search_movies
+        mock_state_manager = _create_mock_state_manager()
 
         with (
             patch("findarr.cli.Config.load", return_value=mock_config),
             patch("findarr.cli.get_checker", return_value=mock_checker),
+            patch("findarr.cli.get_state_manager", return_value=mock_state_manager),
         ):
             result = runner.invoke(app, ["check", "movie", "Matrix", "--format", "simple"])
 
@@ -292,10 +314,12 @@ class TestCheckMovieByName:
 
         mock_checker = MagicMock()
         mock_checker.search_movies = mock_search_movies
+        mock_state_manager = _create_mock_state_manager()
 
         with (
             patch("findarr.cli.Config.load", return_value=mock_config),
             patch("findarr.cli.get_checker", return_value=mock_checker),
+            patch("findarr.cli.get_state_manager", return_value=mock_state_manager),
         ):
             result = runner.invoke(
                 app, ["check", "movie", "Nonexistent", "--format", "simple"]
