@@ -356,9 +356,7 @@ class JobExecutor:
             sonarr_url=sonarr_url,
             sonarr_api_key=sonarr_api_key,
             timeout=self._config.timeout,
-            tag_available=self._config.tags.available,
-            tag_unavailable=self._config.tags.unavailable,
-            create_tags=self._config.tags.create_if_missing,
+            tag_config=self._config.tags,
         )
 
 

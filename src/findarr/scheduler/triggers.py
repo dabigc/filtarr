@@ -128,7 +128,8 @@ def get_next_run_time(trigger: Trigger, base_time: datetime | None = None) -> da
 
     if isinstance(trigger, CronTrigger):
         cron = croniter(trigger.expression, base_time)
-        return cron.get_next(datetime)
+        next_time: datetime = cron.get_next(datetime)
+        return next_time
     else:
         # For interval triggers, next run is base_time + interval
         from datetime import timedelta

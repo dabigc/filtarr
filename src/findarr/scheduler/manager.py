@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, SupportsFloat, SupportsInt
 
 from findarr.scheduler.executor import JobExecutor
 from findarr.scheduler.models import (
@@ -25,6 +25,35 @@ if TYPE_CHECKING:
 
     from findarr.config import Config
     from findarr.state import StateManager
+
+
+def _to_int(value: object, default: int = 0) -> int:
+    """Safely convert a value to int with a default."""
+    if value is None:
+        return default
+    if isinstance(value, SupportsInt):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _to_float(value: object, default: float = 0.0) -> float:
+    """Safely convert a value to float with a default."""
+    if value is None:
+        return default
+    if isinstance(value, SupportsFloat):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
 
 logger = logging.getLogger(__name__)
 
@@ -149,16 +178,16 @@ class SchedulerManager:
                 schedule = ScheduleDefinition(
                     name=str(schedule_data.get("name", "")),
                     enabled=bool(schedule_data.get("enabled", True)),
-                    target=schedule_data.get("target", "both"),  # type: ignore[arg-type]
+                    target=str(schedule_data.get("target", "both")),  # type: ignore[arg-type]
                     trigger=trigger,
-                    batch_size=int(schedule_data.get("batch_size", 0)),
-                    delay=float(schedule_data.get("delay", 0.5)),
+                    batch_size=_to_int(schedule_data.get("batch_size"), 0),
+                    delay=_to_float(schedule_data.get("delay"), 0.5),
                     skip_tagged=bool(schedule_data.get("skip_tagged", True)),
                     include_rechecks=bool(schedule_data.get("include_rechecks", True)),
                     no_tag=bool(schedule_data.get("no_tag", False)),
                     dry_run=bool(schedule_data.get("dry_run", False)),
-                    strategy=schedule_data.get("strategy", "recent"),  # type: ignore[arg-type]
-                    seasons=int(schedule_data.get("seasons", 3)),
+                    strategy=str(schedule_data.get("strategy", "recent")),  # type: ignore[arg-type]
+                    seasons=_to_int(schedule_data.get("seasons"), 3),
                     source="config",
                 )
                 schedules.append(schedule)
@@ -181,16 +210,16 @@ class SchedulerManager:
                 schedule = ScheduleDefinition(
                     name=str(schedule_data.get("name", "")),
                     enabled=bool(schedule_data.get("enabled", True)),
-                    target=schedule_data.get("target", "both"),  # type: ignore[arg-type]
+                    target=str(schedule_data.get("target", "both")),  # type: ignore[arg-type]
                     trigger=trigger,
-                    batch_size=int(schedule_data.get("batch_size", 0)),
-                    delay=float(schedule_data.get("delay", 0.5)),
+                    batch_size=_to_int(schedule_data.get("batch_size"), 0),
+                    delay=_to_float(schedule_data.get("delay"), 0.5),
                     skip_tagged=bool(schedule_data.get("skip_tagged", True)),
                     include_rechecks=bool(schedule_data.get("include_rechecks", True)),
                     no_tag=bool(schedule_data.get("no_tag", False)),
                     dry_run=bool(schedule_data.get("dry_run", False)),
-                    strategy=schedule_data.get("strategy", "recent"),  # type: ignore[arg-type]
-                    seasons=int(schedule_data.get("seasons", 3)),
+                    strategy=str(schedule_data.get("strategy", "recent")),  # type: ignore[arg-type]
+                    seasons=_to_int(schedule_data.get("seasons"), 3),
                     source="dynamic",
                 )
                 schedules.append(schedule)
@@ -246,10 +275,8 @@ class SchedulerManager:
         """
         # Check if name conflicts with config schedule
         for existing in self._config.scheduler.schedules:
-            if (
-                isinstance(existing.get("name"), str)
-                and existing["name"].lower() == schedule.name
-            ):
+            existing_name = existing.get("name")
+            if isinstance(existing_name, str) and existing_name.lower() == schedule.name:
                 raise ValueError(
                     f"Cannot add schedule '{schedule.name}': "
                     "a schedule with this name is defined in config.toml"
@@ -273,10 +300,8 @@ class SchedulerManager:
         """
         # Check if it's a config schedule
         for existing in self._config.scheduler.schedules:
-            if (
-                isinstance(existing.get("name"), str)
-                and existing["name"].lower() == name.lower()
-            ):
+            existing_name = existing.get("name")
+            if isinstance(existing_name, str) and existing_name.lower() == name.lower():
                 raise ValueError(
                     f"Cannot remove schedule '{name}': "
                     "it is defined in config.toml (edit config file instead)"
@@ -298,10 +323,8 @@ class SchedulerManager:
         """
         # Check if it's a config schedule
         for existing in self._config.scheduler.schedules:
-            if (
-                isinstance(existing.get("name"), str)
-                and existing["name"].lower() == name.lower()
-            ):
+            existing_name = existing.get("name")
+            if isinstance(existing_name, str) and existing_name.lower() == name.lower():
                 raise ValueError(
                     f"Cannot modify schedule '{name}': "
                     "it is defined in config.toml (edit config file instead)"
@@ -320,10 +343,8 @@ class SchedulerManager:
         """
         # Check if it's a config schedule
         for existing in self._config.scheduler.schedules:
-            if (
-                isinstance(existing.get("name"), str)
-                and existing["name"].lower() == name.lower()
-            ):
+            existing_name = existing.get("name")
+            if isinstance(existing_name, str) and existing_name.lower() == name.lower():
                 raise ValueError(
                     f"Cannot modify schedule '{name}': "
                     "it is defined in config.toml (edit config file instead)"
@@ -364,9 +385,9 @@ class SchedulerManager:
                     else None
                 ),
                 status=RunStatus(str(r.get("status", "failed"))),
-                items_processed=int(r.get("items_processed", 0)),
-                items_with_4k=int(r.get("items_with_4k", 0)),
-                errors=list(r.get("errors", [])) if isinstance(r.get("errors"), list) else [],
+                items_processed=_to_int(r.get("items_processed"), 0),
+                items_with_4k=_to_int(r.get("items_with_4k"), 0),
+                errors=list(e) if isinstance((e := r.get("errors")), list) else [],
             )
             for r in records
         ]

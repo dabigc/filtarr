@@ -419,14 +419,15 @@ class StateManager:
             schedule: Schedule dictionary (must have 'name' key)
         """
         state = self.load()
-        name = schedule.get("name", "").lower() if isinstance(schedule.get("name"), str) else ""
+        name_val = schedule.get("name")
+        name = name_val.lower() if isinstance(name_val, str) else ""
         if not name:
             raise ValueError("Schedule must have a 'name' field")
 
         # Remove existing schedule with same name
         state.dynamic_schedules = [
             s for s in state.dynamic_schedules
-            if isinstance(s.get("name"), str) and s.get("name", "").lower() != name
+            if not (isinstance((n := s.get("name")), str) and n.lower() == name)
         ]
         state.dynamic_schedules.append(schedule)
         self.save()
@@ -444,7 +445,7 @@ class StateManager:
         original_len = len(state.dynamic_schedules)
         state.dynamic_schedules = [
             s for s in state.dynamic_schedules
-            if isinstance(s.get("name"), str) and s.get("name", "").lower() != name.lower()
+            if not (isinstance((n := s.get("name")), str) and n.lower() == name.lower())
         ]
         if len(state.dynamic_schedules) < original_len:
             self.save()
@@ -462,7 +463,8 @@ class StateManager:
         """
         state = self.load()
         for schedule in state.dynamic_schedules:
-            if isinstance(schedule.get("name"), str) and schedule.get("name", "").lower() == name.lower():
+            sched_name = schedule.get("name")
+            if isinstance(sched_name, str) and sched_name.lower() == name.lower():
                 return schedule
         return None
 
@@ -478,7 +480,8 @@ class StateManager:
         """
         state = self.load()
         for i, schedule in enumerate(state.dynamic_schedules):
-            if isinstance(schedule.get("name"), str) and schedule.get("name", "").lower() == name.lower():
+            sched_name = schedule.get("name")
+            if isinstance(sched_name, str) and sched_name.lower() == name.lower():
                 state.dynamic_schedules[i] = {**schedule, **updates}
                 self.save()
                 return True
@@ -504,8 +507,8 @@ class StateManager:
         if schedule_name:
             history = [
                 r for r in history
-                if isinstance(r.get("schedule_name"), str)
-                and r.get("schedule_name", "").lower() == schedule_name.lower()
+                if isinstance((n := r.get("schedule_name")), str)
+                and n.lower() == schedule_name.lower()
             ]
 
         # Return most recent first
@@ -544,9 +547,10 @@ class StateManager:
         """
         state = self.load()
         for i, record in enumerate(state.schedule_history):
+            rec_name = record.get("schedule_name")
             if (
-                isinstance(record.get("schedule_name"), str)
-                and record.get("schedule_name", "").lower() == schedule_name.lower()
+                isinstance(rec_name, str)
+                and rec_name.lower() == schedule_name.lower()
                 and record.get("started_at") == started_at
             ):
                 state.schedule_history[i] = {**record, **updates}

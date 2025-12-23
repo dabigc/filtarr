@@ -225,13 +225,13 @@ class TestTriggerConversion:
         """Test formatting cron trigger description."""
         trigger = CronTrigger(expression="0 3 * * *")
         desc = format_trigger_description(trigger)
-        assert "cron: 0 3 * * *" == desc
+        assert desc == "cron: 0 3 * * *"
 
     def test_format_trigger_description_interval(self) -> None:
         """Test formatting interval trigger description."""
         trigger = IntervalTrigger(hours=6)
         desc = format_trigger_description(trigger)
-        assert "every 6h" == desc
+        assert desc == "every 6h"
 
     def test_get_next_run_time_interval(self) -> None:
         """Test getting next run time for interval."""
