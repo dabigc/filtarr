@@ -107,14 +107,8 @@ class JobExecutor:
 
                     # Record in state
                     if result and not schedule.dry_run and not schedule.no_tag:
-                        tag_applied = (
-                            result.tag_result.tag_applied
-                            if result.tag_result
-                            else None
-                        )
-                        self._state.record_check(
-                            "movie", movie.id, result.has_4k, tag_applied
-                        )
+                        tag_applied = result.tag_result.tag_applied if result.tag_result else None
+                        self._state.record_check("movie", movie.id, result.has_4k, tag_applied)
 
                 except Exception as e:
                     error_msg = f"Error checking movie {movie.id} ({movie.title}): {e}"
@@ -142,14 +136,8 @@ class JobExecutor:
 
                     # Record in state
                     if result and not schedule.dry_run and not schedule.no_tag:
-                        tag_applied = (
-                            result.tag_result.tag_applied
-                            if result.tag_result
-                            else None
-                        )
-                        self._state.record_check(
-                            "series", series.id, result.has_4k, tag_applied
-                        )
+                        tag_applied = result.tag_result.tag_applied if result.tag_result else None
+                        self._state.record_check("series", series.id, result.has_4k, tag_applied)
 
                 except Exception as e:
                     error_msg = f"Error checking series {series.id} ({series.title}): {e}"
@@ -207,9 +195,7 @@ class JobExecutor:
             errors=errors,
         )
 
-    async def _get_movies_to_check(
-        self, schedule: ScheduleDefinition
-    ) -> list[Movie]:
+    async def _get_movies_to_check(self, schedule: ScheduleDefinition) -> list[Movie]:
         """Get list of movies to check based on schedule settings.
 
         Args:
@@ -219,9 +205,7 @@ class JobExecutor:
             List of movies to check
         """
         radarr = self._config.require_radarr()
-        async with RadarrClient(
-            radarr.url, radarr.api_key, timeout=self._config.timeout
-        ) as client:
+        async with RadarrClient(radarr.url, radarr.api_key, timeout=self._config.timeout) as client:
             all_movies = await client.get_all_movies()
 
             if not schedule.skip_tagged:
@@ -242,9 +226,7 @@ class JobExecutor:
                 if not any(tag_id in skip_tag_ids for tag_id in movie.tags)
             ]
 
-    async def _get_series_to_check(
-        self, schedule: ScheduleDefinition
-    ) -> list[Series]:
+    async def _get_series_to_check(self, schedule: ScheduleDefinition) -> list[Series]:
         """Get list of series to check based on schedule settings.
 
         Args:
@@ -254,9 +236,7 @@ class JobExecutor:
             List of series to check
         """
         sonarr = self._config.require_sonarr()
-        async with SonarrClient(
-            sonarr.url, sonarr.api_key, timeout=self._config.timeout
-        ) as client:
+        async with SonarrClient(sonarr.url, sonarr.api_key, timeout=self._config.timeout) as client:
             all_series = await client.get_all_series()
 
             if not schedule.skip_tagged:
@@ -277,9 +257,7 @@ class JobExecutor:
                 if not any(tag_id in skip_tag_ids for tag_id in series.tags)
             ]
 
-    async def _check_movie(
-        self, movie_id: int, schedule: ScheduleDefinition
-    ) -> FourKResult | None:
+    async def _check_movie(self, movie_id: int, schedule: ScheduleDefinition) -> FourKResult | None:
         """Check a single movie for 4K availability.
 
         Args:
@@ -325,9 +303,7 @@ class JobExecutor:
             dry_run=schedule.dry_run,
         )
 
-    def _create_checker(
-        self, need_radarr: bool = False, need_sonarr: bool = False
-    ) -> FourKChecker:
+    def _create_checker(self, need_radarr: bool = False, need_sonarr: bool = False) -> FourKChecker:
         """Create a FourKChecker instance.
 
         Args:

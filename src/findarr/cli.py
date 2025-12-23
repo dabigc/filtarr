@@ -851,9 +851,7 @@ def schedule_add(
     strategy: Annotated[
         str, typer.Option("--strategy", "-s", help="Series strategy: recent, distributed, all")
     ] = "recent",
-    seasons: Annotated[
-        int, typer.Option("--seasons", help="Seasons to check for series")
-    ] = 3,
+    seasons: Annotated[int, typer.Option("--seasons", help="Seasons to check for series")] = 3,
     enabled: Annotated[
         bool, typer.Option("--enabled/--disabled", help="Whether schedule is active")
     ] = True,
@@ -1046,9 +1044,7 @@ def schedule_history(
     name: Annotated[
         str | None, typer.Option("--name", "-n", help="Filter by schedule name")
     ] = None,
-    limit: Annotated[
-        int, typer.Option("--limit", "-l", help="Maximum records to show")
-    ] = 20,
+    limit: Annotated[int, typer.Option("--limit", "-l", help="Maximum records to show")] = 20,
     output_format: Annotated[
         OutputFormat, typer.Option("--format", "-f", help="Output format")
     ] = OutputFormat.TABLE,

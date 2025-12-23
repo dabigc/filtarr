@@ -107,12 +107,14 @@ def export_cron(
         batch_args = _schedule_to_batch_args(schedule)
         command = f"{findarr_path} {batch_args}"
 
-        lines.extend([
-            f"# Schedule: {schedule.name}",
-            f"# Target: {schedule.target.value}",
-            f"{cron_expr} {command}",
-            "",
-        ])
+        lines.extend(
+            [
+                f"# Schedule: {schedule.name}",
+                f"# Target: {schedule.target.value}",
+                f"{cron_expr} {command}",
+                "",
+            ]
+        )
 
     return "\n".join(lines)
 
@@ -139,7 +141,7 @@ def export_systemd_timer(
     on_calendar = _trigger_to_systemd_calendar(schedule.trigger)
 
     timer_content = f"""# /etc/systemd/system/findarr-{schedule.name}.timer
-# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+# Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 #
 # Install:
 #   sudo cp findarr-{schedule.name}.timer /etc/systemd/system/
@@ -160,7 +162,7 @@ WantedBy=timers.target
 """
 
     service_content = f"""# /etc/systemd/system/findarr-{schedule.name}.service
-# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+# Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 [Unit]
 Description=Findarr batch check: {schedule.name}

@@ -29,10 +29,7 @@ class IntervalTrigger(BaseModel):
     @model_validator(mode="after")
     def at_least_one_nonzero(self) -> IntervalTrigger:
         """Ensure at least one interval component is set."""
-        if all(
-            v == 0
-            for v in [self.weeks, self.days, self.hours, self.minutes, self.seconds]
-        ):
+        if all(v == 0 for v in [self.weeks, self.days, self.hours, self.minutes, self.seconds]):
             raise ValueError("At least one interval component must be non-zero")
         return self
 
@@ -107,30 +104,18 @@ class ScheduleDefinition(BaseModel):
     trigger: Trigger = Field(..., description="When to run: interval or cron")
 
     # Batch operation parameters
-    batch_size: int = Field(
-        default=0, ge=0, description="Max items per run (0=unlimited)"
-    )
-    delay: float = Field(
-        default=0.5, ge=0, description="Delay between checks in seconds"
-    )
-    skip_tagged: bool = Field(
-        default=True, description="Skip items with existing 4K tags"
-    )
-    include_rechecks: bool = Field(
-        default=True, description="Include stale unavailable items"
-    )
+    batch_size: int = Field(default=0, ge=0, description="Max items per run (0=unlimited)")
+    delay: float = Field(default=0.5, ge=0, description="Delay between checks in seconds")
+    skip_tagged: bool = Field(default=True, description="Skip items with existing 4K tags")
+    include_rechecks: bool = Field(default=True, description="Include stale unavailable items")
     no_tag: bool = Field(default=False, description="Disable automatic tagging")
-    dry_run: bool = Field(
-        default=False, description="Preview mode - don't apply tags"
-    )
+    dry_run: bool = Field(default=False, description="Preview mode - don't apply tags")
 
     # Series-specific parameters
     strategy: SeriesStrategy = Field(
         default=SeriesStrategy.RECENT, description="Series checking strategy"
     )
-    seasons: int = Field(
-        default=3, ge=1, description="Number of seasons to check for series"
-    )
+    seasons: int = Field(default=3, ge=1, description="Number of seasons to check for series")
 
     # Metadata
     source: Literal["config", "dynamic"] = Field(
@@ -156,9 +141,7 @@ class ScheduleRunRecord(BaseModel):
 
     schedule_name: str = Field(..., description="Name of the schedule that ran")
     started_at: datetime = Field(..., description="When the run started")
-    completed_at: datetime | None = Field(
-        default=None, description="When the run completed"
-    )
+    completed_at: datetime | None = Field(default=None, description="When the run completed")
     status: RunStatus = Field(..., description="Final status of the run")
     items_processed: int = Field(default=0, ge=0, description="Total items checked")
     items_with_4k: int = Field(default=0, ge=0, description="Items with 4K available")
@@ -184,17 +167,13 @@ class SchedulerState(BaseModel):
     def add_schedule(self, schedule: ScheduleDefinition) -> None:
         """Add a dynamic schedule."""
         # Remove existing schedule with same name if present
-        self.dynamic_schedules = [
-            s for s in self.dynamic_schedules if s.name != schedule.name
-        ]
+        self.dynamic_schedules = [s for s in self.dynamic_schedules if s.name != schedule.name]
         self.dynamic_schedules.append(schedule)
 
     def remove_schedule(self, name: str) -> bool:
         """Remove a dynamic schedule by name. Returns True if removed."""
         original_len = len(self.dynamic_schedules)
-        self.dynamic_schedules = [
-            s for s in self.dynamic_schedules if s.name != name.lower()
-        ]
+        self.dynamic_schedules = [s for s in self.dynamic_schedules if s.name != name.lower()]
         return len(self.dynamic_schedules) < original_len
 
     def get_schedule(self, name: str) -> ScheduleDefinition | None:

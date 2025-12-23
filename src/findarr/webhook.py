@@ -344,8 +344,7 @@ def run_server(
             logger.info("Scheduler configured and will start with server")
         except ImportError:
             logger.warning(
-                "Scheduler dependencies not installed. "
-                "Install with: pip install findarr[scheduler]"
+                "Scheduler dependencies not installed. Install with: pip install findarr[scheduler]"
             )
 
     async def run_with_scheduler() -> None:

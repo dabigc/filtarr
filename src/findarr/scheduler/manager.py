@@ -94,9 +94,7 @@ class SchedulerManager:
         try:
             from apscheduler import AsyncScheduler
         except ImportError:
-            logger.error(
-                "APScheduler not installed. Install with: pip install findarr[scheduler]"
-            )
+            logger.error("APScheduler not installed. Install with: pip install findarr[scheduler]")
             return
 
         schedules = self.get_all_schedules()
