@@ -15,8 +15,9 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 
 # Create virtual environment and install dependencies
-# Only install webhook extra (not dev dependencies)
-RUN uv sync --frozen --no-dev --extra webhook --extra cli
+# Install webhook, cli, and scheduler extras (not dev dependencies)
+# Scheduler is included to enable scheduled batch operations out of the box
+RUN uv sync --frozen --no-dev --extra webhook --extra cli --extra scheduler
 
 # Copy source code
 COPY src/ ./src/
