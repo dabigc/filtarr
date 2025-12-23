@@ -1,5 +1,20 @@
 # Copilot Instructions for findarr
 
+## Code Review Focus
+
+When reviewing PRs, prioritize these areas (blocking issues marked with severity):
+
+| Category | Focus Areas | Blocking |
+|----------|-------------|----------|
+| **Security** | Secrets, injection, input validation | HIGH |
+| **Performance** | Async anti-patterns, N+1 requests | HIGH |
+| **Quality** | Type annotations, exception handling | HIGH |
+
+See `.github/instructions/` for detailed review guidelines:
+- `python-security.instructions.md` - Security vulnerabilities
+- `python-performance.instructions.md` - Performance issues
+- `python-quality.instructions.md` - Code smells and quality
+
 ## Quick Reference
 
 ```bash
