@@ -59,6 +59,15 @@ class WebhookConfig:
     port: int = 8080
 
 
+@dataclass
+class SchedulerConfig:
+    """Configuration for the batch scheduler."""
+
+    enabled: bool = True
+    history_limit: int = 100
+    schedules: list[dict[str, object]] = field(default_factory=list)
+
+
 DEFAULT_TIMEOUT = 120.0
 
 
@@ -72,6 +81,7 @@ class Config:
     tags: TagConfig = field(default_factory=TagConfig)
     state: StateConfig = field(default_factory=StateConfig)
     webhook: WebhookConfig = field(default_factory=WebhookConfig)
+    scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
 
     @classmethod
     def load(cls) -> Self:
@@ -175,6 +185,16 @@ class Config:
                 port=webhook_data.get("port", webhook.port),
             )
 
+        # Parse scheduler configuration
+        scheduler = SchedulerConfig()
+        if "scheduler" in data:
+            scheduler_data = data["scheduler"]
+            scheduler = SchedulerConfig(
+                enabled=scheduler_data.get("enabled", scheduler.enabled),
+                history_limit=scheduler_data.get("history_limit", scheduler.history_limit),
+                schedules=scheduler_data.get("schedules", scheduler.schedules),
+            )
+
         return cls(
             radarr=radarr,
             sonarr=sonarr,
@@ -182,6 +202,7 @@ class Config:
             tags=tags,
             state=state,
             webhook=webhook,
+            scheduler=scheduler,
         )
 
     @classmethod
@@ -200,6 +221,7 @@ class Config:
         tags = base.tags
         state = base.state
         webhook = base.webhook
+        scheduler = base.scheduler
 
         # Check for Radarr env vars
         radarr_url = os.environ.get("FINDARR_RADARR_URL")
@@ -243,6 +265,15 @@ class Config:
                 port=int(webhook_port) if webhook_port else webhook.port,
             )
 
+        # Check for scheduler env var
+        scheduler_enabled = os.environ.get("FINDARR_SCHEDULER_ENABLED")
+        if scheduler_enabled is not None:
+            scheduler = SchedulerConfig(
+                enabled=scheduler_enabled.lower() in ("true", "1", "yes"),
+                history_limit=scheduler.history_limit,
+                schedules=scheduler.schedules,
+            )
+
         return cls(
             radarr=radarr,
             sonarr=sonarr,
@@ -250,6 +281,7 @@ class Config:
             tags=tags,
             state=state,
             webhook=webhook,
+            scheduler=scheduler,
         )
 
     def require_radarr(self) -> RadarrConfig:
