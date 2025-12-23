@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
@@ -9,10 +10,13 @@ from typing import TYPE_CHECKING
 
 from findarr.clients.radarr import RadarrClient
 from findarr.clients.sonarr import SonarrClient
+from findarr.config import TagConfig
 
 if TYPE_CHECKING:
     from findarr.models.common import Release
     from findarr.models.sonarr import Episode
+
+logger = logging.getLogger(__name__)
 
 
 class SamplingStrategy(Enum):
@@ -30,16 +34,29 @@ class SamplingStrategy(Enum):
 
 
 @dataclass
+class TagResult:
+    """Result of a tag operation."""
+
+    tag_applied: str | None = None
+    tag_removed: str | None = None
+    tag_created: bool = False
+    tag_error: str | None = None
+    dry_run: bool = False
+
+
+@dataclass
 class FourKResult:
     """Result of a 4K availability check."""
 
     item_id: int
     item_type: str  # "movie" or "series"
     has_4k: bool
+    item_name: str | None = None
     releases: list[Release] = field(default_factory=list)
     episodes_checked: list[int] = field(default_factory=list)
     seasons_checked: list[int] = field(default_factory=list)
     strategy_used: SamplingStrategy | None = None
+    tag_result: TagResult | None = None
 
     @property
     def four_k_releases(self) -> list[Release]:
@@ -101,6 +118,7 @@ class FourKChecker:
         sonarr_url: str | None = None,
         sonarr_api_key: str | None = None,
         timeout: float = 120.0,
+        tag_config: TagConfig | None = None,
     ) -> None:
         """Initialize the 4K checker.
 
@@ -110,6 +128,7 @@ class FourKChecker:
             sonarr_url: The base URL of the Sonarr instance
             sonarr_api_key: The Sonarr API key
             timeout: Request timeout in seconds (default 120.0)
+            tag_config: Configuration for 4K tagging (optional)
         """
         self._radarr_config = (
             (radarr_url, radarr_api_key)
@@ -122,12 +141,21 @@ class FourKChecker:
             else None
         )
         self._timeout = timeout
+        self._tag_config = tag_config or TagConfig()
 
-    async def check_movie(self, movie_id: int) -> FourKResult:
+    async def check_movie(
+        self,
+        movie_id: int,
+        *,
+        apply_tags: bool = True,
+        dry_run: bool = False,
+    ) -> FourKResult:
         """Check if a movie has 4K releases available.
 
         Args:
             movie_id: The Radarr movie ID
+            apply_tags: Whether to apply tags to the movie (default True)
+            dry_run: If True, don't actually apply tags (default False)
 
         Returns:
             FourKResult with availability information
@@ -140,19 +168,171 @@ class FourKChecker:
 
         url, api_key = self._radarr_config
         async with RadarrClient(url, api_key, timeout=self._timeout) as client:
+            # Get movie info for the name
+            movie = await client.get_movie(movie_id)
+            movie_name = movie.title if movie else None
+
             releases = await client.get_movie_releases(movie_id)
+            has_4k = any(r.is_4k() for r in releases)
+
+            tag_result: TagResult | None = None
+            if apply_tags:
+                tag_result = await self._apply_movie_tags(
+                    client, movie_id, has_4k, dry_run
+                )
+
             return FourKResult(
                 item_id=movie_id,
                 item_type="movie",
-                has_4k=any(r.is_4k() for r in releases),
+                has_4k=has_4k,
+                item_name=movie_name,
                 releases=releases,
+                tag_result=tag_result,
             )
 
-    async def check_movie_by_name(self, name: str) -> FourKResult:
+    async def _apply_movie_tags(
+        self,
+        client: RadarrClient,
+        movie_id: int,
+        has_4k: bool,
+        dry_run: bool,
+    ) -> TagResult:
+        """Apply appropriate tags to a movie based on 4K availability.
+
+        Args:
+            client: The RadarrClient instance
+            movie_id: The movie ID to tag
+            has_4k: Whether the movie has 4K available
+            dry_run: If True, don't actually apply tags
+
+        Returns:
+            TagResult with the operation details
+        """
+        tag_to_apply = (
+            self._tag_config.available if has_4k else self._tag_config.unavailable
+        )
+        tag_to_remove = (
+            self._tag_config.unavailable if has_4k else self._tag_config.available
+        )
+
+        result = TagResult(dry_run=dry_run)
+
+        try:
+            if dry_run:
+                # Just report what would happen
+                result.tag_applied = tag_to_apply
+                result.tag_removed = tag_to_remove
+                return result
+
+            # Get existing tags ONCE to check if tag already exists
+            tags = await client.get_tags()
+            existing_labels = {t.label.lower(): t for t in tags}
+
+            # Check if tag already exists before creating
+            tag_already_exists = tag_to_apply.lower() in existing_labels
+
+            if tag_already_exists:
+                tag = existing_labels[tag_to_apply.lower()]
+            else:
+                # Create the tag since it doesn't exist
+                tag = await client.create_tag(tag_to_apply)
+                result.tag_created = True
+
+            result.tag_applied = tag_to_apply
+
+            # Apply the tag
+            await client.add_tag_to_movie(movie_id, tag.id)
+
+            # Remove the opposite tag if it exists
+            if tag_to_remove.lower() in existing_labels:
+                opposite_tag = existing_labels[tag_to_remove.lower()]
+                await client.remove_tag_from_movie(movie_id, opposite_tag.id)
+                result.tag_removed = tag_to_remove
+
+        except Exception as e:
+            logger.warning("Failed to apply tags to movie %d: %s", movie_id, e)
+            result.tag_error = str(e)
+
+        return result
+
+    async def _apply_series_tags(
+        self,
+        client: SonarrClient,
+        series_id: int,
+        has_4k: bool,
+        dry_run: bool,
+    ) -> TagResult:
+        """Apply appropriate tags to a series based on 4K availability.
+
+        Args:
+            client: The SonarrClient instance
+            series_id: The series ID to tag
+            has_4k: Whether the series has 4K available
+            dry_run: If True, don't actually apply tags
+
+        Returns:
+            TagResult with the operation details
+        """
+        tag_to_apply = (
+            self._tag_config.available if has_4k else self._tag_config.unavailable
+        )
+        tag_to_remove = (
+            self._tag_config.unavailable if has_4k else self._tag_config.available
+        )
+
+        result = TagResult(dry_run=dry_run)
+
+        try:
+            if dry_run:
+                # Just report what would happen
+                result.tag_applied = tag_to_apply
+                result.tag_removed = tag_to_remove
+                return result
+
+            # Get existing tags ONCE to check if tag already exists
+            tags = await client.get_tags()
+            existing_labels = {t.label.lower(): t for t in tags}
+
+            # Check if tag already exists before creating
+            tag_already_exists = tag_to_apply.lower() in existing_labels
+
+            if tag_already_exists:
+                tag = existing_labels[tag_to_apply.lower()]
+            else:
+                # Create the tag since it doesn't exist
+                tag = await client.create_tag(tag_to_apply)
+                result.tag_created = True
+
+            result.tag_applied = tag_to_apply
+
+            # Apply the tag
+            await client.add_tag_to_series(series_id, tag.id)
+
+            # Remove the opposite tag if it exists
+            if tag_to_remove.lower() in existing_labels:
+                opposite_tag = existing_labels[tag_to_remove.lower()]
+                await client.remove_tag_from_series(series_id, opposite_tag.id)
+                result.tag_removed = tag_to_remove
+
+        except Exception as e:
+            logger.warning("Failed to apply tags to series %d: %s", series_id, e)
+            result.tag_error = str(e)
+
+        return result
+
+    async def check_movie_by_name(
+        self,
+        name: str,
+        *,
+        apply_tags: bool = True,
+        dry_run: bool = False,
+    ) -> FourKResult:
         """Check if a movie has 4K releases available by name.
 
         Args:
             name: The movie title to search for
+            apply_tags: Whether to apply tags to the movie (default True)
+            dry_run: If True, don't actually apply tags (default False)
 
         Returns:
             FourKResult with availability information
@@ -169,11 +349,21 @@ class FourKChecker:
             if movie is None:
                 raise ValueError(f"Movie not found: {name}")
             releases = await client.get_movie_releases(movie.id)
+            has_4k = any(r.is_4k() for r in releases)
+
+            tag_result: TagResult | None = None
+            if apply_tags:
+                tag_result = await self._apply_movie_tags(
+                    client, movie.id, has_4k, dry_run
+                )
+
             return FourKResult(
                 item_id=movie.id,
                 item_type="movie",
-                has_4k=any(r.is_4k() for r in releases),
+                has_4k=has_4k,
+                item_name=movie.title,
                 releases=releases,
+                tag_result=tag_result,
             )
 
     async def search_movies(self, term: str) -> list[tuple[int, str, int]]:
@@ -202,6 +392,8 @@ class FourKChecker:
         *,
         strategy: SamplingStrategy = SamplingStrategy.RECENT,
         seasons_to_check: int = 3,
+        apply_tags: bool = True,
+        dry_run: bool = False,
     ) -> FourKResult:
         """Check if a series has 4K releases available.
 
@@ -213,6 +405,8 @@ class FourKChecker:
             series_id: The Sonarr series ID
             strategy: The sampling strategy for selecting episodes
             seasons_to_check: Max seasons to check for RECENT strategy
+            apply_tags: Whether to apply tags to the series (default True)
+            dry_run: If True, don't actually apply tags (default False)
 
         Returns:
             FourKResult with availability and checked episode information
@@ -225,6 +419,10 @@ class FourKChecker:
 
         url, api_key = self._sonarr_config
         async with SonarrClient(url, api_key, timeout=self._timeout) as client:
+            # Get series info for the name
+            series = await client.get_series(series_id)
+            series_name = series.title if series else None
+
             # Get all episodes for the series
             episodes = await client.get_episodes(series_id)
             today = date.today()
@@ -236,11 +434,18 @@ class FourKChecker:
 
             if not aired_episodes:
                 # No aired episodes - return empty result
+                tag_result: TagResult | None = None
+                if apply_tags:
+                    tag_result = await self._apply_series_tags(
+                        client, series_id, False, dry_run
+                    )
                 return FourKResult(
                     item_id=series_id,
                     item_type="series",
                     has_4k=False,
+                    item_name=series_name,
                     strategy_used=strategy,
+                    tag_result=tag_result,
                 )
 
             # Group episodes by season
@@ -282,25 +487,39 @@ class FourKChecker:
 
                 # Short-circuit if 4K found
                 if four_k_found:
+                    tag_result = None
+                    if apply_tags:
+                        tag_result = await self._apply_series_tags(
+                            client, series_id, True, dry_run
+                        )
                     return FourKResult(
                         item_id=series_id,
                         item_type="series",
                         has_4k=True,
+                        item_name=series_name,
                         releases=all_releases,
                         episodes_checked=episodes_checked,
                         seasons_checked=seasons_checked,
                         strategy_used=strategy,
+                        tag_result=tag_result,
                     )
 
             # No 4K found after checking all sampled episodes
+            tag_result = None
+            if apply_tags:
+                tag_result = await self._apply_series_tags(
+                    client, series_id, False, dry_run
+                )
             return FourKResult(
                 item_id=series_id,
                 item_type="series",
                 has_4k=False,
+                item_name=series_name,
                 releases=all_releases,
                 episodes_checked=episodes_checked,
                 seasons_checked=seasons_checked,
                 strategy_used=strategy,
+                tag_result=tag_result,
             )
 
     async def check_series_by_name(
@@ -309,6 +528,8 @@ class FourKChecker:
         *,
         strategy: SamplingStrategy = SamplingStrategy.RECENT,
         seasons_to_check: int = 3,
+        apply_tags: bool = True,
+        dry_run: bool = False,
     ) -> FourKResult:
         """Check if a series has 4K releases available by name.
 
@@ -316,6 +537,8 @@ class FourKChecker:
             name: The series title to search for
             strategy: The sampling strategy for selecting episodes
             seasons_to_check: Max seasons to check for RECENT strategy
+            apply_tags: Whether to apply tags to the series (default True)
+            dry_run: If True, don't actually apply tags (default False)
 
         Returns:
             FourKResult with availability and checked episode information
@@ -337,6 +560,8 @@ class FourKChecker:
             series.id,
             strategy=strategy,
             seasons_to_check=seasons_to_check,
+            apply_tags=apply_tags,
+            dry_run=dry_run,
         )
 
     async def search_series(self, term: str) -> list[tuple[int, str, int]]:

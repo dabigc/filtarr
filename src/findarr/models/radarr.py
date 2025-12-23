@@ -13,3 +13,6 @@ class Movie(BaseModel):
     imdb_id: str = Field("", alias="imdbId")
     monitored: bool = True
     has_file: bool = Field(False, alias="hasFile")
+    tags: list[int] = Field(default_factory=list)
+
+    model_config = {"populate_by_name": True}

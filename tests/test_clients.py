@@ -310,3 +310,341 @@ class TestSonarrClient:
 
         assert len(releases) == 1
         assert releases[0].is_4k() is True
+
+
+class TestRadarrTagManagement:
+    """Tests for RadarrClient tag management functionality."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_get_tags(self) -> None:
+        """Should fetch and parse all tags."""
+        respx.get("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": 1, "label": "4k-available"},
+                    {"id": 2, "label": "4k-unavailable"},
+                    {"id": 3, "label": "hdr"},
+                ],
+            )
+        )
+
+        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+            tags = await client.get_tags()
+
+        assert len(tags) == 3
+        assert tags[0].id == 1
+        assert tags[0].label == "4k-available"
+        assert tags[2].label == "hdr"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_get_tags_empty(self) -> None:
+        """Should return empty list when no tags exist."""
+        respx.get("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(200, json=[])
+        )
+
+        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+            tags = await client.get_tags()
+
+        assert tags == []
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_create_tag(self) -> None:
+        """Should create a new tag and return it."""
+        respx.post("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 5, "label": "new-tag"})
+        )
+
+        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+            tag = await client.create_tag("new-tag")
+
+        assert tag.id == 5
+        assert tag.label == "new-tag"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_get_or_create_tag_existing(self) -> None:
+        """Should return existing tag when it exists."""
+        respx.get("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": 1, "label": "4k-available"},
+                    {"id": 2, "label": "4k-unavailable"},
+                ],
+            )
+        )
+
+        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+            tag = await client.get_or_create_tag("4k-available")
+
+        assert tag.id == 1
+        assert tag.label == "4k-available"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_get_or_create_tag_case_insensitive(self) -> None:
+        """Should find tag case-insensitively."""
+        respx.get("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(
+                200,
+                json=[{"id": 1, "label": "4K-Available"}],
+            )
+        )
+
+        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+            tag = await client.get_or_create_tag("4k-available")
+
+        assert tag.id == 1
+        assert tag.label == "4K-Available"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_get_or_create_tag_new(self) -> None:
+        """Should create tag when it doesn't exist."""
+        respx.get("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(200, json=[])
+        )
+        respx.post("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "new-tag"})
+        )
+
+        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+            tag = await client.get_or_create_tag("new-tag")
+
+        assert tag.id == 1
+        assert tag.label == "new-tag"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_get_movie_raw(self) -> None:
+        """Should fetch raw movie data as dict."""
+        movie_data = {
+            "id": 123,
+            "title": "Test Movie",
+            "year": 2024,
+            "tmdbId": 999,
+            "imdbId": "tt1234567",
+            "monitored": True,
+            "hasFile": True,
+            "tags": [1, 2],
+            "extraField": "ignored",
+        }
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(200, json=movie_data)
+        )
+
+        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+            result = await client.get_movie_raw(123)
+
+        assert result["id"] == 123
+        assert result["title"] == "Test Movie"
+        assert result["tags"] == [1, 2]
+        assert result["extraField"] == "ignored"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_update_movie(self) -> None:
+        """Should update movie and return validated model."""
+        movie_data = {
+            "id": 123,
+            "title": "Test Movie",
+            "year": 2024,
+            "tmdbId": 999,
+            "imdbId": "tt1234567",
+            "monitored": True,
+            "hasFile": True,
+            "tags": [1, 2, 3],
+        }
+        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(200, json=movie_data)
+        )
+
+        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+            movie = await client.update_movie(movie_data)
+
+        assert movie.id == 123
+        assert movie.tags == [1, 2, 3]
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_add_tag_to_movie_new_tag(self) -> None:
+        """Should add new tag to movie."""
+        # First fetch the movie
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={
+                    "id": 123,
+                    "title": "Test Movie",
+                    "year": 2024,
+                    "tags": [1],
+                },
+            )
+        )
+        # Then update with new tag
+        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={
+                    "id": 123,
+                    "title": "Test Movie",
+                    "year": 2024,
+                    "tags": [1, 2],
+                },
+            )
+        )
+
+        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+            movie = await client.add_tag_to_movie(123, 2)
+
+        assert movie.id == 123
+        assert 2 in movie.tags
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_add_tag_to_movie_already_exists(self) -> None:
+        """Should return movie unchanged when tag already exists."""
+        # First fetch shows tag already exists
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={
+                    "id": 123,
+                    "title": "Test Movie",
+                    "year": 2024,
+                    "tags": [1, 2],
+                },
+            )
+        )
+
+        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+            movie = await client.add_tag_to_movie(123, 2)
+
+        assert movie.id == 123
+        assert movie.tags == [1, 2]
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_remove_tag_from_movie(self) -> None:
+        """Should remove tag from movie."""
+        # First fetch the movie
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={
+                    "id": 123,
+                    "title": "Test Movie",
+                    "year": 2024,
+                    "tags": [1, 2],
+                },
+            )
+        )
+        # Then update without the tag
+        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={
+                    "id": 123,
+                    "title": "Test Movie",
+                    "year": 2024,
+                    "tags": [1],
+                },
+            )
+        )
+
+        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+            movie = await client.remove_tag_from_movie(123, 2)
+
+        assert movie.id == 123
+        assert 2 not in movie.tags
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_remove_tag_from_movie_not_present(self) -> None:
+        """Should return movie unchanged when tag not present."""
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={
+                    "id": 123,
+                    "title": "Test Movie",
+                    "year": 2024,
+                    "tags": [1],
+                },
+            )
+        )
+
+        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+            movie = await client.remove_tag_from_movie(123, 99)
+
+        assert movie.id == 123
+        assert movie.tags == [1]
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_add_tag_to_movie_empty_tags(self) -> None:
+        """Should handle movie with no existing tags."""
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={
+                    "id": 123,
+                    "title": "Test Movie",
+                    "year": 2024,
+                    "tags": [],
+                },
+            )
+        )
+        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={
+                    "id": 123,
+                    "title": "Test Movie",
+                    "year": 2024,
+                    "tags": [5],
+                },
+            )
+        )
+
+        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+            movie = await client.add_tag_to_movie(123, 5)
+
+        assert movie.tags == [5]
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_remove_tag_from_movie_last_tag(self) -> None:
+        """Should handle removing last tag from movie."""
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={
+                    "id": 123,
+                    "title": "Test Movie",
+                    "year": 2024,
+                    "tags": [1],
+                },
+            )
+        )
+        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={
+                    "id": 123,
+                    "title": "Test Movie",
+                    "year": 2024,
+                    "tags": [],
+                },
+            )
+        )
+
+        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+            movie = await client.remove_tag_from_movie(123, 1)
+
+        assert movie.tags == []
