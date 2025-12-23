@@ -1,7 +1,9 @@
 """Radarr API client."""
 
+from typing import Any
+
 from findarr.clients.base import BaseArrClient
-from findarr.models.common import Quality, Release
+from findarr.models.common import Quality, Release, Tag
 from findarr.models.radarr import Movie
 
 
@@ -115,3 +117,105 @@ class RadarrClient(BaseArrClient):
         """
         releases = await self.get_movie_releases(movie_id)
         return any(r.is_4k() for r in releases)
+
+    # Tag management methods
+
+    async def get_tags(self) -> list[Tag]:
+        """Fetch all tags.
+
+        Returns:
+            List of Tag models
+        """
+        data = await self._get("/api/v3/tag")
+        return [Tag.model_validate(item) for item in data]
+
+    async def create_tag(self, label: str) -> Tag:
+        """Create a new tag.
+
+        Args:
+            label: The tag label
+
+        Returns:
+            The created Tag model
+        """
+        data = await self._post("/api/v3/tag", json={"label": label})
+        return Tag.model_validate(data)
+
+    async def get_or_create_tag(self, label: str) -> Tag:
+        """Get an existing tag by label or create it if it doesn't exist.
+
+        Args:
+            label: The tag label
+
+        Returns:
+            The existing or newly created Tag model
+        """
+        tags = await self.get_tags()
+        for tag in tags:
+            if tag.label.lower() == label.lower():
+                return tag
+        return await self.create_tag(label)
+
+    async def get_movie_raw(self, movie_id: int) -> dict[str, Any]:
+        """Fetch raw movie data for updating.
+
+        Args:
+            movie_id: The Radarr movie ID
+
+        Returns:
+            Raw movie data dictionary
+        """
+        data: dict[str, Any] = await self._get(f"/api/v3/movie/{movie_id}")
+        return data
+
+    async def update_movie(self, movie_data: dict[str, Any]) -> Movie:
+        """Update a movie.
+
+        Args:
+            movie_data: The complete movie data dictionary with modifications
+
+        Returns:
+            The updated Movie model
+        """
+        movie_id = movie_data["id"]
+        data = await self._put(f"/api/v3/movie/{movie_id}", json=movie_data)
+        # Invalidate cache for this movie
+        await self.invalidate_cache(f"/api/v3/movie/{movie_id}")
+        await self.invalidate_cache("/api/v3/movie")
+        return Movie.model_validate(data)
+
+    async def add_tag_to_movie(self, movie_id: int, tag_id: int) -> Movie:
+        """Add a tag to a movie.
+
+        Args:
+            movie_id: The Radarr movie ID
+            tag_id: The tag ID to add
+
+        Returns:
+            The updated Movie model
+        """
+        movie_data = await self.get_movie_raw(movie_id)
+        tags: list[int] = movie_data.get("tags", [])
+        if tag_id not in tags:
+            tags.append(tag_id)
+            movie_data["tags"] = tags
+            return await self.update_movie(movie_data)
+        return Movie.model_validate(movie_data)
+
+    async def remove_tag_from_movie(self, movie_id: int, tag_id: int) -> Movie:
+        """Remove a tag from a movie.
+
+        Args:
+            movie_id: The Radarr movie ID
+            tag_id: The tag ID to remove
+
+        Returns:
+            The updated Movie model
+        """
+        movie_data = await self.get_movie_raw(movie_id)
+        tags: list[int] = movie_data.get("tags", [])
+        if tag_id in tags:
+            tags.remove(tag_id)
+            movie_data["tags"] = tags
+            return await self.update_movie(movie_data)
+        return Movie.model_validate(movie_data)

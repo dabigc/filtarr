@@ -40,5 +40,6 @@ class Series(BaseModel):
     year: int = 0
     seasons: list[Season] = Field(default_factory=list)
     monitored: bool = True
+    tags: list[int] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}

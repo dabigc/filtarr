@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Self
 
@@ -29,6 +29,28 @@ class SonarrConfig:
     api_key: str
 
 
+@dataclass
+class TagConfig:
+    """Configuration for 4K availability tagging."""
+
+    available: str = "4k-available"
+    unavailable: str = "4k-unavailable"
+    create_if_missing: bool = True
+    recheck_days: int = 30
+
+
+def _default_state_path() -> Path:
+    """Get the default state file path."""
+    return Path.home() / ".config" / "findarr" / "state.json"
+
+
+@dataclass
+class StateConfig:
+    """Configuration for state persistence."""
+
+    path: Path = field(default_factory=_default_state_path)
+
+
 DEFAULT_TIMEOUT = 120.0
 
 
@@ -39,6 +61,8 @@ class Config:
     radarr: RadarrConfig | None = None
     sonarr: SonarrConfig | None = None
     timeout: float = DEFAULT_TIMEOUT
+    tags: TagConfig = field(default_factory=TagConfig)
+    state: StateConfig = field(default_factory=StateConfig)
 
     @classmethod
     def load(cls) -> Self:
@@ -115,7 +139,25 @@ class Config:
         if "timeout" in data:
             timeout = float(data["timeout"])
 
-        return cls(radarr=radarr, sonarr=sonarr, timeout=timeout)
+        # Parse tags configuration
+        tags = TagConfig()
+        if "tags" in data:
+            tags_data = data["tags"]
+            tags = TagConfig(
+                available=tags_data.get("available", tags.available),
+                unavailable=tags_data.get("unavailable", tags.unavailable),
+                create_if_missing=tags_data.get("create_if_missing", tags.create_if_missing),
+                recheck_days=tags_data.get("recheck_days", tags.recheck_days),
+            )
+
+        # Parse state configuration
+        state = StateConfig()
+        if "state" in data:
+            state_data = data["state"]
+            if "path" in state_data:
+                state = StateConfig(path=Path(state_data["path"]).expanduser())
+
+        return cls(radarr=radarr, sonarr=sonarr, timeout=timeout, tags=tags, state=state)
 
     @classmethod
     def _load_from_env(cls, base: Self) -> Self:
@@ -130,6 +172,8 @@ class Config:
         radarr = base.radarr
         sonarr = base.sonarr
         timeout = base.timeout
+        tags = base.tags
+        state = base.state
 
         # Check for Radarr env vars
         radarr_url = os.environ.get("FINDARR_RADARR_URL")
@@ -148,7 +192,23 @@ class Config:
         if timeout_str:
             timeout = float(timeout_str)
 
-        return cls(radarr=radarr, sonarr=sonarr, timeout=timeout)
+        # Check for tag env vars
+        tag_available = os.environ.get("FINDARR_TAG_AVAILABLE")
+        tag_unavailable = os.environ.get("FINDARR_TAG_UNAVAILABLE")
+        if tag_available or tag_unavailable:
+            tags = TagConfig(
+                available=tag_available or tags.available,
+                unavailable=tag_unavailable or tags.unavailable,
+                create_if_missing=tags.create_if_missing,
+                recheck_days=tags.recheck_days,
+            )
+
+        # Check for state path env var
+        state_path = os.environ.get("FINDARR_STATE_PATH")
+        if state_path:
+            state = StateConfig(path=Path(state_path).expanduser())
+
+        return cls(radarr=radarr, sonarr=sonarr, timeout=timeout, tags=tags, state=state)
 
     def require_radarr(self) -> RadarrConfig:
         """Get Radarr config, raising if not configured.

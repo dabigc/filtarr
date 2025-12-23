@@ -103,6 +103,11 @@ class TestCheckSeriesWithSampling:
         today = date.today()
         yesterday = today - timedelta(days=1)
 
+        # Mock series info endpoint
+        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+            return_value=Response(200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []})
+        )
+
         # Mock episodes endpoint
         respx.get(
             "http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}
@@ -160,6 +165,11 @@ class TestCheckSeriesWithSampling:
         """Should stop checking after finding 4K."""
         today = date.today()
         yesterday = today - timedelta(days=1)
+
+        # Mock series info endpoint
+        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+            return_value=Response(200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []})
+        )
 
         respx.get(
             "http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}
@@ -222,6 +232,11 @@ class TestCheckSeriesWithSampling:
         """Should return empty result when no episodes have aired."""
         tomorrow = date.today() + timedelta(days=1)
 
+        # Mock series info endpoint
+        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+            return_value=Response(200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []})
+        )
+
         respx.get(
             "http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}
         ).mock(
@@ -246,6 +261,11 @@ class TestCheckSeriesWithSampling:
     @pytest.mark.asyncio
     async def test_check_series_with_distributed_strategy(self) -> None:
         """Should check first, middle, and last seasons with DISTRIBUTED."""
+        # Mock series info endpoint
+        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+            return_value=Response(200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []})
+        )
+
         respx.get(
             "http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}
         ).mock(
@@ -293,6 +313,11 @@ class TestCheckSeriesWithSampling:
     @pytest.mark.asyncio
     async def test_check_movie_still_works(self) -> None:
         """Verify check_movie still functions correctly."""
+        # Mock movie info endpoint
+        respx.get("http://radarr:7878/api/v3/movie/456").mock(
+            return_value=Response(200, json={"id": 456, "title": "Test Movie", "year": 2024})
+        )
+
         respx.get(
             "http://radarr:7878/api/v3/release", params={"movieId": "456"}
         ).mock(
@@ -418,6 +443,10 @@ class TestNameBasedLookup:
                 200,
                 json=[{"id": 456, "title": "Breaking Bad", "year": 2008, "seasons": []}],
             )
+        )
+        # Mock series info
+        respx.get("http://sonarr:8989/api/v3/series/456").mock(
+            return_value=Response(200, json={"id": 456, "title": "Breaking Bad", "year": 2008, "seasons": []})
         )
         # Mock episodes
         respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "456"}).mock(

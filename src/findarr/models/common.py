@@ -29,3 +29,10 @@ class Release(BaseModel):
             return True
         title_lower = self.title.lower()
         return "2160p" in title_lower or "4k" in title_lower
+
+
+class Tag(BaseModel):
+    """A tag in Radarr/Sonarr."""
+
+    id: int
+    label: str
