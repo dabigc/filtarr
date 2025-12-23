@@ -3,10 +3,8 @@
 # Build stage - install dependencies
 FROM python:3.12-alpine AS builder
 
-# Install build dependencies for Alpine
+# Install build dependencies and uv
 RUN apk add --no-cache gcc musl-dev libffi-dev
-
-# Install uv for fast dependency management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
@@ -19,26 +17,26 @@ COPY pyproject.toml uv.lock README.md ./
 # Scheduler is included to enable scheduled batch operations out of the box
 RUN uv sync --frozen --no-dev --extra webhook --extra cli --extra scheduler
 
-# Copy source code
+# Copy source code and install the package itself
+# Combined into single layer since source changes always require reinstall
 COPY src/ ./src/
-
-# Install the package itself
 RUN uv pip install --no-deps -e .
 
 
 # Runtime stage - minimal image
 FROM python:3.12-alpine AS runtime
 
-# Install runtime dependencies only
-RUN apk add --no-cache libffi curl
-
-# Create non-root user for security
-RUN addgroup -g 1000 findarr && \
-    adduser -u 1000 -G findarr -D -h /app findarr
+# Install runtime dependencies, create non-root user, and set up directories
+# Combined into single layer to minimize image size
+RUN apk add --no-cache libffi curl && \
+    addgroup -g 1000 findarr && \
+    adduser -u 1000 -G findarr -D -h /app findarr && \
+    mkdir -p /config && \
+    chown findarr:findarr /config
 
 WORKDIR /app
 
-# Copy virtual environment from builder
+# Copy virtual environment and source from builder
 COPY --from=builder --chown=findarr:findarr /app/.venv /app/.venv
 COPY --from=builder --chown=findarr:findarr /app/src /app/src
 
@@ -46,12 +44,8 @@ COPY --from=builder --chown=findarr:findarr /app/src /app/src
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    # Default webhook server settings
     FINDARR_WEBHOOK_HOST="0.0.0.0" \
     FINDARR_WEBHOOK_PORT="8080"
-
-# Create config directory
-RUN mkdir -p /config && chown findarr:findarr /config
 
 # Switch to non-root user
 USER findarr
