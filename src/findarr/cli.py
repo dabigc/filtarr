@@ -7,7 +7,7 @@ import json
 import uuid
 from enum import Enum
 from pathlib import Path  # noqa: TC003 - needed at runtime for typer
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Literal
 
 import typer
 from rich.console import Console
@@ -130,7 +130,9 @@ def print_result(result: FourKResult, format: OutputFormat) -> None:
         console.print(format_result_simple(result))
 
 
-def get_checker(config: Config, need_radarr: bool = False, need_sonarr: bool = False) -> FourKChecker:
+def get_checker(
+    config: Config, need_radarr: bool = False, need_sonarr: bool = False
+) -> FourKChecker:
     """Create a FourKChecker from config."""
     radarr_url = None
     radarr_key = None
@@ -184,11 +186,10 @@ def check_movie(
     format: Annotated[
         OutputFormat, typer.Option("--format", "-f", help="Output format")
     ] = OutputFormat.TABLE,
-    no_tag: Annotated[
-        bool, typer.Option("--no-tag", help="Disable automatic tagging")
-    ] = False,
+    no_tag: Annotated[bool, typer.Option("--no-tag", help="Disable automatic tagging")] = False,
     dry_run: Annotated[
-        bool, typer.Option("--dry-run", help="Show what tags would be applied without applying them")
+        bool,
+        typer.Option("--dry-run", help="Show what tags would be applied without applying them"),
     ] = False,
 ) -> None:
     """Check if a movie has 4K releases available.
@@ -256,7 +257,8 @@ def check_movie(
 def check_series(
     series: Annotated[str, typer.Argument(help="Series ID or name to check")],
     seasons: Annotated[
-        int, typer.Option("--seasons", "-s", help="Number of seasons to check (for recent strategy)")
+        int,
+        typer.Option("--seasons", "-s", help="Number of seasons to check (for recent strategy)"),
     ] = 3,
     strategy: Annotated[
         str, typer.Option("--strategy", help="Sampling strategy: recent, distributed, or all")
@@ -264,11 +266,10 @@ def check_series(
     format: Annotated[
         OutputFormat, typer.Option("--format", "-f", help="Output format")
     ] = OutputFormat.TABLE,
-    no_tag: Annotated[
-        bool, typer.Option("--no-tag", help="Disable automatic tagging")
-    ] = False,
+    no_tag: Annotated[bool, typer.Option("--no-tag", help="Disable automatic tagging")] = False,
     dry_run: Annotated[
-        bool, typer.Option("--dry-run", help="Show what tags would be applied without applying them")
+        bool,
+        typer.Option("--dry-run", help="Show what tags would be applied without applying them"),
     ] = False,
 ) -> None:
     """Check if a TV series has 4K releases available.
@@ -291,8 +292,7 @@ def check_series(
         }
         if strategy.lower() not in strategy_map:
             error_console.print(
-                f"[red]Invalid strategy:[/red] {strategy}. "
-                "Use: recent, distributed, or all"
+                f"[red]Invalid strategy:[/red] {strategy}. Use: recent, distributed, or all"
             )
             raise typer.Exit(2)
 
@@ -396,19 +396,20 @@ def check_batch(
         int, typer.Option("--batch-size", "-b", help="Max items to process per run (0=unlimited)")
     ] = 0,
     skip_tagged: Annotated[
-        bool, typer.Option("--skip-tagged/--no-skip-tagged", help="Skip items with existing 4k tags")
+        bool,
+        typer.Option("--skip-tagged/--no-skip-tagged", help="Skip items with existing 4k tags"),
     ] = True,
     resume: Annotated[
         bool, typer.Option("--resume/--no-resume", help="Resume interrupted batch run")
     ] = True,
-    no_tag: Annotated[
-        bool, typer.Option("--no-tag", help="Disable automatic tagging")
-    ] = False,
+    no_tag: Annotated[bool, typer.Option("--no-tag", help="Disable automatic tagging")] = False,
     dry_run: Annotated[
-        bool, typer.Option("--dry-run", help="Show what tags would be applied without applying them")
+        bool,
+        typer.Option("--dry-run", help="Show what tags would be applied without applying them"),
     ] = False,
     include_rechecks: Annotated[
-        bool, typer.Option("--include-rechecks", help="Include stale unavailable items for re-checking")
+        bool,
+        typer.Option("--include-rechecks", help="Include stale unavailable items for re-checking"),
     ] = True,
 ) -> None:
     """Check multiple items from a file or process all items from Radarr/Sonarr.
@@ -426,9 +427,7 @@ def check_batch(
     """
     # Validate: need either file or --all-* flags
     if not file and not all_movies and not all_series:
-        error_console.print(
-            "[red]Error:[/red] Must specify --file, --all-movies, or --all-series"
-        )
+        error_console.print("[red]Error:[/red] Must specify --file, --all-movies, or --all-series")
         raise typer.Exit(2)
 
     if file and not file.exists():
@@ -455,6 +454,7 @@ def check_batch(
     apply_tags = not no_tag
 
     # Determine batch type for state tracking
+    batch_type: Literal["movie", "series", "mixed"]
     if all_movies and all_series:
         batch_type = "mixed"
     elif all_movies:
@@ -615,7 +615,9 @@ def check_batch(
             else:
                 batch_id = str(uuid.uuid4())[:8]
                 batch_progress = state_manager.start_batch(
-                    batch_id, batch_type, len(all_items)  # type: ignore[arg-type]
+                    batch_id,
+                    batch_type,
+                    len(all_items),
                 )
 
         # Process items with progress bar
@@ -649,7 +651,9 @@ def check_batch(
                             # Search by name
                             matches = await checker.search_movies(item_name)
                             if not matches:
-                                error_console.print(f"[yellow]Movie not found:[/yellow] {item_name}")
+                                error_console.print(
+                                    f"[yellow]Movie not found:[/yellow] {item_name}"
+                                )
                             elif len(matches) > 1:
                                 error_console.print(
                                     f"[yellow]Multiple movies match '{item_name}':[/yellow] "
@@ -676,7 +680,9 @@ def check_batch(
                             # Search by name
                             matches = await checker.search_series(item_name)
                             if not matches:
-                                error_console.print(f"[yellow]Series not found:[/yellow] {item_name}")
+                                error_console.print(
+                                    f"[yellow]Series not found:[/yellow] {item_name}"
+                                )
                             elif len(matches) > 1:
                                 error_console.print(
                                     f"[yellow]Multiple series match '{item_name}':[/yellow] "
@@ -759,7 +765,87 @@ def check_batch(
 def version() -> None:
     """Show version information."""
     from findarr import __version__
+
     console.print(f"findarr version {__version__}")
+
+
+@app.command()
+def serve(
+    host: Annotated[
+        str | None,
+        typer.Option(
+            "--host",
+            "-h",
+            help="Host to bind the webhook server to.",
+        ),
+    ] = None,
+    port: Annotated[
+        int | None,
+        typer.Option(
+            "--port",
+            "-p",
+            help="Port to listen on.",
+        ),
+    ] = None,
+    log_level: Annotated[
+        str,
+        typer.Option(
+            "--log-level",
+            "-l",
+            help="Logging level (debug, info, warning, error).",
+        ),
+    ] = "info",
+) -> None:
+    """Start the webhook server to receive Radarr/Sonarr notifications.
+
+    The server listens for webhook events from Radarr and Sonarr when new
+    movies or series are added. When a webhook is received, findarr will
+    automatically check 4K availability and apply tags based on your config.
+
+    Configure webhooks in Radarr/Sonarr:
+    - URL: http://<host>:<port>/webhook/radarr (or /webhook/sonarr)
+    - Method: POST
+    - Events: On Movie Added (Radarr) or On Series Add (Sonarr)
+    - Add header: X-Api-Key with your Radarr/Sonarr API key
+
+    Example:
+        findarr serve --port 8080
+        findarr serve --host 0.0.0.0 --port 9000 --log-level debug
+    """
+    try:
+        from findarr.webhook import run_server
+    except ImportError:
+        error_console.print(
+            "[red]Error:[/red] Webhook server requires additional dependencies.\n"
+            "Install with: [bold]pip install findarr[webhook][/bold]"
+        )
+        raise typer.Exit(1) from None
+
+    config = Config.load()
+
+    # Use CLI args or fall back to config
+    server_host = host or config.webhook.host
+    server_port = port or config.webhook.port
+
+    console.print("[bold green]Starting findarr webhook server[/bold green]")
+    console.print(f"  Host: {server_host}")
+    console.print(f"  Port: {server_port}")
+    console.print(f"  Radarr configured: {'Yes' if config.radarr else 'No'}")
+    console.print(f"  Sonarr configured: {'Yes' if config.sonarr else 'No'}")
+    console.print()
+    console.print("[dim]Configure webhooks in Radarr/Sonarr to POST to:[/dim]")
+    if config.radarr:
+        console.print(f"  Radarr: http://{server_host}:{server_port}/webhook/radarr")
+    if config.sonarr:
+        console.print(f"  Sonarr: http://{server_host}:{server_port}/webhook/sonarr")
+    console.print()
+
+    run_server(
+        host=server_host,
+        port=server_port,
+        config=config,
+        log_level=log_level,
+    )
 
 
 if __name__ == "__main__":

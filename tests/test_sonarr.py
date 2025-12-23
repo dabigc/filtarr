@@ -67,9 +67,7 @@ class TestGetEpisodes:
     @pytest.mark.asyncio
     async def test_get_episodes_parses_response(self) -> None:
         """Should parse episode list from API response."""
-        respx.get(
-            "http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}
-        ).mock(
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -149,9 +147,7 @@ class TestGetEpisodeReleases:
     @pytest.mark.asyncio
     async def test_get_episode_releases_parses_response(self) -> None:
         """Should parse releases for a specific episode."""
-        respx.get(
-            "http://sonarr:8989/api/v3/release", params={"episodeId": "1001"}
-        ).mock(
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "1001"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -195,9 +191,7 @@ class TestGetLatestAiredEpisode:
         last_week = today - timedelta(days=7)
         tomorrow = today + timedelta(days=1)
 
-        respx.get(
-            "http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}
-        ).mock(
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -246,9 +240,7 @@ class TestGetLatestAiredEpisode:
         tomorrow = date.today() + timedelta(days=1)
         next_week = date.today() + timedelta(days=7)
 
-        respx.get(
-            "http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}
-        ).mock(
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -283,9 +275,9 @@ class TestGetLatestAiredEpisode:
     @pytest.mark.asyncio
     async def test_returns_none_when_no_episodes(self) -> None:
         """Should return None if series has no episodes."""
-        respx.get(
-            "http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}
-        ).mock(return_value=Response(200, json=[]))
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+            return_value=Response(200, json=[])
+        )
 
         async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
             latest = await client.get_latest_aired_episode(123)
@@ -298,9 +290,7 @@ class TestGetLatestAiredEpisode:
         """Should skip episodes without air dates."""
         yesterday = date.today() - timedelta(days=1)
 
-        respx.get(
-            "http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}
-        ).mock(
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -431,9 +421,7 @@ class TestSonarrTagManagement:
     @pytest.mark.asyncio
     async def test_get_tags_empty(self) -> None:
         """Should return empty list when no tags exist."""
-        respx.get("http://sonarr:8989/api/v3/tag").mock(
-            return_value=Response(200, json=[])
-        )
+        respx.get("http://sonarr:8989/api/v3/tag").mock(return_value=Response(200, json=[]))
 
         async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
             tags = await client.get_tags()
@@ -495,9 +483,7 @@ class TestSonarrTagManagement:
     @pytest.mark.asyncio
     async def test_get_or_create_tag_new(self) -> None:
         """Should create tag when it doesn't exist."""
-        respx.get("http://sonarr:8989/api/v3/tag").mock(
-            return_value=Response(200, json=[])
-        )
+        respx.get("http://sonarr:8989/api/v3/tag").mock(return_value=Response(200, json=[]))
         respx.post("http://sonarr:8989/api/v3/tag").mock(
             return_value=Response(201, json={"id": 1, "label": "new-tag"})
         )

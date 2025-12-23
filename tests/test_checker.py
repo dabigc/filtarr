@@ -73,12 +73,27 @@ class TestFourKResult:
         from findarr.models.common import Quality, Release
 
         releases = [
-            Release(guid="1", title="Movie.2160p", indexer="Test", size=1000,
-                   quality=Quality(id=19, name="WEBDL-2160p")),
-            Release(guid="2", title="Movie.1080p", indexer="Test", size=500,
-                   quality=Quality(id=7, name="Bluray-1080p")),
-            Release(guid="3", title="Movie.4K.HDR", indexer="Test", size=1500,
-                   quality=Quality(id=31, name="Bluray-2160p")),
+            Release(
+                guid="1",
+                title="Movie.2160p",
+                indexer="Test",
+                size=1000,
+                quality=Quality(id=19, name="WEBDL-2160p"),
+            ),
+            Release(
+                guid="2",
+                title="Movie.1080p",
+                indexer="Test",
+                size=500,
+                quality=Quality(id=7, name="Bluray-1080p"),
+            ),
+            Release(
+                guid="3",
+                title="Movie.4K.HDR",
+                indexer="Test",
+                size=1500,
+                quality=Quality(id=31, name="Bluray-2160p"),
+            ),
         ]
 
         result = FourKResult(
@@ -105,54 +120,94 @@ class TestCheckSeriesWithSampling:
 
         # Mock series info endpoint
         respx.get("http://sonarr:8989/api/v3/series/123").mock(
-            return_value=Response(200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []})
+            return_value=Response(
+                200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
+            )
         )
 
         # Mock episodes endpoint
-        respx.get(
-            "http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}
-        ).mock(
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
                     # Season 1 episodes
-                    {"id": 101, "seriesId": 123, "seasonNumber": 1, "episodeNumber": 1,
-                     "airDate": "2020-01-01", "monitored": True},
-                    {"id": 102, "seriesId": 123, "seasonNumber": 1, "episodeNumber": 2,
-                     "airDate": "2020-01-08", "monitored": True},
+                    {
+                        "id": 101,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-01",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 102,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 2,
+                        "airDate": "2020-01-08",
+                        "monitored": True,
+                    },
                     # Season 2 episodes
-                    {"id": 201, "seriesId": 123, "seasonNumber": 2, "episodeNumber": 1,
-                     "airDate": "2021-01-01", "monitored": True},
+                    {
+                        "id": 201,
+                        "seriesId": 123,
+                        "seasonNumber": 2,
+                        "episodeNumber": 1,
+                        "airDate": "2021-01-01",
+                        "monitored": True,
+                    },
                     # Season 3 episodes
-                    {"id": 301, "seriesId": 123, "seasonNumber": 3, "episodeNumber": 1,
-                     "airDate": "2022-01-01", "monitored": True},
+                    {
+                        "id": 301,
+                        "seriesId": 123,
+                        "seasonNumber": 3,
+                        "episodeNumber": 1,
+                        "airDate": "2022-01-01",
+                        "monitored": True,
+                    },
                     # Season 4 episodes
-                    {"id": 401, "seriesId": 123, "seasonNumber": 4, "episodeNumber": 1,
-                     "airDate": "2023-01-01", "monitored": True},
+                    {
+                        "id": 401,
+                        "seriesId": 123,
+                        "seasonNumber": 4,
+                        "episodeNumber": 1,
+                        "airDate": "2023-01-01",
+                        "monitored": True,
+                    },
                     # Season 5 episodes (most recent)
-                    {"id": 501, "seriesId": 123, "seasonNumber": 5, "episodeNumber": 1,
-                     "airDate": yesterday.isoformat(), "monitored": True},
+                    {
+                        "id": 501,
+                        "seriesId": 123,
+                        "seasonNumber": 5,
+                        "episodeNumber": 1,
+                        "airDate": yesterday.isoformat(),
+                        "monitored": True,
+                    },
                 ],
             )
         )
 
         # Mock release endpoints - no 4K releases
         for ep_id in [301, 401, 501]:  # Latest 3 seasons
-            respx.get(
-                "http://sonarr:8989/api/v3/release", params={"episodeId": str(ep_id)}
-            ).mock(
+            respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": str(ep_id)}).mock(
                 return_value=Response(
                     200,
                     json=[
-                        {"guid": f"rel-{ep_id}", "title": "Show.S0X.1080p",
-                         "indexer": "Test", "size": 1000,
-                         "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}}}
+                        {
+                            "guid": f"rel-{ep_id}",
+                            "title": "Show.S0X.1080p",
+                            "indexer": "Test",
+                            "size": 1000,
+                            "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}},
+                        }
                     ],
                 )
             )
 
         checker = FourKChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
-        result = await checker.check_series(123, strategy=SamplingStrategy.RECENT, seasons_to_check=3)
+        result = await checker.check_series(
+            123, strategy=SamplingStrategy.RECENT, seasons_to_check=3
+        )
 
         assert result.has_4k is False
         assert result.strategy_used == SamplingStrategy.RECENT
@@ -168,49 +223,71 @@ class TestCheckSeriesWithSampling:
 
         # Mock series info endpoint
         respx.get("http://sonarr:8989/api/v3/series/123").mock(
-            return_value=Response(200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []})
+            return_value=Response(
+                200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
+            )
         )
 
-        respx.get(
-            "http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}
-        ).mock(
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
-                    {"id": 101, "seriesId": 123, "seasonNumber": 1, "episodeNumber": 1,
-                     "airDate": "2020-01-01", "monitored": True},
-                    {"id": 201, "seriesId": 123, "seasonNumber": 2, "episodeNumber": 1,
-                     "airDate": "2021-01-01", "monitored": True},
-                    {"id": 301, "seriesId": 123, "seasonNumber": 3, "episodeNumber": 1,
-                     "airDate": yesterday.isoformat(), "monitored": True},
+                    {
+                        "id": 101,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-01",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 201,
+                        "seriesId": 123,
+                        "seasonNumber": 2,
+                        "episodeNumber": 1,
+                        "airDate": "2021-01-01",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 301,
+                        "seriesId": 123,
+                        "seasonNumber": 3,
+                        "episodeNumber": 1,
+                        "airDate": yesterday.isoformat(),
+                        "monitored": True,
+                    },
                 ],
             )
         )
 
         # First season checked (season 1) - no 4K
-        respx.get(
-            "http://sonarr:8989/api/v3/release", params={"episodeId": "101"}
-        ).mock(
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
-                    {"guid": "rel-101", "title": "Show.S01.1080p",
-                     "indexer": "Test", "size": 1000,
-                     "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}}}
+                    {
+                        "guid": "rel-101",
+                        "title": "Show.S01.1080p",
+                        "indexer": "Test",
+                        "size": 1000,
+                        "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}},
+                    }
                 ],
             )
         )
 
         # Second season (season 2) - has 4K!
-        respx.get(
-            "http://sonarr:8989/api/v3/release", params={"episodeId": "201"}
-        ).mock(
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "201"}).mock(
             return_value=Response(
                 200,
                 json=[
-                    {"guid": "rel-201-4k", "title": "Show.S02.2160p.WEB-DL",
-                     "indexer": "Test", "size": 5000,
-                     "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}}}
+                    {
+                        "guid": "rel-201-4k",
+                        "title": "Show.S02.2160p.WEB-DL",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
                 ],
             )
         )
@@ -234,17 +311,23 @@ class TestCheckSeriesWithSampling:
 
         # Mock series info endpoint
         respx.get("http://sonarr:8989/api/v3/series/123").mock(
-            return_value=Response(200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []})
+            return_value=Response(
+                200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
+            )
         )
 
-        respx.get(
-            "http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}
-        ).mock(
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
-                    {"id": 101, "seriesId": 123, "seasonNumber": 1, "episodeNumber": 1,
-                     "airDate": tomorrow.isoformat(), "monitored": True},
+                    {
+                        "id": 101,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": tomorrow.isoformat(),
+                        "monitored": True,
+                    },
                 ],
             )
         )
@@ -263,34 +346,62 @@ class TestCheckSeriesWithSampling:
         """Should check first, middle, and last seasons with DISTRIBUTED."""
         # Mock series info endpoint
         respx.get("http://sonarr:8989/api/v3/series/123").mock(
-            return_value=Response(200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []})
+            return_value=Response(
+                200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
+            )
         )
 
-        respx.get(
-            "http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}
-        ).mock(
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
-                    {"id": 101, "seriesId": 123, "seasonNumber": 1, "episodeNumber": 1,
-                     "airDate": "2020-01-01", "monitored": True},
-                    {"id": 201, "seriesId": 123, "seasonNumber": 2, "episodeNumber": 1,
-                     "airDate": "2021-01-01", "monitored": True},
-                    {"id": 301, "seriesId": 123, "seasonNumber": 3, "episodeNumber": 1,
-                     "airDate": "2022-01-01", "monitored": True},
-                    {"id": 401, "seriesId": 123, "seasonNumber": 4, "episodeNumber": 1,
-                     "airDate": "2023-01-01", "monitored": True},
-                    {"id": 501, "seriesId": 123, "seasonNumber": 5, "episodeNumber": 1,
-                     "airDate": "2024-01-01", "monitored": True},
+                    {
+                        "id": 101,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-01",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 201,
+                        "seriesId": 123,
+                        "seasonNumber": 2,
+                        "episodeNumber": 1,
+                        "airDate": "2021-01-01",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 301,
+                        "seriesId": 123,
+                        "seasonNumber": 3,
+                        "episodeNumber": 1,
+                        "airDate": "2022-01-01",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 401,
+                        "seriesId": 123,
+                        "seasonNumber": 4,
+                        "episodeNumber": 1,
+                        "airDate": "2023-01-01",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 501,
+                        "seriesId": 123,
+                        "seasonNumber": 5,
+                        "episodeNumber": 1,
+                        "airDate": "2024-01-01",
+                        "monitored": True,
+                    },
                 ],
             )
         )
 
         # Mock releases for seasons 1, 3, 5 (first, middle, last)
         for ep_id in [101, 301, 501]:
-            respx.get(
-                "http://sonarr:8989/api/v3/release", params={"episodeId": str(ep_id)}
-            ).mock(
+            respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": str(ep_id)}).mock(
                 return_value=Response(200, json=[])
             )
 
@@ -318,15 +429,17 @@ class TestCheckSeriesWithSampling:
             return_value=Response(200, json={"id": 456, "title": "Test Movie", "year": 2024})
         )
 
-        respx.get(
-            "http://radarr:7878/api/v3/release", params={"movieId": "456"}
-        ).mock(
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "456"}).mock(
             return_value=Response(
                 200,
                 json=[
-                    {"guid": "movie-rel", "title": "Movie.2024.2160p.UHD",
-                     "indexer": "Test", "size": 15000,
-                     "quality": {"quality": {"id": 31, "name": "Bluray-2160p"}}}
+                    {
+                        "guid": "movie-rel",
+                        "title": "Movie.2024.2160p.UHD",
+                        "indexer": "Test",
+                        "size": 15000,
+                        "quality": {"quality": {"id": 31, "name": "Bluray-2160p"}},
+                    }
                 ],
             )
         )
@@ -406,9 +519,13 @@ class TestNameBasedLookup:
             return_value=Response(
                 200,
                 json=[
-                    {"guid": "rel-1", "title": "The.Matrix.2160p.UHD",
-                     "indexer": "Test", "size": 5000,
-                     "quality": {"quality": {"id": 31, "name": "Bluray-2160p"}}}
+                    {
+                        "guid": "rel-1",
+                        "title": "The.Matrix.2160p.UHD",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 31, "name": "Bluray-2160p"}},
+                    }
                 ],
             )
         )
@@ -424,9 +541,7 @@ class TestNameBasedLookup:
     @pytest.mark.asyncio
     async def test_check_movie_by_name_not_found(self) -> None:
         """Should raise ValueError when movie not found."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(
-            return_value=Response(200, json=[])
-        )
+        respx.get("http://radarr:7878/api/v3/movie").mock(return_value=Response(200, json=[]))
 
         checker = FourKChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
 
@@ -446,15 +561,23 @@ class TestNameBasedLookup:
         )
         # Mock series info
         respx.get("http://sonarr:8989/api/v3/series/456").mock(
-            return_value=Response(200, json={"id": 456, "title": "Breaking Bad", "year": 2008, "seasons": []})
+            return_value=Response(
+                200, json={"id": 456, "title": "Breaking Bad", "year": 2008, "seasons": []}
+            )
         )
         # Mock episodes
         respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "456"}).mock(
             return_value=Response(
                 200,
                 json=[
-                    {"id": 1001, "seriesId": 456, "seasonNumber": 1, "episodeNumber": 1,
-                     "airDate": "2008-01-20", "monitored": True},
+                    {
+                        "id": 1001,
+                        "seriesId": 456,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2008-01-20",
+                        "monitored": True,
+                    },
                 ],
             )
         )
@@ -463,9 +586,13 @@ class TestNameBasedLookup:
             return_value=Response(
                 200,
                 json=[
-                    {"guid": "rel-1", "title": "Breaking.Bad.S01E01.2160p",
-                     "indexer": "Test", "size": 3000,
-                     "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}}}
+                    {
+                        "guid": "rel-1",
+                        "title": "Breaking.Bad.S01E01.2160p",
+                        "indexer": "Test",
+                        "size": 3000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
                 ],
             )
         )
@@ -481,9 +608,7 @@ class TestNameBasedLookup:
     @pytest.mark.asyncio
     async def test_check_series_by_name_not_found(self) -> None:
         """Should raise ValueError when series not found."""
-        respx.get("http://sonarr:8989/api/v3/series").mock(
-            return_value=Response(200, json=[])
-        )
+        respx.get("http://sonarr:8989/api/v3/series").mock(return_value=Response(200, json=[]))
 
         checker = FourKChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
 
@@ -539,9 +664,7 @@ class TestTagApplication:
             )
         )
         # Mock get_tags (empty - no existing tags)
-        respx.get("http://radarr:7878/api/v3/tag").mock(
-            return_value=Response(200, json=[])
-        )
+        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
         # Mock create_tag
         respx.post("http://radarr:7878/api/v3/tag").mock(
             return_value=Response(201, json={"id": 1, "label": "4k-available"})

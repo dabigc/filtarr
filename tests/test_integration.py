@@ -136,7 +136,9 @@ class TestSeriesCheckIntegration:
 
         # Mock series info endpoint
         respx.get("http://sonarr.local:8989/api/v3/series/456").mock(
-            return_value=Response(200, json={"id": 456, "title": "Test Series", "year": 2020, "seasons": []})
+            return_value=Response(
+                200, json={"id": 456, "title": "Test Series", "year": 2020, "seasons": []}
+            )
         )
 
         # Mock episodes endpoint
@@ -148,18 +150,48 @@ class TestSeriesCheckIntegration:
                 200,
                 json=[
                     # Season 1
-                    {"id": 1001, "seriesId": 456, "seasonNumber": 1, "episodeNumber": 1,
-                     "airDate": "2020-01-15", "monitored": True},
-                    {"id": 1002, "seriesId": 456, "seasonNumber": 1, "episodeNumber": 2,
-                     "airDate": "2020-01-22", "monitored": True},
+                    {
+                        "id": 1001,
+                        "seriesId": 456,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-15",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 1002,
+                        "seriesId": 456,
+                        "seasonNumber": 1,
+                        "episodeNumber": 2,
+                        "airDate": "2020-01-22",
+                        "monitored": True,
+                    },
                     # Season 2
-                    {"id": 2001, "seriesId": 456, "seasonNumber": 2, "episodeNumber": 1,
-                     "airDate": "2021-01-15", "monitored": True},
-                    {"id": 2002, "seriesId": 456, "seasonNumber": 2, "episodeNumber": 2,
-                     "airDate": "2021-01-22", "monitored": True},
+                    {
+                        "id": 2001,
+                        "seriesId": 456,
+                        "seasonNumber": 2,
+                        "episodeNumber": 1,
+                        "airDate": "2021-01-15",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 2002,
+                        "seriesId": 456,
+                        "seasonNumber": 2,
+                        "episodeNumber": 2,
+                        "airDate": "2021-01-22",
+                        "monitored": True,
+                    },
                     # Season 3 (most recent)
-                    {"id": 3001, "seriesId": 456, "seasonNumber": 3, "episodeNumber": 1,
-                     "airDate": last_week.isoformat(), "monitored": True},
+                    {
+                        "id": 3001,
+                        "seriesId": 456,
+                        "seasonNumber": 3,
+                        "episodeNumber": 1,
+                        "airDate": last_week.isoformat(),
+                        "monitored": True,
+                    },
                 ],
             )
         )
@@ -172,9 +204,13 @@ class TestSeriesCheckIntegration:
             return_value=Response(
                 200,
                 json=[
-                    {"guid": "s02e02-1080p", "title": "Show.S02E02.1080p",
-                     "indexer": "Test", "size": 2_000_000_000,
-                     "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}}},
+                    {
+                        "guid": "s02e02-1080p",
+                        "title": "Show.S02E02.1080p",
+                        "indexer": "Test",
+                        "size": 2_000_000_000,
+                        "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}},
+                    },
                 ],
             )
         )
@@ -187,9 +223,13 @@ class TestSeriesCheckIntegration:
             return_value=Response(
                 200,
                 json=[
-                    {"guid": "s03e01-4k", "title": "Show.S03E01.2160p.WEB-DL",
-                     "indexer": "Test", "size": 5_000_000_000,
-                     "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}}},
+                    {
+                        "guid": "s03e01-4k",
+                        "title": "Show.S03E01.2160p.WEB-DL",
+                        "indexer": "Test",
+                        "size": 5_000_000_000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    },
                 ],
             )
         )
@@ -217,7 +257,9 @@ class TestSeriesCheckIntegration:
         """Full flow: check series with DISTRIBUTED strategy (first, middle, last)."""
         # Mock series info endpoint
         respx.get("http://sonarr.local:8989/api/v3/series/789").mock(
-            return_value=Response(200, json={"id": 789, "title": "Long Series", "year": 2019, "seasons": []})
+            return_value=Response(
+                200, json={"id": 789, "title": "Long Series", "year": 2019, "seasons": []}
+            )
         )
 
         # Mock episodes for 5 seasons
@@ -228,16 +270,46 @@ class TestSeriesCheckIntegration:
             return_value=Response(
                 200,
                 json=[
-                    {"id": 1001, "seriesId": 789, "seasonNumber": 1, "episodeNumber": 10,
-                     "airDate": "2019-03-15", "monitored": True},
-                    {"id": 2001, "seriesId": 789, "seasonNumber": 2, "episodeNumber": 10,
-                     "airDate": "2020-03-15", "monitored": True},
-                    {"id": 3001, "seriesId": 789, "seasonNumber": 3, "episodeNumber": 10,
-                     "airDate": "2021-03-15", "monitored": True},
-                    {"id": 4001, "seriesId": 789, "seasonNumber": 4, "episodeNumber": 10,
-                     "airDate": "2022-03-15", "monitored": True},
-                    {"id": 5001, "seriesId": 789, "seasonNumber": 5, "episodeNumber": 10,
-                     "airDate": "2023-03-15", "monitored": True},
+                    {
+                        "id": 1001,
+                        "seriesId": 789,
+                        "seasonNumber": 1,
+                        "episodeNumber": 10,
+                        "airDate": "2019-03-15",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 2001,
+                        "seriesId": 789,
+                        "seasonNumber": 2,
+                        "episodeNumber": 10,
+                        "airDate": "2020-03-15",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 3001,
+                        "seriesId": 789,
+                        "seasonNumber": 3,
+                        "episodeNumber": 10,
+                        "airDate": "2021-03-15",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 4001,
+                        "seriesId": 789,
+                        "seasonNumber": 4,
+                        "episodeNumber": 10,
+                        "airDate": "2022-03-15",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 5001,
+                        "seriesId": 789,
+                        "seasonNumber": 5,
+                        "episodeNumber": 10,
+                        "airDate": "2023-03-15",
+                        "monitored": True,
+                    },
                 ],
             )
         )
@@ -251,9 +323,13 @@ class TestSeriesCheckIntegration:
                 return_value=Response(
                     200,
                     json=[
-                        {"guid": f"ep-{ep_id}-1080p", "title": "Show.S0X.E10.1080p",
-                         "indexer": "Test", "size": 2_000_000_000,
-                         "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}}},
+                        {
+                            "guid": f"ep-{ep_id}-1080p",
+                            "title": "Show.S0X.E10.1080p",
+                            "indexer": "Test",
+                            "size": 2_000_000_000,
+                            "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}},
+                        },
                     ],
                 )
             )
@@ -287,7 +363,9 @@ class TestSeriesCheckIntegration:
 
         # Mock series info for Breaking Bad
         respx.get("http://sonarr.local:8989/api/v3/series/500").mock(
-            return_value=Response(200, json={"id": 500, "title": "Breaking Bad", "year": 2008, "seasons": []})
+            return_value=Response(
+                200, json={"id": 500, "title": "Breaking Bad", "year": 2008, "seasons": []}
+            )
         )
 
         # Mock episodes for Breaking Bad
@@ -298,8 +376,14 @@ class TestSeriesCheckIntegration:
             return_value=Response(
                 200,
                 json=[
-                    {"id": 5001, "seriesId": 500, "seasonNumber": 5, "episodeNumber": 16,
-                     "airDate": "2013-09-29", "monitored": True},
+                    {
+                        "id": 5001,
+                        "seriesId": 500,
+                        "seasonNumber": 5,
+                        "episodeNumber": 16,
+                        "airDate": "2013-09-29",
+                        "monitored": True,
+                    },
                 ],
             )
         )
@@ -312,9 +396,13 @@ class TestSeriesCheckIntegration:
             return_value=Response(
                 200,
                 json=[
-                    {"guid": "bb-4k", "title": "Breaking.Bad.S05E16.2160p.UHD",
-                     "indexer": "Test", "size": 8_000_000_000,
-                     "quality": {"quality": {"id": 31, "name": "Bluray-2160p"}}},
+                    {
+                        "guid": "bb-4k",
+                        "title": "Breaking.Bad.S05E16.2160p.UHD",
+                        "indexer": "Test",
+                        "size": 8_000_000_000,
+                        "quality": {"quality": {"id": 31, "name": "Bluray-2160p"}},
+                    },
                 ],
             )
         )
@@ -355,16 +443,22 @@ class TestCombinedCheckerIntegration:
             return_value=Response(
                 200,
                 json=[
-                    {"guid": "movie-4k", "title": "Movie.2160p",
-                     "indexer": "Test", "size": 50_000_000_000,
-                     "quality": {"quality": {"id": 31, "name": "Bluray-2160p"}}},
+                    {
+                        "guid": "movie-4k",
+                        "title": "Movie.2160p",
+                        "indexer": "Test",
+                        "size": 50_000_000_000,
+                        "quality": {"quality": {"id": 31, "name": "Bluray-2160p"}},
+                    },
                 ],
             )
         )
 
         # Mock series info
         respx.get("http://sonarr.local:8989/api/v3/series/20").mock(
-            return_value=Response(200, json={"id": 20, "title": "Some Series", "year": 2023, "seasons": []})
+            return_value=Response(
+                200, json={"id": 20, "title": "Some Series", "year": 2023, "seasons": []}
+            )
         )
 
         # Mock series episodes
@@ -375,8 +469,14 @@ class TestCombinedCheckerIntegration:
             return_value=Response(
                 200,
                 json=[
-                    {"id": 2001, "seriesId": 20, "seasonNumber": 1, "episodeNumber": 1,
-                     "airDate": "2023-01-01", "monitored": True},
+                    {
+                        "id": 2001,
+                        "seriesId": 20,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2023-01-01",
+                        "monitored": True,
+                    },
                 ],
             )
         )
@@ -389,9 +489,13 @@ class TestCombinedCheckerIntegration:
             return_value=Response(
                 200,
                 json=[
-                    {"guid": "series-1080p", "title": "Series.S01E01.1080p",
-                     "indexer": "Test", "size": 2_000_000_000,
-                     "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}}},
+                    {
+                        "guid": "series-1080p",
+                        "title": "Series.S01E01.1080p",
+                        "indexer": "Test",
+                        "size": 2_000_000_000,
+                        "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}},
+                    },
                 ],
             )
         )
