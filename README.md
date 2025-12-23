@@ -297,18 +297,80 @@ sudo systemctl enable findarr-webhook
 sudo systemctl start findarr-webhook
 ```
 
-### Running with Docker Compose
+### Running with Docker
+
+The official Docker image is available on GitHub Container Registry.
+
+#### Quick Start
+
+```bash
+docker run -d \
+  --name findarr \
+  -p 8080:8080 \
+  -e FINDARR_RADARR_URL="http://radarr:7878" \
+  -e FINDARR_RADARR_API_KEY="your-radarr-key" \
+  -e FINDARR_SONARR_URL="http://sonarr:8989" \
+  -e FINDARR_SONARR_API_KEY="your-sonarr-key" \
+  ghcr.io/dabigc/4k-findarr:latest
+```
+
+#### Using a Config File
+
+Mount your config file to `/config/config.toml`:
+
+```bash
+docker run -d \
+  --name findarr \
+  -p 8080:8080 \
+  -v /path/to/config.toml:/config/config.toml:ro \
+  ghcr.io/dabigc/4k-findarr:latest
+```
+
+#### Docker Compose
 
 ```yaml
 services:
   findarr:
-    image: python:3.12-slim
-    command: pip install findarr[webhook] && findarr serve
+    image: ghcr.io/dabigc/4k-findarr:latest
+    container_name: findarr
     ports:
       - "8080:8080"
-    volumes:
-      - ~/.config/findarr:/root/.config/findarr
+    environment:
+      - FINDARR_RADARR_URL=http://radarr:7878
+      - FINDARR_RADARR_API_KEY=your-radarr-key
+      - FINDARR_SONARR_URL=http://sonarr:8989
+      - FINDARR_SONARR_API_KEY=your-sonarr-key
+      # Optional: customize tags
+      - FINDARR_TAG_AVAILABLE=4k-available
+      - FINDARR_TAG_UNAVAILABLE=4k-unavailable
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Example: Run alongside Radarr/Sonarr
+  radarr:
+    image: linuxserver/radarr:latest
+    # ... your radarr config
+
+  sonarr:
+    image: linuxserver/sonarr:latest
+    # ... your sonarr config
+```
+
+#### Building Locally
+
+```bash
+# Build the image
+docker build -t findarr .
+
+# Run it
+docker run -d -p 8080:8080 \
+  -e FINDARR_RADARR_URL="http://radarr:7878" \
+  -e FINDARR_RADARR_API_KEY="your-key" \
+  findarr
 ```
 
 ## Python API

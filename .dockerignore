@@ -1,0 +1,45 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+ENV
+env
+.mypy_cache
+.pytest_cache
+.ruff_cache
+*.egg-info
+dist
+build
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Testing
+.coverage
+htmlcov
+.tox
+.nox
+
+# Documentation
+docs/_build
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+.serena
+tests
+CHANGELOG.md
+.github
