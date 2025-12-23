@@ -135,9 +135,7 @@ class StateFile:
         """Create a key for the checks dictionary."""
         return f"{item_type}:{item_id}"
 
-    def get_check(
-        self, item_type: Literal["movie", "series"], item_id: int
-    ) -> CheckRecord | None:
+    def get_check(self, item_type: Literal["movie", "series"], item_id: int) -> CheckRecord | None:
         """Get the check record for an item.
 
         Args:
@@ -313,9 +311,7 @@ class StateManager:
         state = self.load()
         return state.get_stale_unavailable_items(recheck_days)
 
-    def get_check(
-        self, item_type: Literal["movie", "series"], item_id: int
-    ) -> CheckRecord | None:
+    def get_check(self, item_type: Literal["movie", "series"], item_id: int) -> CheckRecord | None:
         """Get the check record for an item.
 
         Args:

@@ -111,8 +111,7 @@ def create_app(config: Config | None = None) -> Any:
         from fastapi.responses import JSONResponse
     except ImportError as e:
         raise ImportError(
-            "FastAPI is required for webhook server. "
-            "Install with: pip install findarr[webhook]"
+            "FastAPI is required for webhook server. Install with: pip install findarr[webhook]"
         ) from e
 
     if config is None:
@@ -169,8 +168,7 @@ def create_app(config: Config | None = None) -> Any:
 
         # Schedule background task for 4K check
         logger.info(
-            f"Received MovieAdded webhook for: {payload.movie.title} "
-            f"(id={payload.movie.id})"
+            f"Received MovieAdded webhook for: {payload.movie.title} (id={payload.movie.id})"
         )
         task = asyncio.create_task(
             _process_movie_check(payload.movie.id, payload.movie.title, config)
@@ -222,8 +220,7 @@ def create_app(config: Config | None = None) -> Any:
 
         # Schedule background task for 4K check
         logger.info(
-            f"Received SeriesAdd webhook for: {payload.series.title} "
-            f"(id={payload.series.id})"
+            f"Received SeriesAdd webhook for: {payload.series.title} (id={payload.series.id})"
         )
         task = asyncio.create_task(
             _process_series_check(payload.series.id, payload.series.title, config)
@@ -276,8 +273,7 @@ def run_server(
         import uvicorn
     except ImportError as e:
         raise ImportError(
-            "uvicorn is required for webhook server. "
-            "Install with: pip install findarr[webhook]"
+            "uvicorn is required for webhook server. Install with: pip install findarr[webhook]"
         ) from e
 
     app = create_app(config)

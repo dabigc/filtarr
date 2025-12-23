@@ -169,9 +169,7 @@ class TestRadarrWebhook:
         assert response.status_code == 401
         assert "X-Api-Key" in response.json()["detail"]
 
-    def test_radarr_webhook_rejects_invalid_api_key(
-        self, test_client: TestClient
-    ) -> None:
+    def test_radarr_webhook_rejects_invalid_api_key(self, test_client: TestClient) -> None:
         """Should reject requests with invalid API key."""
         response = test_client.post(
             "/webhook/radarr",
@@ -184,9 +182,7 @@ class TestRadarrWebhook:
 
         assert response.status_code == 401
 
-    def test_radarr_webhook_accepts_valid_api_key(
-        self, full_config: Config
-    ) -> None:
+    def test_radarr_webhook_accepts_valid_api_key(self, full_config: Config) -> None:
         """Should accept requests with valid Radarr API key."""
         app = create_app(full_config)
         client = TestClient(app)
@@ -207,9 +203,7 @@ class TestRadarrWebhook:
         assert data["media_id"] == 123
         assert data["media_title"] == "Test Movie"
 
-    def test_radarr_webhook_ignores_non_movie_added_events(
-        self, full_config: Config
-    ) -> None:
+    def test_radarr_webhook_ignores_non_movie_added_events(self, full_config: Config) -> None:
         """Should ignore events that are not MovieAdded."""
         app = create_app(full_config)
         client = TestClient(app)
@@ -262,9 +256,7 @@ class TestSonarrWebhook:
         assert response.status_code == 401
         assert "X-Api-Key" in response.json()["detail"]
 
-    def test_sonarr_webhook_rejects_invalid_api_key(
-        self, test_client: TestClient
-    ) -> None:
+    def test_sonarr_webhook_rejects_invalid_api_key(self, test_client: TestClient) -> None:
         """Should reject requests with invalid API key."""
         response = test_client.post(
             "/webhook/sonarr",
@@ -277,9 +269,7 @@ class TestSonarrWebhook:
 
         assert response.status_code == 401
 
-    def test_sonarr_webhook_accepts_valid_api_key(
-        self, full_config: Config
-    ) -> None:
+    def test_sonarr_webhook_accepts_valid_api_key(self, full_config: Config) -> None:
         """Should accept requests with valid Sonarr API key."""
         app = create_app(full_config)
         client = TestClient(app)
@@ -300,9 +290,7 @@ class TestSonarrWebhook:
         assert data["media_id"] == 456
         assert data["media_title"] == "Breaking Bad"
 
-    def test_sonarr_webhook_ignores_non_series_add_events(
-        self, full_config: Config
-    ) -> None:
+    def test_sonarr_webhook_ignores_non_series_add_events(self, full_config: Config) -> None:
         """Should ignore events that are not SeriesAdd."""
         app = create_app(full_config)
         client = TestClient(app)
@@ -343,9 +331,7 @@ class TestBackgroundProcessing:
     """Tests for background task processing."""
 
     @pytest.mark.asyncio
-    async def test_movie_check_background_task_created(
-        self, full_config: Config
-    ) -> None:
+    async def test_movie_check_background_task_created(self, full_config: Config) -> None:
         """Should create background task for movie check on MovieAdded event."""
         app = create_app(full_config)
         client = TestClient(app)
@@ -364,9 +350,7 @@ class TestBackgroundProcessing:
             mock_create_task.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_series_check_background_task_created(
-        self, full_config: Config
-    ) -> None:
+    async def test_series_check_background_task_created(self, full_config: Config) -> None:
         """Should create background task for series check on SeriesAdd event."""
         app = create_app(full_config)
         client = TestClient(app)

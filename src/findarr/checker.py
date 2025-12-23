@@ -131,14 +131,10 @@ class FourKChecker:
             tag_config: Configuration for 4K tagging (optional)
         """
         self._radarr_config = (
-            (radarr_url, radarr_api_key)
-            if radarr_url and radarr_api_key
-            else None
+            (radarr_url, radarr_api_key) if radarr_url and radarr_api_key else None
         )
         self._sonarr_config = (
-            (sonarr_url, sonarr_api_key)
-            if sonarr_url and sonarr_api_key
-            else None
+            (sonarr_url, sonarr_api_key) if sonarr_url and sonarr_api_key else None
         )
         self._timeout = timeout
         self._tag_config = tag_config or TagConfig()
@@ -177,9 +173,7 @@ class FourKChecker:
 
             tag_result: TagResult | None = None
             if apply_tags:
-                tag_result = await self._apply_movie_tags(
-                    client, movie_id, has_4k, dry_run
-                )
+                tag_result = await self._apply_movie_tags(client, movie_id, has_4k, dry_run)
 
             return FourKResult(
                 item_id=movie_id,
@@ -208,12 +202,8 @@ class FourKChecker:
         Returns:
             TagResult with the operation details
         """
-        tag_to_apply = (
-            self._tag_config.available if has_4k else self._tag_config.unavailable
-        )
-        tag_to_remove = (
-            self._tag_config.unavailable if has_4k else self._tag_config.available
-        )
+        tag_to_apply = self._tag_config.available if has_4k else self._tag_config.unavailable
+        tag_to_remove = self._tag_config.unavailable if has_4k else self._tag_config.available
 
         result = TagResult(dry_run=dry_run)
 
@@ -273,12 +263,8 @@ class FourKChecker:
         Returns:
             TagResult with the operation details
         """
-        tag_to_apply = (
-            self._tag_config.available if has_4k else self._tag_config.unavailable
-        )
-        tag_to_remove = (
-            self._tag_config.unavailable if has_4k else self._tag_config.available
-        )
+        tag_to_apply = self._tag_config.available if has_4k else self._tag_config.unavailable
+        tag_to_remove = self._tag_config.unavailable if has_4k else self._tag_config.available
 
         result = TagResult(dry_run=dry_run)
 
@@ -353,9 +339,7 @@ class FourKChecker:
 
             tag_result: TagResult | None = None
             if apply_tags:
-                tag_result = await self._apply_movie_tags(
-                    client, movie.id, has_4k, dry_run
-                )
+                tag_result = await self._apply_movie_tags(client, movie.id, has_4k, dry_run)
 
             return FourKResult(
                 item_id=movie.id,
@@ -428,17 +412,13 @@ class FourKChecker:
             today = date.today()
 
             # Filter to aired episodes
-            aired_episodes = [
-                e for e in episodes if e.air_date and e.air_date <= today
-            ]
+            aired_episodes = [e for e in episodes if e.air_date and e.air_date <= today]
 
             if not aired_episodes:
                 # No aired episodes - return empty result
                 tag_result: TagResult | None = None
                 if apply_tags:
-                    tag_result = await self._apply_series_tags(
-                        client, series_id, False, dry_run
-                    )
+                    tag_result = await self._apply_series_tags(client, series_id, False, dry_run)
                 return FourKResult(
                     item_id=series_id,
                     item_type="series",
@@ -472,9 +452,7 @@ class FourKChecker:
                     continue
 
                 # Get the latest aired episode in this season
-                latest_in_season = max(
-                    season_episodes, key=lambda e: e.air_date or date.min
-                )
+                latest_in_season = max(season_episodes, key=lambda e: e.air_date or date.min)
 
                 # Check releases for this episode
                 releases = await client.get_episode_releases(latest_in_season.id)
@@ -489,9 +467,7 @@ class FourKChecker:
                 if four_k_found:
                     tag_result = None
                     if apply_tags:
-                        tag_result = await self._apply_series_tags(
-                            client, series_id, True, dry_run
-                        )
+                        tag_result = await self._apply_series_tags(client, series_id, True, dry_run)
                     return FourKResult(
                         item_id=series_id,
                         item_type="series",
@@ -507,9 +483,7 @@ class FourKChecker:
             # No 4K found after checking all sampled episodes
             tag_result = None
             if apply_tags:
-                tag_result = await self._apply_series_tags(
-                    client, series_id, False, dry_run
-                )
+                tag_result = await self._apply_series_tags(client, series_id, False, dry_run)
             return FourKResult(
                 item_id=series_id,
                 item_type="series",

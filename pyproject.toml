@@ -56,6 +56,7 @@ dev = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "httpx[http2]>=0.27.0",
+    "types-cachetools>=5.5.0",
 ]
 
 [project.scripts]

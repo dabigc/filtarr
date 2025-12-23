@@ -83,10 +83,24 @@ class TestRadarrClientSearch:
             return_value=Response(
                 200,
                 json=[
-                    {"id": 1, "title": "The Matrix", "year": 1999, "tmdbId": 603,
-                     "imdbId": "tt0133093", "monitored": True, "hasFile": True},
-                    {"id": 2, "title": "The Matrix Reloaded", "year": 2003, "tmdbId": 604,
-                     "imdbId": "tt0234215", "monitored": True, "hasFile": False},
+                    {
+                        "id": 1,
+                        "title": "The Matrix",
+                        "year": 1999,
+                        "tmdbId": 603,
+                        "imdbId": "tt0133093",
+                        "monitored": True,
+                        "hasFile": True,
+                    },
+                    {
+                        "id": 2,
+                        "title": "The Matrix Reloaded",
+                        "year": 2003,
+                        "tmdbId": 604,
+                        "imdbId": "tt0234215",
+                        "monitored": True,
+                        "hasFile": False,
+                    },
                 ],
             )
         )
@@ -209,10 +223,20 @@ class TestSonarrClientSearch:
             return_value=Response(
                 200,
                 json=[
-                    {"id": 1, "title": "Breaking Bad", "year": 2008, "monitored": True,
-                     "seasons": [{"seasonNumber": 1, "monitored": True}]},
-                    {"id": 2, "title": "Better Call Saul", "year": 2015, "monitored": True,
-                     "seasons": []},
+                    {
+                        "id": 1,
+                        "title": "Breaking Bad",
+                        "year": 2008,
+                        "monitored": True,
+                        "seasons": [{"seasonNumber": 1, "monitored": True}],
+                    },
+                    {
+                        "id": 2,
+                        "title": "Better Call Saul",
+                        "year": 2015,
+                        "monitored": True,
+                        "seasons": [],
+                    },
                 ],
             )
         )
@@ -342,9 +366,7 @@ class TestRadarrTagManagement:
     @pytest.mark.asyncio
     async def test_get_tags_empty(self) -> None:
         """Should return empty list when no tags exist."""
-        respx.get("http://radarr:7878/api/v3/tag").mock(
-            return_value=Response(200, json=[])
-        )
+        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
 
         async with RadarrClient("http://radarr:7878", "test-api-key") as client:
             tags = await client.get_tags()
@@ -406,9 +428,7 @@ class TestRadarrTagManagement:
     @pytest.mark.asyncio
     async def test_get_or_create_tag_new(self) -> None:
         """Should create tag when it doesn't exist."""
-        respx.get("http://radarr:7878/api/v3/tag").mock(
-            return_value=Response(200, json=[])
-        )
+        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
         respx.post("http://radarr:7878/api/v3/tag").mock(
             return_value=Response(201, json={"id": 1, "label": "new-tag"})
         )

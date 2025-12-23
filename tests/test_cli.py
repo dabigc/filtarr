@@ -65,9 +65,7 @@ class TestCheckMovieCommand:
         mock_result = FourKResult(item_id=123, item_type="movie", has_4k=True)
         mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
 
-        async def mock_check_movie(
-            _movie_id: int, **_kwargs: object
-        ) -> FourKResult:
+        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> FourKResult:
             return mock_result
 
         mock_checker = MagicMock()
@@ -89,9 +87,7 @@ class TestCheckMovieCommand:
         mock_result = FourKResult(item_id=123, item_type="movie", has_4k=False)
         mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
 
-        async def mock_check_movie(
-            _movie_id: int, **_kwargs: object
-        ) -> FourKResult:
+        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> FourKResult:
             return mock_result
 
         mock_checker = MagicMock()
@@ -166,9 +162,7 @@ class TestCheckSeriesCommand:
         mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
 
         with patch("findarr.cli.Config.load", return_value=mock_config):
-            result = runner.invoke(
-                app, ["check", "series", "456", "--strategy", "invalid"]
-            )
+            result = runner.invoke(app, ["check", "series", "456", "--strategy", "invalid"])
 
         assert result.exit_code == 2
 
@@ -259,9 +253,7 @@ class TestCheckMovieByName:
         async def mock_search_movies(_term: str) -> list[tuple[int, str, int]]:
             return [(123, "The Matrix", 1999)]
 
-        async def mock_check_movie(
-            _movie_id: int, **_kwargs: object
-        ) -> FourKResult:
+        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> FourKResult:
             return mock_result
 
         mock_checker = MagicMock()
@@ -274,9 +266,7 @@ class TestCheckMovieByName:
             patch("findarr.cli.get_checker", return_value=mock_checker),
             patch("findarr.cli.get_state_manager", return_value=mock_state_manager),
         ):
-            result = runner.invoke(
-                app, ["check", "movie", "The Matrix", "--format", "simple"]
-            )
+            result = runner.invoke(app, ["check", "movie", "The Matrix", "--format", "simple"])
 
         assert result.exit_code == 0
         assert "4K available" in result.output
@@ -321,9 +311,7 @@ class TestCheckMovieByName:
             patch("findarr.cli.get_checker", return_value=mock_checker),
             patch("findarr.cli.get_state_manager", return_value=mock_state_manager),
         ):
-            result = runner.invoke(
-                app, ["check", "movie", "Nonexistent", "--format", "simple"]
-            )
+            result = runner.invoke(app, ["check", "movie", "Nonexistent", "--format", "simple"])
 
         assert result.exit_code == 2
         assert "Movie not found" in result.output
@@ -345,9 +333,7 @@ class TestCheckSeriesByName:
         async def mock_search_series(_term: str) -> list[tuple[int, str, int]]:
             return [(456, "Breaking Bad", 2008)]
 
-        async def mock_check_series(
-            _series_id: int, **_kwargs: object
-        ) -> FourKResult:
+        async def mock_check_series(_series_id: int, **_kwargs: object) -> FourKResult:
             return mock_result
 
         mock_checker = MagicMock()
@@ -358,9 +344,7 @@ class TestCheckSeriesByName:
             patch("findarr.cli.Config.load", return_value=mock_config),
             patch("findarr.cli.get_checker", return_value=mock_checker),
         ):
-            result = runner.invoke(
-                app, ["check", "series", "Breaking Bad", "--format", "simple"]
-            )
+            result = runner.invoke(app, ["check", "series", "Breaking Bad", "--format", "simple"])
 
         assert result.exit_code == 0
         assert "4K available" in result.output
@@ -380,9 +364,7 @@ class TestCheckSeriesByName:
             patch("findarr.cli.Config.load", return_value=mock_config),
             patch("findarr.cli.get_checker", return_value=mock_checker),
         ):
-            result = runner.invoke(
-                app, ["check", "series", "Breaking", "--format", "simple"]
-            )
+            result = runner.invoke(app, ["check", "series", "Breaking", "--format", "simple"])
 
         assert result.exit_code == 2
         assert "Multiple series found" in result.output
@@ -402,9 +384,7 @@ class TestCheckSeriesByName:
             patch("findarr.cli.Config.load", return_value=mock_config),
             patch("findarr.cli.get_checker", return_value=mock_checker),
         ):
-            result = runner.invoke(
-                app, ["check", "series", "Nonexistent", "--format", "simple"]
-            )
+            result = runner.invoke(app, ["check", "series", "Nonexistent", "--format", "simple"])
 
         assert result.exit_code == 2
         assert "Series not found" in result.output
