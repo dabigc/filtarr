@@ -70,14 +70,14 @@ class BatchProgress:
             item_type = "mixed"
 
         total_items = data.get("total_items", 0)
-        if not isinstance(total_items, (int, float)):
+        if not isinstance(total_items, int | float):
             total_items = 0
 
         return cls(
             batch_id=str(data.get("batch_id", "")),
             item_type=item_type,  # type: ignore[arg-type]
             total_items=int(total_items),
-            processed_ids={int(i) for i in processed_ids if isinstance(i, (int, float))},
+            processed_ids={int(i) for i in processed_ids if isinstance(i, int | float)},
             started_at=started_at,
         )
 
@@ -112,7 +112,7 @@ class CheckRecord:
             result = "unavailable"
 
         tag_applied = data.get("tag_applied")
-        if not isinstance(tag_applied, (str, type(None))):
+        if not isinstance(tag_applied, str | None):
             tag_applied = None
 
         return cls(
@@ -426,7 +426,8 @@ class StateManager:
 
         # Remove existing schedule with same name
         state.dynamic_schedules = [
-            s for s in state.dynamic_schedules
+            s
+            for s in state.dynamic_schedules
             if not (isinstance((n := s.get("name")), str) and n.lower() == name)
         ]
         state.dynamic_schedules.append(schedule)
@@ -444,7 +445,8 @@ class StateManager:
         state = self.load()
         original_len = len(state.dynamic_schedules)
         state.dynamic_schedules = [
-            s for s in state.dynamic_schedules
+            s
+            for s in state.dynamic_schedules
             if not (isinstance((n := s.get("name")), str) and n.lower() == name.lower())
         ]
         if len(state.dynamic_schedules) < original_len:
@@ -506,7 +508,8 @@ class StateManager:
 
         if schedule_name:
             history = [
-                r for r in history
+                r
+                for r in history
                 if isinstance((n := r.get("schedule_name")), str)
                 and n.lower() == schedule_name.lower()
             ]
