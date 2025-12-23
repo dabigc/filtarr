@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from findarr.checker import FourKChecker
 from findarr.config import Config, TagConfig
@@ -14,7 +15,13 @@ from findarr.models.webhook import (
     WebhookResponse,
 )
 
+if TYPE_CHECKING:
+    from findarr.scheduler import SchedulerManager
+
 logger = logging.getLogger(__name__)
+
+# Global reference to scheduler manager for status endpoint
+_scheduler_manager: SchedulerManager | None = None
 
 
 def _validate_api_key(api_key: str | None, config: Config) -> str | None:
@@ -130,6 +137,45 @@ def create_app(config: Config | None = None) -> Any:
     async def health_check() -> dict[str, str]:
         """Health check endpoint."""
         return {"status": "healthy"}
+
+    @app.get("/status")
+    async def status() -> dict[str, Any]:
+        """Status endpoint showing server and scheduler state."""
+        result: dict[str, Any] = {
+            "status": "healthy",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "radarr_configured": config.radarr is not None,
+            "sonarr_configured": config.sonarr is not None,
+            "scheduler": None,
+        }
+
+        if _scheduler_manager is not None:
+            schedules = _scheduler_manager.get_all_schedules()
+            enabled_schedules = [s for s in schedules if s.enabled]
+            running = _scheduler_manager.get_running_schedules()
+            recent_history = _scheduler_manager.get_history(limit=5)
+
+            result["scheduler"] = {
+                "enabled": True,
+                "running": _scheduler_manager.is_running,
+                "total_schedules": len(schedules),
+                "enabled_schedules": len(enabled_schedules),
+                "currently_running": list(running),
+                "recent_runs": [
+                    {
+                        "schedule": r.schedule_name,
+                        "status": r.status.value,
+                        "started_at": r.started_at.isoformat(),
+                        "items_processed": r.items_processed,
+                        "items_with_4k": r.items_with_4k,
+                    }
+                    for r in recent_history
+                ],
+            }
+        else:
+            result["scheduler"] = {"enabled": False}
+
+        return result
 
     @app.post("/webhook/radarr", response_model=WebhookResponse)
     async def radarr_webhook(
@@ -260,15 +306,19 @@ def run_server(
     port: int = 8080,
     config: Config | None = None,
     log_level: str = "info",
+    scheduler_enabled: bool = True,
 ) -> None:
-    """Run the webhook server.
+    """Run the webhook server with optional scheduler.
 
     Args:
         host: Host to bind to.
         port: Port to listen on.
         config: Application configuration.
         log_level: Logging level for uvicorn.
+        scheduler_enabled: Whether to start the scheduler.
     """
+    global _scheduler_manager
+
     try:
         import uvicorn
     except ImportError as e:
@@ -276,5 +326,57 @@ def run_server(
             "uvicorn is required for webhook server. Install with: pip install findarr[webhook]"
         ) from e
 
+    if config is None:
+        config = Config.load()
+
     app = create_app(config)
-    uvicorn.run(app, host=host, port=port, log_level=log_level)
+
+    # Set up scheduler if enabled
+    scheduler_manager: SchedulerManager | None = None
+    if scheduler_enabled and config.scheduler.enabled:
+        try:
+            from findarr.scheduler import SchedulerManager
+            from findarr.state import StateManager
+
+            state_manager = StateManager(config.state.path)
+            scheduler_manager = SchedulerManager(config, state_manager)
+            _scheduler_manager = scheduler_manager
+            logger.info("Scheduler configured and will start with server")
+        except ImportError:
+            logger.warning(
+                "Scheduler dependencies not installed. Install with: pip install findarr[scheduler]"
+            )
+
+    async def run_with_scheduler() -> None:
+        """Run uvicorn with scheduler lifecycle management."""
+        uvicorn_config = uvicorn.Config(
+            app,
+            host=host,
+            port=port,
+            log_level=log_level,
+        )
+        server = uvicorn.Server(uvicorn_config)
+
+        # Start scheduler before server
+        if scheduler_manager is not None:
+            try:
+                await scheduler_manager.start()
+            except Exception as e:
+                logger.error("Failed to start scheduler: %s", e)
+
+        try:
+            await server.serve()
+        finally:
+            # Stop scheduler after server
+            if scheduler_manager is not None:
+                try:
+                    await scheduler_manager.stop(wait=True)
+                except Exception as e:
+                    logger.error("Error stopping scheduler: %s", e)
+
+    if scheduler_manager is not None:
+        # Run with asyncio to manage scheduler lifecycle
+        asyncio.run(run_with_scheduler())
+    else:
+        # Simple case - just run uvicorn directly
+        uvicorn.run(app, host=host, port=port, log_level=log_level)
