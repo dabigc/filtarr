@@ -11,7 +11,7 @@ from typing import Literal
 
 logger = logging.getLogger(__name__)
 
-STATE_VERSION = 1
+STATE_VERSION = 2
 
 
 @dataclass
@@ -70,14 +70,14 @@ class BatchProgress:
             item_type = "mixed"
 
         total_items = data.get("total_items", 0)
-        if not isinstance(total_items, (int, float)):
+        if not isinstance(total_items, int | float):
             total_items = 0
 
         return cls(
             batch_id=str(data.get("batch_id", "")),
             item_type=item_type,  # type: ignore[arg-type]
             total_items=int(total_items),
-            processed_ids={int(i) for i in processed_ids if isinstance(i, (int, float))},
+            processed_ids={int(i) for i in processed_ids if isinstance(i, int | float)},
             started_at=started_at,
         )
 
@@ -112,7 +112,7 @@ class CheckRecord:
             result = "unavailable"
 
         tag_applied = data.get("tag_applied")
-        if not isinstance(tag_applied, (str, type(None))):
+        if not isinstance(tag_applied, str | None):
             tag_applied = None
 
         return cls(
@@ -124,11 +124,14 @@ class CheckRecord:
 
 @dataclass
 class StateFile:
-    """State file for tracking check history."""
+    """State file for tracking check history and scheduler state."""
 
     version: int = STATE_VERSION
     checks: dict[str, CheckRecord] = field(default_factory=dict)
     batch_progress: BatchProgress | None = None
+    # Scheduler state (stored as dicts, converted to/from models by StateManager)
+    dynamic_schedules: list[dict[str, object]] = field(default_factory=list)
+    schedule_history: list[dict[str, object]] = field(default_factory=list)
 
     @staticmethod
     def _make_key(item_type: Literal["movie", "series"], item_id: int) -> str:
@@ -203,6 +206,10 @@ class StateFile:
         }
         if self.batch_progress is not None:
             result["batch_progress"] = self.batch_progress.to_dict()
+        if self.dynamic_schedules:
+            result["dynamic_schedules"] = self.dynamic_schedules
+        if self.schedule_history:
+            result["schedule_history"] = self.schedule_history
         return result
 
     @classmethod
@@ -226,7 +233,26 @@ class StateFile:
         if isinstance(batch_data, dict):
             batch_progress = BatchProgress.from_dict(batch_data)
 
-        return cls(version=version, checks=checks, batch_progress=batch_progress)
+        # Load scheduler state
+        dynamic_schedules = data.get("dynamic_schedules", [])
+        if not isinstance(dynamic_schedules, list):
+            dynamic_schedules = []
+        # Filter to only dicts
+        dynamic_schedules = [s for s in dynamic_schedules if isinstance(s, dict)]
+
+        schedule_history = data.get("schedule_history", [])
+        if not isinstance(schedule_history, list):
+            schedule_history = []
+        # Filter to only dicts
+        schedule_history = [r for r in schedule_history if isinstance(r, dict)]
+
+        return cls(
+            version=version,
+            checks=checks,
+            batch_progress=batch_progress,
+            dynamic_schedules=dynamic_schedules,
+            schedule_history=schedule_history,
+        )
 
 
 class StateManager:
@@ -374,3 +400,181 @@ class StateManager:
         state = self.load()
         state.batch_progress = None
         self.save()
+
+    # Scheduler state management
+
+    def get_dynamic_schedules(self) -> list[dict[str, object]]:
+        """Get all dynamic schedules.
+
+        Returns:
+            List of schedule dictionaries
+        """
+        state = self.load()
+        return state.dynamic_schedules
+
+    def add_dynamic_schedule(self, schedule: dict[str, object]) -> None:
+        """Add or update a dynamic schedule.
+
+        Args:
+            schedule: Schedule dictionary (must have 'name' key)
+        """
+        state = self.load()
+        name_val = schedule.get("name")
+        name = name_val.lower() if isinstance(name_val, str) else ""
+        if not name:
+            raise ValueError("Schedule must have a 'name' field")
+
+        # Remove existing schedule with same name
+        state.dynamic_schedules = [
+            s
+            for s in state.dynamic_schedules
+            if not (isinstance((n := s.get("name")), str) and n.lower() == name)
+        ]
+        state.dynamic_schedules.append(schedule)
+        self.save()
+
+    def remove_dynamic_schedule(self, name: str) -> bool:
+        """Remove a dynamic schedule by name.
+
+        Args:
+            name: Schedule name to remove
+
+        Returns:
+            True if schedule was removed, False if not found
+        """
+        state = self.load()
+        original_len = len(state.dynamic_schedules)
+        state.dynamic_schedules = [
+            s
+            for s in state.dynamic_schedules
+            if not (isinstance((n := s.get("name")), str) and n.lower() == name.lower())
+        ]
+        if len(state.dynamic_schedules) < original_len:
+            self.save()
+            return True
+        return False
+
+    def get_dynamic_schedule(self, name: str) -> dict[str, object] | None:
+        """Get a dynamic schedule by name.
+
+        Args:
+            name: Schedule name
+
+        Returns:
+            Schedule dictionary if found, None otherwise
+        """
+        state = self.load()
+        for schedule in state.dynamic_schedules:
+            sched_name = schedule.get("name")
+            if isinstance(sched_name, str) and sched_name.lower() == name.lower():
+                return schedule
+        return None
+
+    def update_dynamic_schedule(self, name: str, updates: dict[str, object]) -> bool:
+        """Update a dynamic schedule.
+
+        Args:
+            name: Schedule name to update
+            updates: Dictionary of fields to update
+
+        Returns:
+            True if schedule was updated, False if not found
+        """
+        state = self.load()
+        for i, schedule in enumerate(state.dynamic_schedules):
+            sched_name = schedule.get("name")
+            if isinstance(sched_name, str) and sched_name.lower() == name.lower():
+                state.dynamic_schedules[i] = {**schedule, **updates}
+                self.save()
+                return True
+        return False
+
+    def get_schedule_history(
+        self,
+        schedule_name: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, object]]:
+        """Get schedule run history.
+
+        Args:
+            schedule_name: Optional filter by schedule name
+            limit: Maximum number of records to return
+
+        Returns:
+            List of run record dictionaries (most recent first)
+        """
+        state = self.load()
+        history = state.schedule_history
+
+        if schedule_name:
+            history = [
+                r
+                for r in history
+                if isinstance((n := r.get("schedule_name")), str)
+                and n.lower() == schedule_name.lower()
+            ]
+
+        # Return most recent first
+        history = list(reversed(history))
+
+        if limit:
+            history = history[:limit]
+
+        return history
+
+    def add_schedule_run(self, record: dict[str, object]) -> None:
+        """Add a schedule run record.
+
+        Args:
+            record: Run record dictionary
+        """
+        state = self.load()
+        state.schedule_history.append(record)
+        self.save()
+
+    def update_schedule_run(
+        self,
+        schedule_name: str,
+        started_at: str,
+        updates: dict[str, object],
+    ) -> bool:
+        """Update an existing run record (e.g., to mark as completed).
+
+        Args:
+            schedule_name: Schedule name
+            started_at: ISO timestamp of the run start
+            updates: Dictionary of fields to update
+
+        Returns:
+            True if record was updated, False if not found
+        """
+        state = self.load()
+        for i, record in enumerate(state.schedule_history):
+            rec_name = record.get("schedule_name")
+            if (
+                isinstance(rec_name, str)
+                and rec_name.lower() == schedule_name.lower()
+                and record.get("started_at") == started_at
+            ):
+                state.schedule_history[i] = {**record, **updates}
+                self.save()
+                return True
+        return False
+
+    def prune_schedule_history(self, limit: int) -> int:
+        """Prune schedule history to keep only the most recent entries.
+
+        Args:
+            limit: Maximum number of entries to keep
+
+        Returns:
+            Number of entries removed
+        """
+        state = self.load()
+        if len(state.schedule_history) <= limit:
+            return 0
+
+        removed = len(state.schedule_history) - limit
+        state.schedule_history = state.schedule_history[-limit:]
+        self.save()
+        return removed

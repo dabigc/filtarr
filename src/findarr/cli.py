@@ -23,6 +23,7 @@ from findarr.state import BatchProgress, StateManager
 if TYPE_CHECKING:
     from findarr.models.radarr import Movie
     from findarr.models.sonarr import Series
+    from findarr.scheduler import SchedulerManager
 
 app = typer.Typer(
     name="findarr",
@@ -31,6 +32,9 @@ app = typer.Typer(
 )
 check_app = typer.Typer(help="Check 4K availability for media items.")
 app.add_typer(check_app, name="check")
+
+schedule_app = typer.Typer(help="Manage scheduled batch operations.")
+app.add_typer(schedule_app, name="schedule")
 
 console = Console()
 error_console = Console(stderr=True)
@@ -761,6 +765,408 @@ def check_batch(
     raise typer.Exit(0 if has_4k_count == len(results) else 1)
 
 
+# =============================================================================
+# Schedule Commands
+# =============================================================================
+
+
+def _get_scheduler_manager() -> SchedulerManager:
+    """Get a SchedulerManager instance."""
+    from findarr.scheduler import SchedulerManager
+
+    config = Config.load()
+    state_manager = get_state_manager(config)
+    return SchedulerManager(config, state_manager)
+
+
+@schedule_app.command("list")
+def schedule_list(
+    enabled_only: Annotated[
+        bool, typer.Option("--enabled-only", help="Show only enabled schedules")
+    ] = False,
+    output_format: Annotated[
+        OutputFormat, typer.Option("--format", "-f", help="Output format")
+    ] = OutputFormat.TABLE,
+) -> None:
+    """List all configured schedules."""
+    from findarr.scheduler import format_trigger_description, get_next_run_time
+
+    manager = _get_scheduler_manager()
+    schedules = manager.get_all_schedules()
+
+    if enabled_only:
+        schedules = [s for s in schedules if s.enabled]
+
+    if not schedules:
+        console.print("[dim]No schedules configured[/dim]")
+        raise typer.Exit(0)
+
+    if output_format == OutputFormat.JSON:
+        data = [s.model_dump(mode="json") for s in schedules]
+        console.print(json.dumps(data, indent=2, default=str))
+    else:
+        table = Table(title="Configured Schedules")
+        table.add_column("Name", style="cyan")
+        table.add_column("Target", style="yellow")
+        table.add_column("Trigger", style="green")
+        table.add_column("Enabled", style="blue")
+        table.add_column("Source", style="dim")
+        table.add_column("Next Run", style="magenta")
+
+        for schedule in schedules:
+            next_run = get_next_run_time(schedule.trigger)
+            table.add_row(
+                schedule.name,
+                schedule.target.value,
+                format_trigger_description(schedule.trigger),
+                "Yes" if schedule.enabled else "No",
+                schedule.source,
+                next_run.strftime("%Y-%m-%d %H:%M") if schedule.enabled else "-",
+            )
+
+        console.print(table)
+
+
+@schedule_app.command("add")
+def schedule_add(
+    name: Annotated[str, typer.Argument(help="Unique schedule name")],
+    target: Annotated[
+        str, typer.Option("--target", "-t", help="What to check: movies, series, or both")
+    ] = "both",
+    cron: Annotated[
+        str | None, typer.Option("--cron", "-c", help="Cron expression (e.g., '0 3 * * *')")
+    ] = None,
+    interval: Annotated[
+        str | None, typer.Option("--interval", "-i", help="Interval (e.g., '6h', '1d', '30m')")
+    ] = None,
+    batch_size: Annotated[
+        int, typer.Option("--batch-size", "-b", help="Max items per run (0=unlimited)")
+    ] = 0,
+    delay: Annotated[
+        float, typer.Option("--delay", "-d", help="Delay between checks in seconds")
+    ] = 0.5,
+    skip_tagged: Annotated[
+        bool, typer.Option("--skip-tagged/--no-skip-tagged", help="Skip items with existing tags")
+    ] = True,
+    strategy: Annotated[
+        str, typer.Option("--strategy", "-s", help="Series strategy: recent, distributed, all")
+    ] = "recent",
+    seasons: Annotated[int, typer.Option("--seasons", help="Seasons to check for series")] = 3,
+    enabled: Annotated[
+        bool, typer.Option("--enabled/--disabled", help="Whether schedule is active")
+    ] = True,
+) -> None:
+    """Add a new dynamic schedule.
+
+    Examples:
+        findarr schedule add daily-movies --target movies --cron "0 3 * * *"
+        findarr schedule add hourly-check --target both --interval 6h
+        findarr schedule add weekly-series --target series --interval 1w --strategy recent
+    """
+    from findarr.scheduler import (
+        ScheduleDefinition,
+        ScheduleTarget,
+        SeriesStrategy,
+        parse_interval_string,
+    )
+    from findarr.scheduler.models import CronTrigger, IntervalTrigger
+
+    # Validate trigger
+    if not cron and not interval:
+        error_console.print("[red]Error:[/red] Must specify --cron or --interval")
+        raise typer.Exit(2)
+
+    if cron and interval:
+        error_console.print("[red]Error:[/red] Cannot specify both --cron and --interval")
+        raise typer.Exit(2)
+
+    # Parse trigger
+    trigger: IntervalTrigger | CronTrigger
+    if cron:
+        try:
+            trigger = CronTrigger(expression=cron)
+        except ValueError as e:
+            error_console.print(f"[red]Invalid cron expression:[/red] {e}")
+            raise typer.Exit(2) from e
+    else:
+        assert interval is not None
+        try:
+            trigger = parse_interval_string(interval)
+        except ValueError as e:
+            error_console.print(f"[red]Invalid interval:[/red] {e}")
+            raise typer.Exit(2) from e
+
+    # Validate target
+    try:
+        target_enum = ScheduleTarget(target.lower())
+    except ValueError:
+        error_console.print(
+            f"[red]Invalid target:[/red] {target}. Must be: movies, series, or both"
+        )
+        raise typer.Exit(2) from None
+
+    # Validate strategy
+    try:
+        strategy_enum = SeriesStrategy(strategy.lower())
+    except ValueError:
+        error_console.print(
+            f"[red]Invalid strategy:[/red] {strategy}. Must be: recent, distributed, or all"
+        )
+        raise typer.Exit(2) from None
+
+    # Create schedule
+    try:
+        schedule = ScheduleDefinition(
+            name=name,
+            enabled=enabled,
+            target=target_enum,
+            trigger=trigger,
+            batch_size=batch_size,
+            delay=delay,
+            skip_tagged=skip_tagged,
+            strategy=strategy_enum,
+            seasons=seasons,
+            source="dynamic",
+        )
+    except ValueError as e:
+        error_console.print(f"[red]Invalid schedule:[/red] {e}")
+        raise typer.Exit(2) from e
+
+    # Add schedule
+    manager = _get_scheduler_manager()
+    try:
+        manager.add_schedule(schedule)
+    except ValueError as e:
+        error_console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(2) from e
+
+    console.print(f"[green]Schedule '{schedule.name}' added successfully[/green]")
+    console.print("[dim]Note: Restart 'findarr serve' to activate new schedule[/dim]")
+
+
+@schedule_app.command("remove")
+def schedule_remove(
+    name: Annotated[str, typer.Argument(help="Schedule name to remove")],
+) -> None:
+    """Remove a dynamic schedule."""
+    manager = _get_scheduler_manager()
+
+    try:
+        removed = manager.remove_schedule(name)
+    except ValueError as e:
+        error_console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(2) from e
+
+    if removed:
+        console.print(f"[green]Schedule '{name}' removed[/green]")
+    else:
+        error_console.print(f"[red]Schedule not found:[/red] {name}")
+        raise typer.Exit(1)
+
+
+@schedule_app.command("enable")
+def schedule_enable(
+    name: Annotated[str, typer.Argument(help="Schedule name to enable")],
+) -> None:
+    """Enable a schedule."""
+    manager = _get_scheduler_manager()
+
+    try:
+        updated = manager.enable_schedule(name)
+    except ValueError as e:
+        error_console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(2) from e
+
+    if updated:
+        console.print(f"[green]Schedule '{name}' enabled[/green]")
+        console.print("[dim]Note: Restart 'findarr serve' to apply changes[/dim]")
+    else:
+        error_console.print(f"[red]Schedule not found:[/red] {name}")
+        raise typer.Exit(1)
+
+
+@schedule_app.command("disable")
+def schedule_disable(
+    name: Annotated[str, typer.Argument(help="Schedule name to disable")],
+) -> None:
+    """Disable a schedule."""
+    manager = _get_scheduler_manager()
+
+    try:
+        updated = manager.disable_schedule(name)
+    except ValueError as e:
+        error_console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(2) from e
+
+    if updated:
+        console.print(f"[green]Schedule '{name}' disabled[/green]")
+        console.print("[dim]Note: Restart 'findarr serve' to apply changes[/dim]")
+    else:
+        error_console.print(f"[red]Schedule not found:[/red] {name}")
+        raise typer.Exit(1)
+
+
+@schedule_app.command("run")
+def schedule_run(
+    name: Annotated[str, typer.Argument(help="Schedule name to run")],
+) -> None:
+    """Run a schedule immediately."""
+    manager = _get_scheduler_manager()
+
+    schedule = manager.get_schedule(name)
+    if schedule is None:
+        error_console.print(f"[red]Schedule not found:[/red] {name}")
+        raise typer.Exit(1)
+
+    console.print(f"[bold]Running schedule: {name}[/bold]")
+    console.print(f"  Target: {schedule.target.value}")
+    console.print(f"  Batch size: {schedule.batch_size or 'unlimited'}")
+    console.print()
+
+    async def run() -> None:
+        result = await manager.run_schedule(name)
+        console.print()
+        console.print(f"[bold]Result:[/bold] {result.status.value}")
+        console.print(f"  Items processed: {result.items_processed}")
+        console.print(f"  Items with 4K: {result.items_with_4k}")
+        if result.errors:
+            console.print(f"  Errors: {len(result.errors)}")
+            for error in result.errors[:5]:
+                error_console.print(f"    [red]- {error}[/red]")
+            if len(result.errors) > 5:
+                error_console.print(f"    [dim]... and {len(result.errors) - 5} more[/dim]")
+
+    asyncio.run(run())
+
+
+@schedule_app.command("history")
+def schedule_history(
+    name: Annotated[
+        str | None, typer.Option("--name", "-n", help="Filter by schedule name")
+    ] = None,
+    limit: Annotated[int, typer.Option("--limit", "-l", help="Maximum records to show")] = 20,
+    output_format: Annotated[
+        OutputFormat, typer.Option("--format", "-f", help="Output format")
+    ] = OutputFormat.TABLE,
+) -> None:
+    """Show schedule run history."""
+    manager = _get_scheduler_manager()
+    history = manager.get_history(schedule_name=name, limit=limit)
+
+    if not history:
+        console.print("[dim]No history found[/dim]")
+        raise typer.Exit(0)
+
+    if output_format == OutputFormat.JSON:
+        data = [r.model_dump(mode="json") for r in history]
+        console.print(json.dumps(data, indent=2, default=str))
+    else:
+        table = Table(title="Schedule Run History")
+        table.add_column("Schedule", style="cyan")
+        table.add_column("Started", style="blue")
+        table.add_column("Status", style="green")
+        table.add_column("Items", style="yellow")
+        table.add_column("4K", style="magenta")
+        table.add_column("Duration", style="dim")
+
+        for record in history:
+            status_style = {
+                "completed": "green",
+                "failed": "red",
+                "running": "yellow",
+                "skipped": "dim",
+            }.get(record.status.value, "white")
+
+            duration = ""
+            if record.duration_seconds() is not None:
+                secs = int(record.duration_seconds() or 0)
+                if secs < 60:
+                    duration = f"{secs}s"
+                elif secs < 3600:
+                    duration = f"{secs // 60}m {secs % 60}s"
+                else:
+                    duration = f"{secs // 3600}h {(secs % 3600) // 60}m"
+
+            table.add_row(
+                record.schedule_name,
+                record.started_at.strftime("%Y-%m-%d %H:%M"),
+                f"[{status_style}]{record.status.value}[/{status_style}]",
+                str(record.items_processed),
+                str(record.items_with_4k),
+                duration,
+            )
+
+        console.print(table)
+
+
+@schedule_app.command("export")
+def schedule_export(
+    format_type: Annotated[
+        str, typer.Option("--format", "-f", help="Export format: cron or systemd")
+    ] = "cron",
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Output file or directory (default: stdout)"),
+    ] = None,
+) -> None:
+    """Export schedules to external scheduler format.
+
+    Generates configuration for cron or systemd timers that run
+    'findarr check batch' commands equivalent to the configured schedules.
+
+    Examples:
+        findarr schedule export --format cron
+        findarr schedule export --format cron > /etc/cron.d/findarr
+        findarr schedule export --format systemd --output /etc/systemd/system/
+    """
+    from findarr.scheduler import export_cron, export_systemd
+
+    manager = _get_scheduler_manager()
+    schedules = manager.get_all_schedules()
+    enabled_schedules = [s for s in schedules if s.enabled]
+
+    if not enabled_schedules:
+        error_console.print("[yellow]No enabled schedules to export[/yellow]")
+        raise typer.Exit(0)
+
+    format_type = format_type.lower()
+    if format_type not in ("cron", "systemd"):
+        error_console.print(
+            f"[red]Invalid format:[/red] {format_type}. Must be 'cron' or 'systemd'"
+        )
+        raise typer.Exit(2)
+
+    if format_type == "cron":
+        content = export_cron(enabled_schedules)
+        if output:
+            output.write_text(content)
+            console.print(f"[green]Cron config written to:[/green] {output}")
+        else:
+            console.print(content)
+
+    else:  # systemd
+        if output:
+            results = export_systemd(enabled_schedules, output_dir=output)
+            console.print(f"[green]Generated {len(results)} systemd timer/service pairs:[/green]")
+            for name, _, _ in results:
+                console.print(f"  - findarr-{name}.timer")
+                console.print(f"  - findarr-{name}.service")
+            console.print()
+            console.print("[dim]To install:[/dim]")
+            console.print(f"  sudo cp {output}/findarr-*.{{timer,service}} /etc/systemd/system/")
+            console.print("  sudo systemctl daemon-reload")
+            for name, _, _ in results:
+                console.print(f"  sudo systemctl enable --now findarr-{name}.timer")
+        else:
+            results = export_systemd(enabled_schedules)
+            for name, timer_content, service_content in results:
+                console.print(f"[bold cyan]# findarr-{name}.timer[/bold cyan]")
+                console.print(timer_content)
+                console.print(f"[bold cyan]# findarr-{name}.service[/bold cyan]")
+                console.print(service_content)
+                console.print()
+
+
 @app.command()
 def version() -> None:
     """Show version information."""
@@ -795,12 +1201,23 @@ def serve(
             help="Logging level (debug, info, warning, error).",
         ),
     ] = "info",
+    scheduler: Annotated[
+        bool,
+        typer.Option(
+            "--scheduler/--no-scheduler",
+            help="Enable or disable the batch scheduler.",
+        ),
+    ] = True,
 ) -> None:
     """Start the webhook server to receive Radarr/Sonarr notifications.
 
     The server listens for webhook events from Radarr and Sonarr when new
     movies or series are added. When a webhook is received, findarr will
     automatically check 4K availability and apply tags based on your config.
+
+    The scheduler runs batch operations on configured schedules. Use
+    'findarr schedule list' to see configured schedules. Disable with
+    --no-scheduler if you only want webhook functionality.
 
     Configure webhooks in Radarr/Sonarr:
     - URL: http://<host>:<port>/webhook/radarr (or /webhook/sonarr)
@@ -811,6 +1228,7 @@ def serve(
     Example:
         findarr serve --port 8080
         findarr serve --host 0.0.0.0 --port 9000 --log-level debug
+        findarr serve --no-scheduler  # Webhooks only, no scheduled batches
     """
     try:
         from findarr.webhook import run_server
@@ -826,18 +1244,31 @@ def serve(
     # Use CLI args or fall back to config
     server_host = host or config.webhook.host
     server_port = port or config.webhook.port
+    scheduler_enabled = scheduler and config.scheduler.enabled
 
-    console.print("[bold green]Starting findarr webhook server[/bold green]")
+    console.print("[bold green]Starting findarr server[/bold green]")
     console.print(f"  Host: {server_host}")
     console.print(f"  Port: {server_port}")
     console.print(f"  Radarr configured: {'Yes' if config.radarr else 'No'}")
     console.print(f"  Sonarr configured: {'Yes' if config.sonarr else 'No'}")
+    console.print(f"  Scheduler: {'Enabled' if scheduler_enabled else 'Disabled'}")
+
+    if scheduler_enabled:
+        from findarr.scheduler import SchedulerManager
+
+        state_manager = get_state_manager(config)
+        manager = SchedulerManager(config, state_manager)
+        schedules = manager.get_all_schedules()
+        enabled_count = len([s for s in schedules if s.enabled])
+        console.print(f"  Schedules: {enabled_count} enabled")
+
     console.print()
-    console.print("[dim]Configure webhooks in Radarr/Sonarr to POST to:[/dim]")
+    console.print("[dim]Webhook endpoints:[/dim]")
     if config.radarr:
         console.print(f"  Radarr: http://{server_host}:{server_port}/webhook/radarr")
     if config.sonarr:
         console.print(f"  Sonarr: http://{server_host}:{server_port}/webhook/sonarr")
+    console.print(f"  Status: http://{server_host}:{server_port}/status")
     console.print()
 
     run_server(
@@ -845,6 +1276,7 @@ def serve(
         port=server_port,
         config=config,
         log_level=log_level,
+        scheduler_enabled=scheduler_enabled,
     )
 
 

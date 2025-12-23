@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Scheduler Module** (`pip install findarr[scheduler]`)
+  - Built-in job scheduler using APScheduler for automated batch operations
+  - Support for cron expressions and interval-based triggers
+  - Configurable schedules in config.toml with `[[scheduler.schedules]]` array
+  - Dynamic schedule management via CLI commands
+  - Schedule CLI commands:
+    - `findarr schedule list` - List all configured schedules
+    - `findarr schedule add <name>` - Add a new dynamic schedule
+    - `findarr schedule remove <name>` - Remove a dynamic schedule
+    - `findarr schedule enable/disable <name>` - Toggle schedule status
+    - `findarr schedule run <name>` - Execute a schedule immediately
+    - `findarr schedule history` - View run history with status and statistics
+    - `findarr schedule export --format cron|systemd` - Export for external schedulers
+
+- **Server Integration**
+  - Scheduler runs alongside webhook server in `findarr serve`
+  - New `--scheduler/--no-scheduler` flag to enable/disable scheduler
+  - `/status` endpoint for monitoring scheduler state
+  - Graceful shutdown with job completion
+
+- **Schedule Features**
+  - Full batch parameter support per schedule (batch_size, delay, skip_tagged, etc.)
+  - Overlap prevention - skips runs if previous still executing
+  - Run history tracking with timestamps, item counts, and errors
+  - Automatic history pruning (configurable limit)
+  - Export to cron and systemd timer formats
+
+### Changed
+
+- State file version bumped to v2 with scheduler state fields
+- `findarr serve` now shows scheduler status and schedule count
+
+### Dependencies
+
+- Added `apscheduler>=4.0.0a5` for scheduler optional dependency
+- Added `croniter>=2.0.0` for cron expression parsing
+
 ## [0.1.0] - 2024-12-22
 
 ### Added

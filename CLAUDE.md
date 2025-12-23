@@ -38,6 +38,9 @@ src/findarr/
 # Install with dev dependencies
 uv sync --dev
 
+# Install pre-commit hooks (required for contributors)
+uv run pre-commit install
+
 # Run tests
 uv run pytest
 
@@ -52,7 +55,30 @@ uv run ruff format src tests
 
 # Type check
 uv run mypy src
+
+# Run all pre-commit hooks manually
+uv run pre-commit run --all-files
 ```
+
+## Pre-Commit Checklist (CRITICAL)
+
+**BEFORE creating any commit, Claude MUST run these checks and fix all errors:**
+
+1. **Lint check**: `uv run ruff check src tests`
+   - Fix any lint errors before proceeding
+   - Common issues: Yoda conditions (SIM300), import ordering (I001)
+
+2. **Type check**: `uv run mypy src`
+   - Fix any type errors before proceeding
+   - Common issues: Missing type stubs, incorrect type narrowing
+
+3. **Tests**: `uv run pytest`
+   - Ensure all tests pass
+
+**DO NOT commit if any of these checks fail.** Fix issues first, then commit.
+
+This project uses pre-commit hooks that enforce these checks automatically. If a commit
+is rejected by pre-commit, review the error output and fix the issues before retrying.
 
 ## API Design Principles
 
