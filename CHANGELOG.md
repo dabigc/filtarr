@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2] - 2025-12-23
+
 ### Added
 
 - **Scheduler Module** (`pip install findarr[scheduler]`)
@@ -36,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Automatic history pruning (configurable limit)
   - Export to cron and systemd timer formats
 
+- **Development**
+  - Pre-commit hooks for automated linting and type checking
+  - Docker Compose configuration with `.env.example`
+
 ### Changed
 
 - State file version bumped to v2 with scheduler state fields
@@ -45,13 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `apscheduler>=4.0.0a5` for scheduler optional dependency
 - Added `croniter>=2.0.0` for cron expression parsing
+- Added `pre-commit>=4.0.0` for development
 
-## [0.1.0] - 2024-12-22
+## [0.0.1] - 2025-12-23
 
 ### Added
 
-- Initial release of findarr library
-- **Core Features**
+- **Core Library**
   - `FourKChecker` - High-level API for checking 4K availability
   - `RadarrClient` - Async client for Radarr API v3
   - `SonarrClient` - Async client for Sonarr API v3
@@ -78,6 +84,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Multiple output formats: `--format json|table|simple`
   - Strategy selection: `--strategy recent|distributed|all`
 
+- **Batch Operations**
+  - `findarr batch check` - Check multiple items for 4K availability
+  - `findarr batch tag` - Tag items based on 4K status
+  - `findarr batch report` - Generate availability reports
+  - Configurable batch size and delay between requests
+  - Progress tracking with rich console output
+
+- **Tagging System**
+  - Automatic tagging of items based on 4K availability
+  - Configurable tag names (`4k-available`, `no-4k`, etc.)
+  - Support for both Radarr and Sonarr tagging APIs
+
+- **State Management**
+  - Persistent state file for tracking checked items
+  - Resume capability for interrupted batch operations
+  - Configurable state file location
+
+- **Webhook Server** (`pip install findarr[webhook]`)
+  - FastAPI-based webhook endpoint
+  - `findarr serve` command to run the server
+  - Receive notifications from Radarr/Sonarr
+  - Docker container with GitHub Container Registry publishing
+
 - **Configuration**
   - Environment variables: `RADARR_URL`, `RADARR_API_KEY`, `SONARR_URL`, `SONARR_API_KEY`
   - TOML config file support: `~/.config/findarr/config.toml`
@@ -87,10 +116,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - TTL cache for API responses (5-minute default)
   - Full async/await support with httpx
   - Type annotations and mypy strict mode
-  - 91% test coverage with 109 tests
+  - GitHub Actions CI/CD pipeline
+  - Docker image publishing to ghcr.io
 
 ### Technical Details
 
 - Python 3.11+ required
 - Core dependencies: httpx, pydantic v2, tenacity, cachetools
 - CLI dependencies: typer, rich (optional)
+- Webhook dependencies: fastapi, uvicorn (optional)
