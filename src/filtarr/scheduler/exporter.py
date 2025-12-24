@@ -150,7 +150,7 @@ def export_systemd_timer(
 #   sudo systemctl enable --now filtarr-{schedule.name}.timer
 
 [Unit]
-Description=Findarr scheduled batch check: {schedule.name}
+Description=Filtarr scheduled batch check: {schedule.name}
 
 [Timer]
 OnCalendar={on_calendar}
@@ -165,7 +165,7 @@ WantedBy=timers.target
 # Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 [Unit]
-Description=Findarr batch check: {schedule.name}
+Description=Filtarr batch check: {schedule.name}
 After=network-online.target
 Wants=network-online.target
 

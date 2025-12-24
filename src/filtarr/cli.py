@@ -1138,7 +1138,7 @@ def schedule_export(
 
     Examples:
         filtarr schedule export --format cron
-        filtarr schedule export --format cron > /etc/cron.d/findarr
+        filtarr schedule export --format cron > /etc/cron.d/filtarr
         filtarr schedule export --format systemd --output /etc/systemd/system/
     """
     from filtarr.scheduler import export_cron, export_systemd
@@ -1234,7 +1234,7 @@ def serve(
     """Start the webhook server to receive Radarr/Sonarr notifications.
 
     The server listens for webhook events from Radarr and Sonarr when new
-    movies or series are added. When a webhook is received, findarr will
+    movies or series are added. When a webhook is received, filtarr will
     automatically check 4K availability and apply tags based on your config.
 
     The scheduler runs batch operations on configured schedules. Use

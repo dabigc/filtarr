@@ -147,9 +147,9 @@ jobs:
             ```bash
             docker run -d \
               -p 8080:8080 \
-              -e FINDARR_RADARR_URL="http://radarr:7878" \
-              -e FINDARR_RADARR_API_KEY="your-key" \
-              -e FINDARR_SONARR_URL="http://sonarr:8989" \
-              -e FINDARR_SONARR_API_KEY="your-key" \
+              -e FILTARR_RADARR_URL="http://radarr:7878" \
+              -e FILTARR_RADARR_API_KEY="your-key" \
+              -e FILTARR_SONARR_URL="http://sonarr:8989" \
+              -e FILTARR_SONARR_API_KEY="your-key" \
               ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             ```

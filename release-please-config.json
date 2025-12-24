@@ -3,7 +3,7 @@
   "packages": {
     ".": {
       "release-type": "python",
-      "package-name": "findarr",
+      "package-name": "filtarr",
       "include-component-in-tag": false,
       "include-v-in-tag": true,
       "changelog-path": "CHANGELOG.md",
@@ -16,12 +16,12 @@
       "extra-files": [
         {
           "type": "generic",
-          "path": "src/findarr/__init__.py",
+          "path": "src/filtarr/__init__.py",
           "glob": false
         },
         {
           "type": "generic",
-          "path": "src/findarr/webhook.py",
+          "path": "src/filtarr/webhook.py",
           "glob": false
         }
       ]

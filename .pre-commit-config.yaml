@@ -1,4 +1,4 @@
-# Pre-commit hooks for findarr
+# Pre-commit hooks for filtarr
 # Install: uv run pre-commit install
 # Run manually: uv run pre-commit run --all-files
 

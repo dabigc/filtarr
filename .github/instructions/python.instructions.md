@@ -26,7 +26,7 @@ async def check_4k_available(movie_id: int):
 
 ## Pydantic Models
 
-Located in `src/findarr/models/`. Follow these patterns:
+Located in `src/filtarr/models/`. Follow these patterns:
 
 ```python
 from pydantic import BaseModel, ConfigDict, Field
@@ -44,7 +44,7 @@ class Release(BaseModel):
 Enforced by ruff. Order:
 1. Standard library
 2. Third-party (`httpx`, `pydantic`)
-3. First-party (`findarr`)
+3. First-party (`filtarr`)
 
 ## Docstrings
 

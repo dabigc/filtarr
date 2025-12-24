@@ -1,4 +1,4 @@
-# Copilot Instructions for findarr
+# Copilot Instructions for filtarr
 
 ## Code Review Focus
 
@@ -38,7 +38,7 @@ uv run mypy src
 
 - **Line length**: 100 characters
 - **Target Python**: 3.11+
-- **Import sorting**: isort via ruff (first-party: `findarr`)
+- **Import sorting**: isort via ruff (first-party: `filtarr`)
 - **Type annotations**: Required everywhere (mypy strict mode)
 
 ## Async Patterns
@@ -68,8 +68,8 @@ async def fetch_releases(self, movie_id: int) -> list[Release]:
 
 ## Error Handling
 
-Use custom exceptions from `findarr.exceptions`:
-- `FindarrError` - base exception
+Use custom exceptions from `filtarr.exceptions`:
+- `FiltarrError` - base exception
 - `APIError` - API communication failures
 - `AuthenticationError` - invalid API key
 - `NotFoundError` - resource not found

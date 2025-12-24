@@ -4,7 +4,7 @@ Project-specific instructions for Claude Code.
 
 ## Project Overview
 
-**findarr** is a Python library for checking 4K availability of media items via Radarr/Sonarr search results. It provides a programmatic API for querying whether movies (via Radarr) and TV shows (via Sonarr) are available in 4K resolution from indexers.
+**filtarr** is a Python library for checking media availability via Radarr/Sonarr search results using configurable search criteria. It provides a programmatic API for querying whether movies (via Radarr) and TV shows (via Sonarr) match specific criteria (e.g., 4K resolution, HDR, Dolby Vision) from indexers.
 
 ## Tech Stack
 
@@ -18,7 +18,7 @@ Project-specific instructions for Claude Code.
 ## Project Structure
 
 ```
-src/findarr/
+src/filtarr/
 ├── __init__.py       # Public API exports
 ├── clients/          # Radarr/Sonarr API clients
 │   ├── radarr.py
@@ -45,7 +45,7 @@ uv run pre-commit install
 uv run pytest
 
 # Run tests with coverage
-uv run pytest --cov=findarr --cov-report=term-missing
+uv run pytest --cov=filtarr --cov-report=term-missing
 
 # Lint
 uv run ruff check src tests
