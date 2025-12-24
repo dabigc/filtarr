@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Build stage - install dependencies
-FROM python:3.12-alpine AS builder
+FROM python:3.14-alpine AS builder
 
 # Install build dependencies and uv
 RUN apk add --no-cache gcc musl-dev libffi-dev
@@ -24,7 +24,7 @@ RUN uv pip install --no-deps -e .
 
 
 # Runtime stage - minimal image
-FROM python:3.12-alpine AS runtime
+FROM python:3.14-alpine AS runtime
 
 # Install runtime dependencies, create non-root user, and set up directories
 # Combined into single layer to minimize image size
