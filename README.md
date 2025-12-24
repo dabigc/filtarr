@@ -383,21 +383,14 @@ docker run -d \
 
 #### Docker Compose
 
-Create a `.env` file with your configuration:
+Copy the example environment file and add your API keys:
 
 ```bash
-# .env
-FILTARR_RADARR_URL=http://radarr:7878
-FILTARR_RADARR_API_KEY=your-radarr-key
-FILTARR_SONARR_URL=http://sonarr:8989
-FILTARR_SONARR_API_KEY=your-sonarr-key
-
-# Optional: customize tags
-FILTARR_TAG_AVAILABLE=4k-available
-FILTARR_TAG_UNAVAILABLE=4k-unavailable
+cp .env.example .env
+# Edit .env with your Radarr/Sonarr API keys
 ```
 
-Then use this `docker-compose.yml`:
+Then start the container:
 
 ```yaml
 services:
