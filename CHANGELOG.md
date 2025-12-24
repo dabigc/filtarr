@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4](https://github.com/dabigc/filtarr/compare/v1.1.3...v1.1.4) (2025-12-24)
+
+
+### Bug Fixes
+
+* **ci:** inline PyPI publishing in release-please workflow ([#39](https://github.com/dabigc/filtarr/issues/39)) ([73507e3](https://github.com/dabigc/filtarr/commit/73507e38bcf7e9d4971f5a6a38fc877c05453095))
+
 ## [1.1.3](https://github.com/dabigc/filtarr/compare/v1.1.2...v1.1.3) (2025-12-24)
 
 
