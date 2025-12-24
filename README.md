@@ -1,6 +1,62 @@
 # Filtarr
 
-A Python library and CLI for checking 4K availability of media via Radarr/Sonarr search results.
+[![CI](https://github.com/dabigc/filtarr/actions/workflows/ci.yml/badge.svg)](https://github.com/dabigc/filtarr/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/filtarr.svg)](https://pypi.org/project/filtarr/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![codecov](https://codecov.io/gh/dabigc/filtarr/graph/badge.svg)](https://codecov.io/gh/dabigc/filtarr)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://github.com/dabigc/filtarr/pkgs/container/filtarr)
+
+**Running multiple Radarr/Sonarr instances?** You know the problem: your 4K instance fills up with movies that will *never* be available in 4K, your indexers get hammered searching for releases that don't exist, and tools like [Huntarr](https://github.com/plexguide/Huntarr.io) waste API calls hunting for content you'll never find.
+
+**Filtarr solves this.** Instead of blindly syncing your entire library to secondary instances, filtarr checks what's *actually available* from your indexers and tags items accordingly. Only sync what you can actually get.
+
+## How It Works
+
+```
+┌─────────────────┐     ┌──────────┐     ┌─────────────────┐
+│  Primary Radarr │────▶│  Filtarr │────▶│  Tags Applied   │
+│  (All Movies)   │     │          │     │  • 4k-available │
+└─────────────────┘     │ Searches │     │  • 4k-unavailable│
+                        │ Indexers │     └────────┬────────┘
+                        └──────────┘              │
+                                                  ▼
+                              ┌─────────────────────────────┐
+                              │  Secondary Radarr (4K)      │
+                              │  Import List filtered by    │
+                              │  "4k-available" tag         │
+                              └─────────────────────────────┘
+```
+
+1. **Filtarr queries your indexers** through Radarr/Sonarr's search API—using the same sources *you* have access to
+2. **Tags are applied** based on availability: `4k-available` or `4k-unavailable`
+3. **Use import lists** with tag filters to sync only available content to secondary instances
+
+## Why Filtarr?
+
+| Problem | Filtarr Solution |
+|---------|------------------|
+| Secondary instance cluttered with unavailable content | Only syncs what's actually available |
+| Wasted API calls searching for non-existent releases | Fewer items = fewer searches |
+| Manual checking is tedious | Automated via webhooks, schedules, or batch operations |
+| Don't know if content will ever be available | Clear tagging shows availability at a glance |
+
+## Use Cases
+
+- **4K Instance Management** — Only add movies/shows that have 4K releases on your indexers
+- **Special Edition Hunting** — Tag content with Director's Cuts, IMAX editions, or remasters available
+- **HDR/DV Filtering** — Separate HDR/Dolby Vision content from SDR libraries
+- **Smart Huntarr Integration** — Stop Huntarr from searching for content that doesn't exist
+
+## Features
+
+- **Multiple Check Methods**: CLI, Python API, webhooks, or scheduled jobs
+- **Flexible Criteria**: Built-in presets (4K, HDR, Director's Cut) or custom matching functions
+- **Smart Tagging**: Automatic tag creation and management in Radarr/Sonarr
+- **Series Sampling**: Efficiently check TV shows without querying every season
+- **Resume Support**: Batch operations can be interrupted and resumed
+- **Docker Ready**: Official image at `ghcr.io/dabigc/filtarr`
 
 ## Quick Start
 
