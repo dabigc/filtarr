@@ -65,7 +65,7 @@ ReleaseChecker
 SearchResult
     Result container for release searches.
 SearchCriteria
-    Predefined search criteria (FOUR_K, HDR, DIRECTORS_CUT, etc.).
+    Predefined search criteria (FOUR_K, HDR, DOLBY_VISION, DIRECTORS_CUT, etc.).
 ResultType
     Type of search result.
 RadarrClient
