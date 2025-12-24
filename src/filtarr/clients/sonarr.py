@@ -3,9 +3,9 @@
 from datetime import date
 from typing import Any
 
-from findarr.clients.base import BaseArrClient
-from findarr.models.common import Quality, Release, Tag
-from findarr.models.sonarr import Episode, Season, Series
+from filtarr.clients.base import BaseArrClient
+from filtarr.models.common import Quality, Release, Tag
+from filtarr.models.sonarr import Episode, Season, Series
 
 
 class SonarrClient(BaseArrClient):

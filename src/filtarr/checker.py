@@ -1,4 +1,4 @@
-"""Main 4K availability checker combining Radarr and Sonarr."""
+"""Main release checker combining Radarr and Sonarr."""
 
 from __future__ import annotations
 
@@ -8,13 +8,16 @@ from datetime import date
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from findarr.clients.radarr import RadarrClient
-from findarr.clients.sonarr import SonarrClient
-from findarr.config import TagConfig
+from filtarr.clients.radarr import RadarrClient
+from filtarr.clients.sonarr import SonarrClient
+from filtarr.config import TagConfig
+from filtarr.criteria import ResultType, SearchCriteria, get_matcher_for_criteria
 
 if TYPE_CHECKING:
-    from findarr.models.common import Release
-    from findarr.models.sonarr import Episode
+    from collections.abc import Callable
+
+    from filtarr.models.common import Release
+    from filtarr.models.sonarr import Episode
 
 logger = logging.getLogger(__name__)
 
@@ -45,22 +48,41 @@ class TagResult:
 
 
 @dataclass
-class FourKResult:
-    """Result of a 4K availability check."""
+class SearchResult:
+    """Result of a release search/availability check."""
 
     item_id: int
     item_type: str  # "movie" or "series"
-    has_4k: bool
+    has_match: bool
+    result_type: ResultType = ResultType.FOUR_K
     item_name: str | None = None
     releases: list[Release] = field(default_factory=list)
     episodes_checked: list[int] = field(default_factory=list)
     seasons_checked: list[int] = field(default_factory=list)
     strategy_used: SamplingStrategy | None = None
     tag_result: TagResult | None = None
+    _criteria: SearchCriteria | Callable[[Release], bool] | None = field(default=None, repr=False)
+
+    @property
+    def matched_releases(self) -> list[Release]:
+        """Get only the releases that match the search criteria."""
+        if self._criteria is None:
+            # Default to 4K for backward compatibility
+            return [r for r in self.releases if r.is_4k()]
+        if isinstance(self._criteria, SearchCriteria):
+            matcher = get_matcher_for_criteria(self._criteria)
+            return [r for r in self.releases if matcher(r)]
+        return [r for r in self.releases if self._criteria(r)]
+
+    # Backward compatibility aliases
+    @property
+    def has_4k(self) -> bool:
+        """Alias for has_match when searching for 4K."""
+        return self.has_match
 
     @property
     def four_k_releases(self) -> list[Release]:
-        """Get only the 4K releases."""
+        """Alias for matched_releases (backward compatibility)."""
         return [r for r in self.releases if r.is_4k()]
 
 
@@ -108,8 +130,12 @@ def select_seasons_to_check(
     return sorted_seasons
 
 
-class FourKChecker:
-    """Check 4K availability across Radarr and Sonarr."""
+class ReleaseChecker:
+    """Check release availability across Radarr and Sonarr.
+
+    Supports searching for various release criteria including 4K, HDR,
+    Director's Cut, and custom criteria via callables.
+    """
 
     def __init__(
         self,
@@ -120,7 +146,7 @@ class FourKChecker:
         timeout: float = 120.0,
         tag_config: TagConfig | None = None,
     ) -> None:
-        """Initialize the 4K checker.
+        """Initialize the release checker.
 
         Args:
             radarr_url: The base URL of the Radarr instance
@@ -128,7 +154,7 @@ class FourKChecker:
             sonarr_url: The base URL of the Sonarr instance
             sonarr_api_key: The Sonarr API key
             timeout: Request timeout in seconds (default 120.0)
-            tag_config: Configuration for 4K tagging (optional)
+            tag_config: Configuration for tagging (optional)
         """
         self._radarr_config = (
             (radarr_url, radarr_api_key) if radarr_url and radarr_api_key else None
@@ -143,18 +169,20 @@ class FourKChecker:
         self,
         movie_id: int,
         *,
+        criteria: SearchCriteria | Callable[[Release], bool] = SearchCriteria.FOUR_K,
         apply_tags: bool = True,
         dry_run: bool = False,
-    ) -> FourKResult:
-        """Check if a movie has 4K releases available.
+    ) -> SearchResult:
+        """Check if a movie has releases matching the criteria.
 
         Args:
             movie_id: The Radarr movie ID
+            criteria: Search criteria - either a SearchCriteria enum or custom callable
             apply_tags: Whether to apply tags to the movie (default True)
             dry_run: If True, don't actually apply tags (default False)
 
         Returns:
-            FourKResult with availability information
+            SearchResult with availability information
 
         Raises:
             ValueError: If Radarr is not configured
@@ -169,19 +197,30 @@ class FourKChecker:
             movie_name = movie.title if movie else None
 
             releases = await client.get_movie_releases(movie_id)
-            has_4k = any(r.is_4k() for r in releases)
+
+            # Determine matcher based on criteria
+            if isinstance(criteria, SearchCriteria):
+                matcher = get_matcher_for_criteria(criteria)
+                result_type = ResultType(criteria.value)
+            else:
+                matcher = criteria
+                result_type = ResultType.CUSTOM
+
+            has_match = any(matcher(r) for r in releases)
 
             tag_result: TagResult | None = None
             if apply_tags:
-                tag_result = await self._apply_movie_tags(client, movie_id, has_4k, dry_run)
+                tag_result = await self._apply_movie_tags(client, movie_id, has_match, dry_run)
 
-            return FourKResult(
+            return SearchResult(
                 item_id=movie_id,
                 item_type="movie",
-                has_4k=has_4k,
+                has_match=has_match,
+                result_type=result_type,
                 item_name=movie_name,
                 releases=releases,
                 tag_result=tag_result,
+                _criteria=criteria,
             )
 
     async def _apply_movie_tags(
@@ -310,18 +349,20 @@ class FourKChecker:
         self,
         name: str,
         *,
+        criteria: SearchCriteria | Callable[[Release], bool] = SearchCriteria.FOUR_K,
         apply_tags: bool = True,
         dry_run: bool = False,
-    ) -> FourKResult:
-        """Check if a movie has 4K releases available by name.
+    ) -> SearchResult:
+        """Check if a movie has releases matching criteria by name.
 
         Args:
             name: The movie title to search for
+            criteria: Search criteria - either a SearchCriteria enum or custom callable
             apply_tags: Whether to apply tags to the movie (default True)
             dry_run: If True, don't actually apply tags (default False)
 
         Returns:
-            FourKResult with availability information
+            SearchResult with availability information
 
         Raises:
             ValueError: If Radarr is not configured or movie not found
@@ -335,19 +376,30 @@ class FourKChecker:
             if movie is None:
                 raise ValueError(f"Movie not found: {name}")
             releases = await client.get_movie_releases(movie.id)
-            has_4k = any(r.is_4k() for r in releases)
+
+            # Determine matcher based on criteria
+            if isinstance(criteria, SearchCriteria):
+                matcher = get_matcher_for_criteria(criteria)
+                result_type = ResultType(criteria.value)
+            else:
+                matcher = criteria
+                result_type = ResultType.CUSTOM
+
+            has_match = any(matcher(r) for r in releases)
 
             tag_result: TagResult | None = None
             if apply_tags:
-                tag_result = await self._apply_movie_tags(client, movie.id, has_4k, dry_run)
+                tag_result = await self._apply_movie_tags(client, movie.id, has_match, dry_run)
 
-            return FourKResult(
+            return SearchResult(
                 item_id=movie.id,
                 item_type="movie",
-                has_4k=has_4k,
+                has_match=has_match,
+                result_type=result_type,
                 item_name=movie.title,
                 releases=releases,
                 tag_result=tag_result,
+                _criteria=criteria,
             )
 
     async def search_movies(self, term: str) -> list[tuple[int, str, int]]:
@@ -374,12 +426,13 @@ class FourKChecker:
         self,
         series_id: int,
         *,
+        criteria: SearchCriteria | Callable[[Release], bool] = SearchCriteria.FOUR_K,
         strategy: SamplingStrategy = SamplingStrategy.RECENT,
         seasons_to_check: int = 3,
         apply_tags: bool = True,
         dry_run: bool = False,
-    ) -> FourKResult:
-        """Check if a series has 4K releases available.
+    ) -> SearchResult:
+        """Check if a series has releases matching the criteria.
 
         Uses episode-level checking with configurable sampling strategy.
         First checks the latest aired episode for a quick result, then
@@ -387,19 +440,28 @@ class FourKChecker:
 
         Args:
             series_id: The Sonarr series ID
+            criteria: Search criteria - either a SearchCriteria enum or custom callable
             strategy: The sampling strategy for selecting episodes
             seasons_to_check: Max seasons to check for RECENT strategy
             apply_tags: Whether to apply tags to the series (default True)
             dry_run: If True, don't actually apply tags (default False)
 
         Returns:
-            FourKResult with availability and checked episode information
+            SearchResult with availability and checked episode information
 
         Raises:
             ValueError: If Sonarr is not configured
         """
         if not self._sonarr_config:
             raise ValueError("Sonarr is not configured")
+
+        # Determine matcher based on criteria
+        if isinstance(criteria, SearchCriteria):
+            matcher = get_matcher_for_criteria(criteria)
+            result_type = ResultType(criteria.value)
+        else:
+            matcher = criteria
+            result_type = ResultType.CUSTOM
 
         url, api_key = self._sonarr_config
         async with SonarrClient(url, api_key, timeout=self._timeout) as client:
@@ -419,13 +481,15 @@ class FourKChecker:
                 tag_result: TagResult | None = None
                 if apply_tags:
                     tag_result = await self._apply_series_tags(client, series_id, False, dry_run)
-                return FourKResult(
+                return SearchResult(
                     item_id=series_id,
                     item_type="series",
-                    has_4k=False,
+                    has_match=False,
+                    result_type=result_type,
                     item_name=series_name,
                     strategy_used=strategy,
                     tag_result=tag_result,
+                    _criteria=criteria,
                 )
 
             # Group episodes by season
@@ -459,63 +523,69 @@ class FourKChecker:
                 episodes_checked.append(latest_in_season.id)
                 seasons_checked.append(season_num)
 
-                # Check if any 4K releases found
-                four_k_found = any(r.is_4k() for r in releases)
+                # Check if any matching releases found
+                match_found = any(matcher(r) for r in releases)
                 all_releases.extend(releases)
 
-                # Short-circuit if 4K found
-                if four_k_found:
+                # Short-circuit if match found
+                if match_found:
                     tag_result = None
                     if apply_tags:
                         tag_result = await self._apply_series_tags(client, series_id, True, dry_run)
-                    return FourKResult(
+                    return SearchResult(
                         item_id=series_id,
                         item_type="series",
-                        has_4k=True,
+                        has_match=True,
+                        result_type=result_type,
                         item_name=series_name,
                         releases=all_releases,
                         episodes_checked=episodes_checked,
                         seasons_checked=seasons_checked,
                         strategy_used=strategy,
                         tag_result=tag_result,
+                        _criteria=criteria,
                     )
 
-            # No 4K found after checking all sampled episodes
+            # No match found after checking all sampled episodes
             tag_result = None
             if apply_tags:
                 tag_result = await self._apply_series_tags(client, series_id, False, dry_run)
-            return FourKResult(
+            return SearchResult(
                 item_id=series_id,
                 item_type="series",
-                has_4k=False,
+                has_match=False,
+                result_type=result_type,
                 item_name=series_name,
                 releases=all_releases,
                 episodes_checked=episodes_checked,
                 seasons_checked=seasons_checked,
                 strategy_used=strategy,
                 tag_result=tag_result,
+                _criteria=criteria,
             )
 
     async def check_series_by_name(
         self,
         name: str,
         *,
+        criteria: SearchCriteria | Callable[[Release], bool] = SearchCriteria.FOUR_K,
         strategy: SamplingStrategy = SamplingStrategy.RECENT,
         seasons_to_check: int = 3,
         apply_tags: bool = True,
         dry_run: bool = False,
-    ) -> FourKResult:
-        """Check if a series has 4K releases available by name.
+    ) -> SearchResult:
+        """Check if a series has releases matching criteria by name.
 
         Args:
             name: The series title to search for
+            criteria: Search criteria - either a SearchCriteria enum or custom callable
             strategy: The sampling strategy for selecting episodes
             seasons_to_check: Max seasons to check for RECENT strategy
             apply_tags: Whether to apply tags to the series (default True)
             dry_run: If True, don't actually apply tags (default False)
 
         Returns:
-            FourKResult with availability and checked episode information
+            SearchResult with availability and checked episode information
 
         Raises:
             ValueError: If Sonarr is not configured or series not found
@@ -532,6 +602,7 @@ class FourKChecker:
         # Now use check_series with the found ID
         return await self.check_series(
             series.id,
+            criteria=criteria,
             strategy=strategy,
             seasons_to_check=seasons_to_check,
             apply_tags=apply_tags,

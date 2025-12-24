@@ -6,21 +6,21 @@ import shutil
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from findarr.scheduler.models import CronTrigger, IntervalTrigger, ScheduleDefinition
-from findarr.scheduler.triggers import trigger_to_cron_expression
+from filtarr.scheduler.models import CronTrigger, IntervalTrigger, ScheduleDefinition
+from filtarr.scheduler.triggers import trigger_to_cron_expression
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _get_findarr_path() -> str:
-    """Get the path to the findarr executable."""
-    # Try to find findarr in PATH
-    findarr_path = shutil.which("findarr")
-    if findarr_path:
-        return findarr_path
+def _get_filtarr_path() -> str:
+    """Get the path to the filtarr executable."""
+    # Try to find filtarr in PATH
+    filtarr_path = shutil.which("filtarr")
+    if filtarr_path:
+        return filtarr_path
     # Fallback to generic command
-    return "findarr"
+    return "filtarr"
 
 
 def _schedule_to_batch_args(schedule: ScheduleDefinition) -> str:
@@ -70,29 +70,29 @@ def _schedule_to_batch_args(schedule: ScheduleDefinition) -> str:
 
 def export_cron(
     schedules: list[ScheduleDefinition],
-    findarr_path: str | None = None,
+    filtarr_path: str | None = None,
 ) -> str:
     """Export schedules to cron format.
 
     Args:
         schedules: List of schedule definitions
-        findarr_path: Path to findarr executable (auto-detected if None)
+        filtarr_path: Path to filtarr executable (auto-detected if None)
 
     Returns:
         Crontab content string
     """
-    if findarr_path is None:
-        findarr_path = _get_findarr_path()
+    if filtarr_path is None:
+        filtarr_path = _get_filtarr_path()
 
     lines = [
-        "# findarr scheduled batch operations",
+        "# filtarr scheduled batch operations",
         f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         "# Add these lines to your crontab (crontab -e)",
         "",
         "# Environment setup (adjust as needed)",
         "# PATH=/usr/local/bin:/usr/bin:/bin",
-        "# FINDARR_RADARR_URL=http://localhost:7878",
-        "# FINDARR_RADARR_API_KEY=your-api-key",
+        "# FILTARR_RADARR_URL=http://localhost:7878",
+        "# FILTARR_RADARR_API_KEY=your-api-key",
         "",
     ]
 
@@ -105,7 +105,7 @@ def export_cron(
     for schedule in enabled_schedules:
         cron_expr = trigger_to_cron_expression(schedule.trigger)
         batch_args = _schedule_to_batch_args(schedule)
-        command = f"{findarr_path} {batch_args}"
+        command = f"{filtarr_path} {batch_args}"
 
         lines.extend(
             [
@@ -121,33 +121,33 @@ def export_cron(
 
 def export_systemd_timer(
     schedule: ScheduleDefinition,
-    findarr_path: str | None = None,
+    filtarr_path: str | None = None,
 ) -> tuple[str, str]:
     """Export a single schedule to systemd timer and service files.
 
     Args:
         schedule: Schedule definition
-        findarr_path: Path to findarr executable (auto-detected if None)
+        filtarr_path: Path to filtarr executable (auto-detected if None)
 
     Returns:
         Tuple of (timer_content, service_content)
     """
-    if findarr_path is None:
-        findarr_path = _get_findarr_path()
+    if filtarr_path is None:
+        filtarr_path = _get_filtarr_path()
 
     batch_args = _schedule_to_batch_args(schedule)
 
     # Convert trigger to systemd OnCalendar format
     on_calendar = _trigger_to_systemd_calendar(schedule.trigger)
 
-    timer_content = f"""# /etc/systemd/system/findarr-{schedule.name}.timer
+    timer_content = f"""# /etc/systemd/system/filtarr-{schedule.name}.timer
 # Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 #
 # Install:
-#   sudo cp findarr-{schedule.name}.timer /etc/systemd/system/
-#   sudo cp findarr-{schedule.name}.service /etc/systemd/system/
+#   sudo cp filtarr-{schedule.name}.timer /etc/systemd/system/
+#   sudo cp filtarr-{schedule.name}.service /etc/systemd/system/
 #   sudo systemctl daemon-reload
-#   sudo systemctl enable --now findarr-{schedule.name}.timer
+#   sudo systemctl enable --now filtarr-{schedule.name}.timer
 
 [Unit]
 Description=Findarr scheduled batch check: {schedule.name}
@@ -161,7 +161,7 @@ RandomizedDelaySec=300
 WantedBy=timers.target
 """
 
-    service_content = f"""# /etc/systemd/system/findarr-{schedule.name}.service
+    service_content = f"""# /etc/systemd/system/filtarr-{schedule.name}.service
 # Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 [Unit]
@@ -171,12 +171,12 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart={findarr_path} {batch_args}
+ExecStart={filtarr_path} {batch_args}
 # Uncomment and configure environment variables:
-# Environment="FINDARR_RADARR_URL=http://localhost:7878"
-# Environment="FINDARR_RADARR_API_KEY=your-api-key"
+# Environment="FILTARR_RADARR_URL=http://localhost:7878"
+# Environment="FILTARR_RADARR_API_KEY=your-api-key"
 # Or use an environment file:
-# EnvironmentFile=/etc/findarr/env
+# EnvironmentFile=/etc/filtarr/env
 
 [Install]
 WantedBy=multi-user.target
@@ -249,14 +249,14 @@ def _trigger_to_systemd_calendar(trigger: IntervalTrigger | CronTrigger) -> str:
 def export_systemd(
     schedules: list[ScheduleDefinition],
     output_dir: Path | None = None,
-    findarr_path: str | None = None,
+    filtarr_path: str | None = None,
 ) -> list[tuple[str, str, str]]:
     """Export all schedules to systemd format.
 
     Args:
         schedules: List of schedule definitions
         output_dir: Directory to write files to (None for dry-run/display)
-        findarr_path: Path to findarr executable (auto-detected if None)
+        filtarr_path: Path to filtarr executable (auto-detected if None)
 
     Returns:
         List of (schedule_name, timer_content, service_content) tuples
@@ -265,13 +265,13 @@ def export_systemd(
     enabled_schedules = [s for s in schedules if s.enabled]
 
     for schedule in enabled_schedules:
-        timer_content, service_content = export_systemd_timer(schedule, findarr_path)
+        timer_content, service_content = export_systemd_timer(schedule, filtarr_path)
         results.append((schedule.name, timer_content, service_content))
 
         if output_dir is not None:
             output_dir.mkdir(parents=True, exist_ok=True)
-            timer_path = output_dir / f"findarr-{schedule.name}.timer"
-            service_path = output_dir / f"findarr-{schedule.name}.service"
+            timer_path = output_dir / f"filtarr-{schedule.name}.timer"
+            service_path = output_dir / f"filtarr-{schedule.name}.service"
 
             timer_path.write_text(timer_content)
             service_path.write_text(service_content)

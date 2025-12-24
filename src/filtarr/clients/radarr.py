@@ -2,9 +2,9 @@
 
 from typing import Any
 
-from findarr.clients.base import BaseArrClient
-from findarr.models.common import Quality, Release, Tag
-from findarr.models.radarr import Movie
+from filtarr.clients.base import BaseArrClient
+from filtarr.models.common import Quality, Release, Tag
+from filtarr.models.radarr import Movie
 
 
 class RadarrClient(BaseArrClient):

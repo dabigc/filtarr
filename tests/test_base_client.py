@@ -4,7 +4,7 @@ import pytest
 import respx
 from httpx import ConnectError, ConnectTimeout, ReadTimeout, Response
 
-from findarr.clients.radarr import RadarrClient
+from filtarr.clients.radarr import RadarrClient
 
 
 class TestCaching:

@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from findarr.scheduler import (
+from filtarr.scheduler import (
     CronTrigger,
     IntervalTrigger,
     RunStatus,

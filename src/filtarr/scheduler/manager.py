@@ -7,13 +7,13 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, SupportsFloat, SupportsInt
 
-from findarr.scheduler.executor import JobExecutor
-from findarr.scheduler.models import (
+from filtarr.scheduler.executor import JobExecutor
+from filtarr.scheduler.models import (
     RunStatus,
     ScheduleDefinition,
     ScheduleRunRecord,
 )
-from findarr.scheduler.triggers import (
+from filtarr.scheduler.triggers import (
     format_trigger_description,
     get_next_run_time,
     parse_trigger,
@@ -23,8 +23,8 @@ from findarr.scheduler.triggers import (
 if TYPE_CHECKING:
     from apscheduler import AsyncScheduler
 
-    from findarr.config import Config
-    from findarr.state import StateManager
+    from filtarr.config import Config
+    from filtarr.state import StateManager
 
 
 def _to_int(value: object, default: int = 0) -> int:
@@ -94,7 +94,7 @@ class SchedulerManager:
         try:
             from apscheduler import AsyncScheduler
         except ImportError:
-            logger.error("APScheduler not installed. Install with: pip install findarr[scheduler]")
+            logger.error("APScheduler not installed. Install with: pip install filtarr[scheduler]")
             return
 
         schedules = self.get_all_schedules()

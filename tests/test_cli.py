@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from typer.testing import CliRunner
 
-from findarr.checker import FourKResult, SamplingStrategy
-from findarr.cli import app, format_result_json, format_result_simple
-from findarr.config import Config, RadarrConfig, SonarrConfig
+from filtarr.checker import SamplingStrategy, SearchResult
+from filtarr.cli import app, format_result_json, format_result_simple
+from filtarr.config import Config, RadarrConfig, SonarrConfig
 
 runner = CliRunner()
 
@@ -26,10 +26,10 @@ class TestOutputFormatters:
 
     def test_format_result_json(self) -> None:
         """Should format result as valid JSON."""
-        result = FourKResult(
+        result = SearchResult(
             item_id=123,
             item_type="movie",
-            has_4k=True,
+            has_match=True,
             releases=[],
             episodes_checked=[1, 2],
             seasons_checked=[1, 2],
@@ -41,31 +41,31 @@ class TestOutputFormatters:
 
         assert data["item_id"] == 123
         assert data["item_type"] == "movie"
-        assert data["has_4k"] is True
+        assert data["has_match"] is True
         assert data["episodes_checked"] == [1, 2]
         assert data["seasons_checked"] == [1, 2]
         assert data["strategy_used"] == "recent"
 
     def test_format_result_simple_with_4k(self) -> None:
         """Should format as '<type>:<id>: 4K available'."""
-        result = FourKResult(item_id=456, item_type="series", has_4k=True)
+        result = SearchResult(item_id=456, item_type="series", has_match=True)
         assert format_result_simple(result) == "series:456: 4K available"
 
     def test_format_result_simple_no_4k(self) -> None:
         """Should format as '<type>:<id>: No 4K'."""
-        result = FourKResult(item_id=789, item_type="movie", has_4k=False)
+        result = SearchResult(item_id=789, item_type="movie", has_match=False)
         assert format_result_simple(result) == "movie:789: No 4K"
 
 
 class TestCheckMovieCommand:
-    """Tests for 'findarr check movie' command."""
+    """Tests for 'filtarr check movie' command."""
 
     def test_check_movie_with_4k(self) -> None:
         """Should exit 0 when 4K is available."""
-        mock_result = FourKResult(item_id=123, item_type="movie", has_4k=True)
+        mock_result = SearchResult(item_id=123, item_type="movie", has_match=True)
         mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
 
-        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> FourKResult:
+        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> SearchResult:
             return mock_result
 
         mock_checker = MagicMock()
@@ -73,9 +73,9 @@ class TestCheckMovieCommand:
         mock_state_manager = _create_mock_state_manager()
 
         with (
-            patch("findarr.cli.Config.load", return_value=mock_config),
-            patch("findarr.cli.get_checker", return_value=mock_checker),
-            patch("findarr.cli.get_state_manager", return_value=mock_state_manager),
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
         ):
             result = runner.invoke(app, ["check", "movie", "123", "--format", "simple"])
 
@@ -84,10 +84,10 @@ class TestCheckMovieCommand:
 
     def test_check_movie_no_4k(self) -> None:
         """Should exit 1 when no 4K available."""
-        mock_result = FourKResult(item_id=123, item_type="movie", has_4k=False)
+        mock_result = SearchResult(item_id=123, item_type="movie", has_match=False)
         mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
 
-        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> FourKResult:
+        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> SearchResult:
             return mock_result
 
         mock_checker = MagicMock()
@@ -95,9 +95,9 @@ class TestCheckMovieCommand:
         mock_state_manager = _create_mock_state_manager()
 
         with (
-            patch("findarr.cli.Config.load", return_value=mock_config),
-            patch("findarr.cli.get_checker", return_value=mock_checker),
-            patch("findarr.cli.get_state_manager", return_value=mock_state_manager),
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
         ):
             result = runner.invoke(app, ["check", "movie", "123", "--format", "simple"])
 
@@ -108,28 +108,28 @@ class TestCheckMovieCommand:
         """Should exit 2 when Radarr not configured."""
         mock_config = Config()  # No Radarr
 
-        with patch("findarr.cli.Config.load", return_value=mock_config):
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(app, ["check", "movie", "123"])
 
         assert result.exit_code == 2
 
 
 class TestCheckSeriesCommand:
-    """Tests for 'findarr check series' command."""
+    """Tests for 'filtarr check series' command."""
 
     def test_check_series_with_4k(self) -> None:
         """Should exit 0 when 4K is available."""
-        mock_result = FourKResult(
+        mock_result = SearchResult(
             item_id=456,
             item_type="series",
-            has_4k=True,
+            has_match=True,
             strategy_used=SamplingStrategy.RECENT,
         )
         mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
 
         with (
-            patch("findarr.cli.Config.load", return_value=mock_config),
-            patch("findarr.cli.asyncio.run", return_value=mock_result),
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.asyncio.run", return_value=mock_result),
         ):
             result = runner.invoke(app, ["check", "series", "456", "--format", "simple"])
 
@@ -138,17 +138,17 @@ class TestCheckSeriesCommand:
 
     def test_check_series_with_strategy_option(self) -> None:
         """Should accept --strategy option."""
-        mock_result = FourKResult(
+        mock_result = SearchResult(
             item_id=456,
             item_type="series",
-            has_4k=False,
+            has_match=False,
             strategy_used=SamplingStrategy.DISTRIBUTED,
         )
         mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
 
         with (
-            patch("findarr.cli.Config.load", return_value=mock_config),
-            patch("findarr.cli.asyncio.run", return_value=mock_result),
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.asyncio.run", return_value=mock_result),
         ):
             result = runner.invoke(
                 app,
@@ -161,14 +161,14 @@ class TestCheckSeriesCommand:
         """Should exit 2 for invalid strategy."""
         mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
 
-        with patch("findarr.cli.Config.load", return_value=mock_config):
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(app, ["check", "series", "456", "--strategy", "invalid"])
 
         assert result.exit_code == 2
 
 
 class TestBatchCommand:
-    """Tests for 'findarr check batch' command."""
+    """Tests for 'filtarr check batch' command."""
 
     def test_batch_file_not_found(self) -> None:
         """Should exit 2 when file doesn't exist."""
@@ -180,11 +180,11 @@ class TestBatchCommand:
         batch_file = tmp_path / "items.txt"
         batch_file.write_text("movie:123\nseries:456\n")
 
-        mock_movie_result = FourKResult(item_id=123, item_type="movie", has_4k=True)
-        mock_series_result = FourKResult(
+        mock_movie_result = SearchResult(item_id=123, item_type="movie", has_match=True)
+        mock_series_result = SearchResult(
             item_id=456,
             item_type="series",
-            has_4k=True,
+            has_match=True,
             strategy_used=SamplingStrategy.RECENT,
         )
         mock_config = Config(
@@ -193,8 +193,8 @@ class TestBatchCommand:
         )
 
         with (
-            patch("findarr.cli.Config.load", return_value=mock_config),
-            patch("findarr.cli.get_checker") as mock_get_checker,
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker") as mock_get_checker,
         ):
             mock_checker = AsyncMock()
             mock_checker.check_movie.return_value = mock_movie_result
@@ -213,12 +213,12 @@ class TestBatchCommand:
         batch_file = tmp_path / "items.txt"
         batch_file.write_text("# This is a comment\n\nmovie:123\n")
 
-        mock_result = FourKResult(item_id=123, item_type="movie", has_4k=True)
+        mock_result = SearchResult(item_id=123, item_type="movie", has_match=True)
         mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
 
         with (
-            patch("findarr.cli.Config.load", return_value=mock_config),
-            patch("findarr.cli.get_checker") as mock_get_checker,
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker") as mock_get_checker,
         ):
             mock_checker = AsyncMock()
             mock_checker.check_movie.return_value = mock_result
@@ -239,21 +239,21 @@ class TestVersionCommand:
         """Should show version information."""
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0
-        assert "findarr version" in result.stdout
+        assert "filtarr version" in result.stdout
 
 
 class TestCheckMovieByName:
-    """Tests for 'findarr check movie' with name lookup."""
+    """Tests for 'filtarr check movie' with name lookup."""
 
     def test_check_movie_by_name_single_match(self) -> None:
         """Should use single match when searching by name."""
-        mock_result = FourKResult(item_id=123, item_type="movie", has_4k=True)
+        mock_result = SearchResult(item_id=123, item_type="movie", has_match=True)
         mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
 
         async def mock_search_movies(_term: str) -> list[tuple[int, str, int]]:
             return [(123, "The Matrix", 1999)]
 
-        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> FourKResult:
+        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> SearchResult:
             return mock_result
 
         mock_checker = MagicMock()
@@ -262,9 +262,9 @@ class TestCheckMovieByName:
         mock_state_manager = _create_mock_state_manager()
 
         with (
-            patch("findarr.cli.Config.load", return_value=mock_config),
-            patch("findarr.cli.get_checker", return_value=mock_checker),
-            patch("findarr.cli.get_state_manager", return_value=mock_state_manager),
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
         ):
             result = runner.invoke(app, ["check", "movie", "The Matrix", "--format", "simple"])
 
@@ -284,9 +284,9 @@ class TestCheckMovieByName:
         mock_state_manager = _create_mock_state_manager()
 
         with (
-            patch("findarr.cli.Config.load", return_value=mock_config),
-            patch("findarr.cli.get_checker", return_value=mock_checker),
-            patch("findarr.cli.get_state_manager", return_value=mock_state_manager),
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
         ):
             result = runner.invoke(app, ["check", "movie", "Matrix", "--format", "simple"])
 
@@ -307,9 +307,9 @@ class TestCheckMovieByName:
         mock_state_manager = _create_mock_state_manager()
 
         with (
-            patch("findarr.cli.Config.load", return_value=mock_config),
-            patch("findarr.cli.get_checker", return_value=mock_checker),
-            patch("findarr.cli.get_state_manager", return_value=mock_state_manager),
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
         ):
             result = runner.invoke(app, ["check", "movie", "Nonexistent", "--format", "simple"])
 
@@ -318,14 +318,14 @@ class TestCheckMovieByName:
 
 
 class TestCheckSeriesByName:
-    """Tests for 'findarr check series' with name lookup."""
+    """Tests for 'filtarr check series' with name lookup."""
 
     def test_check_series_by_name_single_match(self) -> None:
         """Should use single match when searching by name."""
-        mock_result = FourKResult(
+        mock_result = SearchResult(
             item_id=456,
             item_type="series",
-            has_4k=True,
+            has_match=True,
             strategy_used=SamplingStrategy.RECENT,
         )
         mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
@@ -333,7 +333,7 @@ class TestCheckSeriesByName:
         async def mock_search_series(_term: str) -> list[tuple[int, str, int]]:
             return [(456, "Breaking Bad", 2008)]
 
-        async def mock_check_series(_series_id: int, **_kwargs: object) -> FourKResult:
+        async def mock_check_series(_series_id: int, **_kwargs: object) -> SearchResult:
             return mock_result
 
         mock_checker = MagicMock()
@@ -341,8 +341,8 @@ class TestCheckSeriesByName:
         mock_checker.check_series = mock_check_series
 
         with (
-            patch("findarr.cli.Config.load", return_value=mock_config),
-            patch("findarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
         ):
             result = runner.invoke(app, ["check", "series", "Breaking Bad", "--format", "simple"])
 
@@ -361,8 +361,8 @@ class TestCheckSeriesByName:
         mock_checker.search_series = mock_search_series
 
         with (
-            patch("findarr.cli.Config.load", return_value=mock_config),
-            patch("findarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
         ):
             result = runner.invoke(app, ["check", "series", "Breaking", "--format", "simple"])
 
@@ -381,8 +381,8 @@ class TestCheckSeriesByName:
         mock_checker.search_series = mock_search_series
 
         with (
-            patch("findarr.cli.Config.load", return_value=mock_config),
-            patch("findarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
         ):
             result = runner.invoke(app, ["check", "series", "Nonexistent", "--format", "simple"])
 
@@ -398,12 +398,12 @@ class TestBatchWithNames:
         batch_file = tmp_path / "items.txt"
         batch_file.write_text("movie:The Matrix\n")
 
-        mock_result = FourKResult(item_id=123, item_type="movie", has_4k=True)
+        mock_result = SearchResult(item_id=123, item_type="movie", has_match=True)
         mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
 
         with (
-            patch("findarr.cli.Config.load", return_value=mock_config),
-            patch("findarr.cli.get_checker") as mock_get_checker,
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker") as mock_get_checker,
         ):
             mock_checker = AsyncMock()
             mock_checker.search_movies.return_value = [(123, "The Matrix", 1999)]
@@ -426,8 +426,8 @@ class TestBatchWithNames:
         mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
 
         with (
-            patch("findarr.cli.Config.load", return_value=mock_config),
-            patch("findarr.cli.get_checker") as mock_get_checker,
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker") as mock_get_checker,
         ):
             mock_checker = AsyncMock()
             mock_checker.search_movies.return_value = [
@@ -455,8 +455,8 @@ class TestBatchWithNames:
         mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
 
         with (
-            patch("findarr.cli.Config.load", return_value=mock_config),
-            patch("findarr.cli.get_checker") as mock_get_checker,
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker") as mock_get_checker,
         ):
             mock_checker = AsyncMock()
             mock_checker.search_movies.return_value = []

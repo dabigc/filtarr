@@ -7,10 +7,10 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from findarr.checker import FourKChecker, FourKResult, SamplingStrategy
-from findarr.clients.radarr import RadarrClient
-from findarr.clients.sonarr import SonarrClient
-from findarr.scheduler.models import (
+from filtarr.checker import ReleaseChecker, SamplingStrategy, SearchResult
+from filtarr.clients.radarr import RadarrClient
+from filtarr.clients.sonarr import SonarrClient
+from filtarr.scheduler.models import (
     RunStatus,
     ScheduleDefinition,
     ScheduleRunRecord,
@@ -19,10 +19,10 @@ from findarr.scheduler.models import (
 )
 
 if TYPE_CHECKING:
-    from findarr.config import Config
-    from findarr.models.radarr import Movie
-    from findarr.models.sonarr import Series
-    from findarr.state import StateManager
+    from filtarr.config import Config
+    from filtarr.models.radarr import Movie
+    from filtarr.models.sonarr import Series
+    from filtarr.state import StateManager
 
 logger = logging.getLogger(__name__)
 
@@ -102,13 +102,13 @@ class JobExecutor:
                 try:
                     result = await self._check_movie(movie.id, schedule)
                     items_processed += 1
-                    if result and result.has_4k:
+                    if result and result.has_match:
                         items_with_4k += 1
 
                     # Record in state
                     if result and not schedule.dry_run and not schedule.no_tag:
                         tag_applied = result.tag_result.tag_applied if result.tag_result else None
-                        self._state.record_check("movie", movie.id, result.has_4k, tag_applied)
+                        self._state.record_check("movie", movie.id, result.has_match, tag_applied)
 
                 except Exception as e:
                     error_msg = f"Error checking movie {movie.id} ({movie.title}): {e}"
@@ -131,13 +131,13 @@ class JobExecutor:
                 try:
                     result = await self._check_series(series.id, schedule)
                     items_processed += 1
-                    if result and result.has_4k:
+                    if result and result.has_match:
                         items_with_4k += 1
 
                     # Record in state
                     if result and not schedule.dry_run and not schedule.no_tag:
                         tag_applied = result.tag_result.tag_applied if result.tag_result else None
-                        self._state.record_check("series", series.id, result.has_4k, tag_applied)
+                        self._state.record_check("series", series.id, result.has_match, tag_applied)
 
                 except Exception as e:
                     error_msg = f"Error checking series {series.id} ({series.title}): {e}"
@@ -257,7 +257,9 @@ class JobExecutor:
                 if not any(tag_id in skip_tag_ids for tag_id in series.tags)
             ]
 
-    async def _check_movie(self, movie_id: int, schedule: ScheduleDefinition) -> FourKResult | None:
+    async def _check_movie(
+        self, movie_id: int, schedule: ScheduleDefinition
+    ) -> SearchResult | None:
         """Check a single movie for 4K availability.
 
         Args:
@@ -265,7 +267,7 @@ class JobExecutor:
             schedule: Schedule definition
 
         Returns:
-            FourKResult if successful, None otherwise
+            SearchResult if successful, None otherwise
         """
         checker = self._create_checker(need_radarr=True)
         return await checker.check_movie(
@@ -276,7 +278,7 @@ class JobExecutor:
 
     async def _check_series(
         self, series_id: int, schedule: ScheduleDefinition
-    ) -> FourKResult | None:
+    ) -> SearchResult | None:
         """Check a single series for 4K availability.
 
         Args:
@@ -284,7 +286,7 @@ class JobExecutor:
             schedule: Schedule definition
 
         Returns:
-            FourKResult if successful, None otherwise
+            SearchResult if successful, None otherwise
         """
         # Map schedule strategy to SamplingStrategy
         strategy_map = {
@@ -303,15 +305,17 @@ class JobExecutor:
             dry_run=schedule.dry_run,
         )
 
-    def _create_checker(self, need_radarr: bool = False, need_sonarr: bool = False) -> FourKChecker:
-        """Create a FourKChecker instance.
+    def _create_checker(
+        self, need_radarr: bool = False, need_sonarr: bool = False
+    ) -> ReleaseChecker:
+        """Create a ReleaseChecker instance.
 
         Args:
             need_radarr: Whether Radarr is needed
             need_sonarr: Whether Sonarr is needed
 
         Returns:
-            Configured FourKChecker instance
+            Configured ReleaseChecker instance
         """
         radarr_url = None
         radarr_api_key = None
@@ -326,7 +330,7 @@ class JobExecutor:
             sonarr_url = self._config.sonarr.url
             sonarr_api_key = self._config.sonarr.api_key
 
-        return FourKChecker(
+        return ReleaseChecker(
             radarr_url=radarr_url,
             radarr_api_key=radarr_api_key,
             sonarr_url=sonarr_url,

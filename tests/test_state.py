@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from findarr.state import (
+from filtarr.state import (
     STATE_VERSION,
     BatchProgress,
     CheckRecord,

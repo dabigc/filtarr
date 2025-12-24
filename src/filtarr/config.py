@@ -1,4 +1,4 @@
-"""Configuration loading for findarr CLI."""
+"""Configuration loading for filtarr CLI."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ class TagConfig:
 
 def _default_state_path() -> Path:
     """Get the default state file path."""
-    return Path.home() / ".config" / "findarr" / "state.json"
+    return Path.home() / ".config" / "filtarr" / "state.json"
 
 
 @dataclass
@@ -89,14 +89,14 @@ class Config:
 
         Configuration precedence (highest to lowest):
         1. Environment variables
-        2. Config file (~/.config/findarr/config.toml)
+        2. Config file (~/.config/filtarr/config.toml)
 
         Environment variables:
-        - FINDARR_RADARR_URL
-        - FINDARR_RADARR_API_KEY
-        - FINDARR_SONARR_URL
-        - FINDARR_SONARR_API_KEY
-        - FINDARR_TIMEOUT (request timeout in seconds)
+        - FILTARR_RADARR_URL
+        - FILTARR_RADARR_API_KEY
+        - FILTARR_SONARR_URL
+        - FILTARR_SONARR_API_KEY
+        - FILTARR_TIMEOUT (request timeout in seconds)
 
         Returns:
             Config instance with loaded values
@@ -107,7 +107,7 @@ class Config:
         config = cls()
 
         # Load from config file first (lower precedence)
-        config_file = Path.home() / ".config" / "findarr" / "config.toml"
+        config_file = Path.home() / ".config" / "filtarr" / "config.toml"
         if config_file.exists():
             config = cls._load_from_file(config_file)
 
@@ -224,25 +224,25 @@ class Config:
         scheduler = base.scheduler
 
         # Check for Radarr env vars
-        radarr_url = os.environ.get("FINDARR_RADARR_URL")
-        radarr_key = os.environ.get("FINDARR_RADARR_API_KEY")
+        radarr_url = os.environ.get("FILTARR_RADARR_URL")
+        radarr_key = os.environ.get("FILTARR_RADARR_API_KEY")
         if radarr_url and radarr_key:
             radarr = RadarrConfig(url=radarr_url, api_key=radarr_key)
 
         # Check for Sonarr env vars
-        sonarr_url = os.environ.get("FINDARR_SONARR_URL")
-        sonarr_key = os.environ.get("FINDARR_SONARR_API_KEY")
+        sonarr_url = os.environ.get("FILTARR_SONARR_URL")
+        sonarr_key = os.environ.get("FILTARR_SONARR_API_KEY")
         if sonarr_url and sonarr_key:
             sonarr = SonarrConfig(url=sonarr_url, api_key=sonarr_key)
 
         # Check for timeout env var
-        timeout_str = os.environ.get("FINDARR_TIMEOUT")
+        timeout_str = os.environ.get("FILTARR_TIMEOUT")
         if timeout_str:
             timeout = float(timeout_str)
 
         # Check for tag env vars
-        tag_available = os.environ.get("FINDARR_TAG_AVAILABLE")
-        tag_unavailable = os.environ.get("FINDARR_TAG_UNAVAILABLE")
+        tag_available = os.environ.get("FILTARR_TAG_AVAILABLE")
+        tag_unavailable = os.environ.get("FILTARR_TAG_UNAVAILABLE")
         if tag_available or tag_unavailable:
             tags = TagConfig(
                 available=tag_available or tags.available,
@@ -252,13 +252,13 @@ class Config:
             )
 
         # Check for state path env var
-        state_path = os.environ.get("FINDARR_STATE_PATH")
+        state_path = os.environ.get("FILTARR_STATE_PATH")
         if state_path:
             state = StateConfig(path=Path(state_path).expanduser())
 
         # Check for webhook env vars
-        webhook_host = os.environ.get("FINDARR_WEBHOOK_HOST")
-        webhook_port = os.environ.get("FINDARR_WEBHOOK_PORT")
+        webhook_host = os.environ.get("FILTARR_WEBHOOK_HOST")
+        webhook_port = os.environ.get("FILTARR_WEBHOOK_PORT")
         if webhook_host or webhook_port:
             webhook = WebhookConfig(
                 host=webhook_host or webhook.host,
@@ -266,7 +266,7 @@ class Config:
             )
 
         # Check for scheduler env var
-        scheduler_enabled = os.environ.get("FINDARR_SCHEDULER_ENABLED")
+        scheduler_enabled = os.environ.get("FILTARR_SCHEDULER_ENABLED")
         if scheduler_enabled is not None:
             scheduler = SchedulerConfig(
                 enabled=scheduler_enabled.lower() in ("true", "1", "yes"),
@@ -295,9 +295,9 @@ class Config:
         """
         if self.radarr is None:
             raise ConfigurationError(
-                "Radarr is not configured. Set FINDARR_RADARR_URL and "
-                "FINDARR_RADARR_API_KEY environment variables, or create "
-                "~/.config/findarr/config.toml"
+                "Radarr is not configured. Set FILTARR_RADARR_URL and "
+                "FILTARR_RADARR_API_KEY environment variables, or create "
+                "~/.config/filtarr/config.toml"
             )
         return self.radarr
 
@@ -312,8 +312,8 @@ class Config:
         """
         if self.sonarr is None:
             raise ConfigurationError(
-                "Sonarr is not configured. Set FINDARR_SONARR_URL and "
-                "FINDARR_SONARR_API_KEY environment variables, or create "
-                "~/.config/findarr/config.toml"
+                "Sonarr is not configured. Set FILTARR_SONARR_URL and "
+                "FILTARR_SONARR_API_KEY environment variables, or create "
+                "~/.config/filtarr/config.toml"
             )
         return self.sonarr
