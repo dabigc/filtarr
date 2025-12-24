@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path  # noqa: TC003 - needed at runtime for typer
 from typing import TYPE_CHECKING, Annotated, Literal
@@ -474,6 +475,559 @@ def _filter_series_by_tags(series: list[Series], skip_tag_ids: set[int]) -> list
     return [s for s in series if not any(tag in skip_tag_ids for tag in s.tags)]
 
 
+# =============================================================================
+# Batch Processing Helper Functions
+# =============================================================================
+
+
+@dataclass
+class BatchContext:
+    """Context for batch processing operations."""
+
+    config: Config
+    state_manager: StateManager
+    search_criteria: SearchCriteria
+    criteria_str: str
+    sampling_strategy: SamplingStrategy
+    seasons: int
+    apply_tags: bool
+    dry_run: bool
+    batch_size: int
+    delay: float
+    output_format: OutputFormat
+    console: Console
+    error_console: Console
+
+    # Counters (mutable)
+    results: list[SearchResult] = field(default_factory=list)
+    has_match_count: int = 0
+    skipped_count: int = 0
+    processed_this_run: int = 0
+    batch_limit_reached: bool = False
+
+
+def _parse_batch_file(file: Path, error_console: Console) -> tuple[list[tuple[str, str]], set[str]]:
+    """Parse items from a batch file.
+
+    Args:
+        file: Path to the batch file
+        error_console: Console for error output
+
+    Returns:
+        Tuple of (file_items, file_item_keys) where file_items is list of (type, id_or_name)
+        and file_item_keys is set of "type:id" strings for deduplication
+    """
+    file_items: list[tuple[str, str]] = []
+    file_item_keys: set[str] = set()
+
+    with file.open() as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if ":" not in line:
+                error_console.print(
+                    f"[yellow]Warning:[/yellow] Line {line_num}: "
+                    f"Invalid format '{line}', expected 'movie:<id_or_name>' or 'series:<id_or_name>'"
+                )
+                continue
+            item_type, item_value = line.split(":", 1)
+            item_type = item_type.lower()
+            if item_type not in ("movie", "series"):
+                error_console.print(
+                    f"[yellow]Warning:[/yellow] Line {line_num}: "
+                    f"Invalid type '{item_type}', skipping"
+                )
+                continue
+            file_items.append((item_type, item_value.strip()))
+            # Track numeric IDs for deduplication with rechecks
+            if item_value.strip().isdigit():
+                file_item_keys.add(f"{item_type}:{item_value.strip()}")
+
+    return file_items, file_item_keys
+
+
+async def _fetch_movies_to_check(
+    config: Config,
+    search_criteria: SearchCriteria,
+    skip_tagged: bool,
+    console: Console,
+) -> tuple[list[Movie], set[int]]:
+    """Fetch movies from Radarr and filter by tags if needed.
+
+    Returns:
+        Tuple of (movies_to_check, skip_tag_ids)
+    """
+    radarr = config.require_radarr()
+    skip_tags: set[int] = set()
+    movies: list[Movie] = []
+
+    async with RadarrClient(radarr.url, radarr.api_key, timeout=config.timeout) as client:
+        if skip_tagged:
+            available_tag, unavailable_tag = config.tags.get_tag_names(search_criteria.value)
+            tag_names = {available_tag, unavailable_tag}
+            all_tags = await client.get_tags()
+            for tag in all_tags:
+                if tag.label in tag_names:
+                    skip_tags.add(tag.id)
+
+        console.print("[dim]Fetching all movies from Radarr...[/dim]")
+        all_movies_list = await client.get_all_movies()
+
+        if skip_tagged:
+            movies = _filter_movies_by_tags(all_movies_list, skip_tags)
+            skipped = len(all_movies_list) - len(movies)
+            if skipped > 0:
+                console.print(f"[dim]Skipping {skipped} already-tagged movies[/dim]")
+        else:
+            movies = all_movies_list
+
+        console.print(f"[dim]Found {len(movies)} movies to check[/dim]")
+
+    return movies, skip_tags
+
+
+async def _fetch_series_to_check(
+    config: Config,
+    search_criteria: SearchCriteria,
+    skip_tagged: bool,
+    console: Console,
+) -> tuple[list[Series], set[int]]:
+    """Fetch series from Sonarr and filter by tags if needed.
+
+    Returns:
+        Tuple of (series_to_check, skip_tag_ids)
+    """
+    sonarr = config.require_sonarr()
+    skip_tags: set[int] = set()
+    series: list[Series] = []
+
+    async with SonarrClient(sonarr.url, sonarr.api_key, timeout=config.timeout) as client:
+        if skip_tagged:
+            available_tag, unavailable_tag = config.tags.get_tag_names(search_criteria.value)
+            tag_names = {available_tag, unavailable_tag}
+            all_tags = await client.get_tags()
+            for tag in all_tags:
+                if tag.label in tag_names:
+                    skip_tags.add(tag.id)
+
+        console.print("[dim]Fetching all series from Sonarr...[/dim]")
+        all_series_list = await client.get_all_series()
+
+        if skip_tagged:
+            series = _filter_series_by_tags(all_series_list, skip_tags)
+            skipped = len(all_series_list) - len(series)
+            if skipped > 0:
+                console.print(f"[dim]Skipping {skipped} already-tagged series[/dim]")
+        else:
+            series = all_series_list
+
+        console.print(f"[dim]Found {len(series)} series to check[/dim]")
+
+    return series, skip_tags
+
+
+async def _process_movie_item(
+    checker: ReleaseChecker,
+    item_id: int,
+    item_name: str,
+    search_criteria: SearchCriteria,
+    apply_tags: bool,
+    dry_run: bool,
+    console: Console,
+    error_console: Console,
+) -> SearchResult | None:
+    """Process a single movie item (by ID or name lookup).
+
+    Returns:
+        SearchResult if successful, None if not found or ambiguous
+    """
+    if item_id > 0:
+        return await checker.check_movie(
+            item_id,
+            criteria=search_criteria,
+            apply_tags=apply_tags,
+            dry_run=dry_run,
+        )
+
+    # Search by name
+    matches = await checker.search_movies(item_name)
+    if not matches:
+        error_console.print(f"[yellow]Movie not found:[/yellow] {item_name}")
+        return None
+    if len(matches) > 1:
+        error_console.print(
+            f"[yellow]Multiple movies match '{item_name}':[/yellow] "
+            f"{', '.join(f'{t} ({y})' for _, t, y in matches[:3])}"
+            f"{'...' if len(matches) > 3 else ''}"
+        )
+        return None
+
+    movie_id, movie_title, _ = matches[0]
+    console.print(f"[dim]Found: {movie_title}[/dim]")
+    return await checker.check_movie(
+        movie_id,
+        criteria=search_criteria,
+        apply_tags=apply_tags,
+        dry_run=dry_run,
+    )
+
+
+async def _process_series_item(
+    checker: ReleaseChecker,
+    item_id: int,
+    item_name: str,
+    series_criteria: SearchCriteria,
+    sampling_strategy: SamplingStrategy,
+    seasons: int,
+    apply_tags: bool,
+    dry_run: bool,
+    console: Console,
+    error_console: Console,
+) -> SearchResult | None:
+    """Process a single series item (by ID or name lookup).
+
+    Returns:
+        SearchResult if successful, None if not found or ambiguous
+    """
+    if item_id > 0:
+        return await checker.check_series(
+            item_id,
+            criteria=series_criteria,
+            strategy=sampling_strategy,
+            seasons_to_check=seasons,
+            apply_tags=apply_tags,
+            dry_run=dry_run,
+        )
+
+    # Search by name
+    matches = await checker.search_series(item_name)
+    if not matches:
+        error_console.print(f"[yellow]Series not found:[/yellow] {item_name}")
+        return None
+    if len(matches) > 1:
+        error_console.print(
+            f"[yellow]Multiple series match '{item_name}':[/yellow] "
+            f"{', '.join(f'{t} ({y})' for _, t, y in matches[:3])}"
+            f"{'...' if len(matches) > 3 else ''}"
+        )
+        return None
+
+    series_id, series_title, _ = matches[0]
+    console.print(f"[dim]Found: {series_title}[/dim]")
+    return await checker.check_series(
+        series_id,
+        criteria=series_criteria,
+        strategy=sampling_strategy,
+        seasons_to_check=seasons,
+        apply_tags=apply_tags,
+        dry_run=dry_run,
+    )
+
+
+async def _process_batch_item(
+    ctx: BatchContext,
+    item_type: str,
+    item_id: int,
+    item_name: str,
+) -> SearchResult | None:
+    """Process a single batch item (movie or series).
+
+    Returns:
+        SearchResult if successful, None if not found or error
+    """
+    if item_type == "movie":
+        checker = get_checker(ctx.config, need_radarr=True)
+        return await _process_movie_item(
+            checker,
+            item_id,
+            item_name,
+            ctx.search_criteria,
+            ctx.apply_tags,
+            ctx.dry_run,
+            ctx.console,
+            ctx.error_console,
+        )
+
+    # For series, use 4K if movie-only criteria was specified
+    if ctx.search_criteria in MOVIE_ONLY_CRITERIA:
+        ctx.console.print(
+            f"[yellow]Warning:[/yellow] {ctx.criteria_str} criteria is movie-only. "
+            f"Using 4K for series '{item_name}'"
+        )
+        series_criteria = SearchCriteria.FOUR_K
+    else:
+        series_criteria = ctx.search_criteria
+
+    checker = get_checker(ctx.config, need_sonarr=True)
+    return await _process_series_item(
+        checker,
+        item_id,
+        item_name,
+        series_criteria,
+        ctx.sampling_strategy,
+        ctx.seasons,
+        ctx.apply_tags,
+        ctx.dry_run,
+        ctx.console,
+        ctx.error_console,
+    )
+
+
+def _handle_batch_result(
+    ctx: BatchContext,
+    result: SearchResult,
+    item_id: int,
+    batch_progress: BatchProgress | None,
+) -> None:
+    """Handle a batch result: record state, update progress, print result."""
+    # Record in state file (unless dry run)
+    if not ctx.dry_run and ctx.apply_tags and result.tag_result:
+        ctx.state_manager.record_check(
+            result.item_type,  # type: ignore[arg-type]
+            result.item_id,
+            result.has_match,
+            result.tag_result.tag_applied,
+        )
+
+    # Update batch progress
+    if batch_progress and item_id > 0:
+        ctx.state_manager.update_batch_progress(item_id)
+
+    print_result(result, ctx.output_format)
+
+
+def _build_item_list(
+    movies: list[Movie],
+    series: list[Series],
+    file_items: list[tuple[str, str]],
+) -> list[tuple[str, int, str]]:
+    """Build combined item list from movies, series, and file items."""
+    all_items: list[tuple[str, int, str]] = []
+
+    for movie in movies:
+        all_items.append(("movie", movie.id, movie.title))
+
+    for series_item in series:
+        all_items.append(("series", series_item.id, series_item.title))
+
+    for item_type, item_value in file_items:
+        if item_value.isdigit():
+            all_items.append((item_type, int(item_value), f"ID:{item_value}"))
+        else:
+            all_items.append((item_type, -1, item_value))
+
+    return all_items
+
+
+async def _process_single_item(
+    ctx: BatchContext,
+    item_type: str,
+    item_id: int,
+    item_name: str,
+    batch_progress: BatchProgress | None,
+) -> bool:
+    """Process a single item and handle the result.
+
+    Returns:
+        True if processing should continue, False if batch limit reached
+    """
+    try:
+        result = await _process_batch_item(ctx, item_type, item_id, item_name)
+
+        if result:
+            ctx.results.append(result)
+            _handle_batch_result(ctx, result, item_id, batch_progress)
+            if result.has_match:
+                ctx.has_match_count += 1
+            ctx.processed_this_run += 1
+
+            # Check if batch size limit reached
+            if ctx.batch_size > 0 and ctx.processed_this_run >= ctx.batch_size:
+                ctx.batch_limit_reached = True
+                return False
+
+    except ConfigurationError as e:
+        ctx.error_console.print(f"[red]Config error for {item_type}:{item_name}:[/red] {e}")
+        if batch_progress and item_id > 0:
+            ctx.state_manager.update_batch_progress(item_id)
+    except Exception as e:
+        ctx.error_console.print(f"[red]Error checking {item_type}:{item_name}:[/red] {e}")
+        if batch_progress and item_id > 0:
+            ctx.state_manager.update_batch_progress(item_id)
+
+    return True
+
+
+async def _run_batch_checks(
+    ctx: BatchContext,
+    all_movies: bool,
+    all_series: bool,
+    skip_tagged: bool,
+    file_items: list[tuple[str, str]],
+    batch_type: Literal["movie", "series", "mixed"],
+    existing_progress: BatchProgress | None,
+) -> None:
+    """Run batch checks on all items."""
+    # Fetch movies and series to check
+    movies_to_check: list[Movie] = []
+    series_to_check: list[Series] = []
+
+    if all_movies:
+        movies_to_check, _ = await _fetch_movies_to_check(
+            ctx.config, ctx.search_criteria, skip_tagged, ctx.console
+        )
+
+    if all_series:
+        series_to_check, _ = await _fetch_series_to_check(
+            ctx.config, ctx.search_criteria, skip_tagged, ctx.console
+        )
+
+    # Build combined item list
+    all_items = _build_item_list(movies_to_check, series_to_check, file_items)
+
+    if not all_items:
+        ctx.error_console.print("[red]No items to check[/red]")
+        return
+
+    # Start or resume batch progress tracking
+    batch_progress: BatchProgress | None = None
+    if all_movies or all_series:
+        if existing_progress:
+            batch_progress = existing_progress
+        else:
+            batch_id = str(uuid.uuid4())[:8]
+            batch_progress = ctx.state_manager.start_batch(batch_id, batch_type, len(all_items))
+
+    # Process items with progress bar
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+        console=ctx.console,
+        disable=len(all_items) < 3,
+    ) as progress:
+        task = progress.add_task("Checking items...", total=len(all_items))
+
+        for item_type, item_id, item_name in all_items:
+            # Skip if already processed (resume mode)
+            if batch_progress and item_id > 0 and batch_progress.is_processed(item_id):
+                progress.advance(task)
+                ctx.skipped_count += 1
+                continue
+
+            should_continue = await _process_single_item(
+                ctx, item_type, item_id, item_name, batch_progress
+            )
+            progress.advance(task)
+
+            if not should_continue:
+                break
+
+            # Apply delay between checks
+            if ctx.delay > 0:
+                await asyncio.sleep(ctx.delay)
+
+    # Clear batch progress on successful completion
+    if batch_progress and not ctx.batch_limit_reached:
+        ctx.state_manager.clear_batch_progress()
+
+
+def _validate_batch_inputs(
+    file: Path | None,
+    all_movies: bool,
+    all_series: bool,
+    criteria: str,
+    strategy: str,
+) -> tuple[SearchCriteria, SamplingStrategy]:
+    """Validate batch command inputs and return parsed criteria/strategy."""
+    # Validate: need either file or --all-* flags
+    if not file and not all_movies and not all_series:
+        error_console.print("[red]Error:[/red] Must specify --file, --all-movies, or --all-series")
+        raise typer.Exit(2)
+
+    if file and not file.exists():
+        error_console.print(f"[red]File not found:[/red] {file}")
+        raise typer.Exit(2)
+
+    # Validate criteria
+    criteria_lower = criteria.lower()
+    if criteria_lower not in CRITERIA_MAP:
+        error_console.print(
+            f"[red]Invalid criteria:[/red] {criteria}. "
+            f"Valid options: {', '.join(VALID_CRITERIA_NAMES)}"
+        )
+        raise typer.Exit(2)
+    search_criteria = CRITERIA_MAP[criteria_lower]
+
+    # Check for movie-only criteria with series
+    if all_series and search_criteria in MOVIE_ONLY_CRITERIA:
+        error_console.print(
+            f"[red]Error:[/red] {criteria} criteria is only applicable to movies. "
+            f"Cannot use with --all-series. Valid options for series: 4k, hdr, dolby-vision"
+        )
+        raise typer.Exit(2)
+
+    # Validate strategy
+    strategy_map = {
+        "recent": SamplingStrategy.RECENT,
+        "distributed": SamplingStrategy.DISTRIBUTED,
+        "all": SamplingStrategy.ALL,
+    }
+    if strategy.lower() not in strategy_map:
+        error_console.print(f"[red]Invalid strategy:[/red] {strategy}")
+        raise typer.Exit(2)
+    sampling_strategy = strategy_map[strategy.lower()]
+
+    return search_criteria, sampling_strategy
+
+
+def _prepare_file_items(
+    file: Path | None,
+    include_rechecks: bool,
+    state_manager: StateManager,
+    recheck_days: int,
+) -> list[tuple[str, str]]:
+    """Prepare file items including rechecks."""
+    file_items: list[tuple[str, str]] = []
+    file_item_keys: set[str] = set()
+
+    if file:
+        file_items, file_item_keys = _parse_batch_file(file, error_console)
+
+    if include_rechecks:
+        stale_items = state_manager.get_stale_unavailable_items(recheck_days)
+        recheck_count = 0
+        for item_type, item_id in stale_items:
+            key = f"{item_type}:{item_id}"
+            if key not in file_item_keys:
+                file_items.append((item_type, str(item_id)))
+                recheck_count += 1
+
+        if recheck_count > 0:
+            console.print(
+                f"[dim]Including {recheck_count} stale items for re-checking "
+                f"(>{recheck_days} days old)[/dim]"
+            )
+
+    return file_items
+
+
+def _print_batch_summary(ctx: BatchContext) -> None:
+    """Print batch summary."""
+    console.print()
+    display_criteria = _format_result_type(ctx.search_criteria.value)
+    summary_parts = [
+        f"{ctx.has_match_count}/{len(ctx.results)} items have {display_criteria} available"
+    ]
+    if ctx.skipped_count > 0:
+        summary_parts.append(f"{ctx.skipped_count} resumed/skipped")
+    if ctx.batch_limit_reached:
+        summary_parts.append(f"batch limit ({ctx.batch_size}) reached - run again to continue")
+    console.print(f"[bold]Summary:[/bold] {', '.join(summary_parts)}")
+
+
 @check_app.command("batch")
 def check_batch(
     file: Annotated[
@@ -544,43 +1098,12 @@ def check_batch(
         filtarr check batch --all-series --delay 1.0
         filtarr check batch --all-movies --all-series
     """
-    # Validate: need either file or --all-* flags
-    if not file and not all_movies and not all_series:
-        error_console.print("[red]Error:[/red] Must specify --file, --all-movies, or --all-series")
-        raise typer.Exit(2)
+    # Validate inputs
+    search_criteria, sampling_strategy = _validate_batch_inputs(
+        file, all_movies, all_series, criteria, strategy
+    )
 
-    if file and not file.exists():
-        error_console.print(f"[red]File not found:[/red] {file}")
-        raise typer.Exit(2)
-
-    # Validate criteria
-    criteria_lower = criteria.lower()
-    if criteria_lower not in CRITERIA_MAP:
-        error_console.print(
-            f"[red]Invalid criteria:[/red] {criteria}. "
-            f"Valid options: {', '.join(VALID_CRITERIA_NAMES)}"
-        )
-        raise typer.Exit(2)
-    search_criteria = CRITERIA_MAP[criteria_lower]
-
-    # Check for movie-only criteria with series
-    if all_series and search_criteria in MOVIE_ONLY_CRITERIA:
-        error_console.print(
-            f"[red]Error:[/red] {criteria} criteria is only applicable to movies. "
-            f"Cannot use with --all-series. Valid options for series: 4k, hdr, dolby-vision"
-        )
-        raise typer.Exit(2)
-
-    strategy_map = {
-        "recent": SamplingStrategy.RECENT,
-        "distributed": SamplingStrategy.DISTRIBUTED,
-        "all": SamplingStrategy.ALL,
-    }
-    if strategy.lower() not in strategy_map:
-        error_console.print(f"[red]Invalid strategy:[/red] {strategy}")
-        raise typer.Exit(2)
-    sampling_strategy = strategy_map[strategy.lower()]
-
+    # Load configuration
     try:
         config = Config.load()
     except ConfigurationError as e:
@@ -588,9 +1111,8 @@ def check_batch(
         raise typer.Exit(2) from e
 
     state_manager = get_state_manager(config)
-    apply_tags = not no_tag
 
-    # Determine batch type for state tracking
+    # Determine batch type
     batch_type: Literal["movie", "series", "mixed"]
     if all_movies and all_series:
         batch_type = "mixed"
@@ -599,7 +1121,6 @@ def check_batch(
     elif all_series:
         batch_type = "series"
     else:
-        # File-only mode or no items specified - treat as mixed
         batch_type = "mixed"
 
     # Check for existing batch progress
@@ -612,315 +1133,39 @@ def check_batch(
                 f"{existing_progress.total_items} already processed"
             )
 
-    # Parse items from file - now supports both IDs and names
-    file_items: list[tuple[str, str]] = []  # (type, id_or_name)
-    file_item_keys: set[str] = set()  # Track items from file to avoid duplicates
-    if file:
-        with file.open() as f:
-            for line_num, line in enumerate(f, 1):
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if ":" not in line:
-                    error_console.print(
-                        f"[yellow]Warning:[/yellow] Line {line_num}: "
-                        f"Invalid format '{line}', expected 'movie:<id_or_name>' or 'series:<id_or_name>'"
-                    )
-                    continue
-                item_type, item_value = line.split(":", 1)
-                item_type = item_type.lower()
-                if item_type not in ("movie", "series"):
-                    error_console.print(
-                        f"[yellow]Warning:[/yellow] Line {line_num}: "
-                        f"Invalid type '{item_type}', skipping"
-                    )
-                    continue
-                file_items.append((item_type, item_value.strip()))
-                # Track numeric IDs for deduplication with rechecks
-                if item_value.strip().isdigit():
-                    file_item_keys.add(f"{item_type}:{item_value.strip()}")
+    # Prepare file items
+    file_items = _prepare_file_items(
+        file, include_rechecks, state_manager, config.tags.recheck_days
+    )
 
-    # Include stale unavailable items for rechecking
-    recheck_count = 0
-    if include_rechecks:
-        stale_items = state_manager.get_stale_unavailable_items(config.tags.recheck_days)
-        for item_type, item_id in stale_items:
-            key = f"{item_type}:{item_id}"
-            if key not in file_item_keys:
-                file_items.append((item_type, str(item_id)))
-                recheck_count += 1
+    # Create batch context
+    ctx = BatchContext(
+        config=config,
+        state_manager=state_manager,
+        search_criteria=search_criteria,
+        criteria_str=criteria,
+        sampling_strategy=sampling_strategy,
+        seasons=seasons,
+        apply_tags=not no_tag,
+        dry_run=dry_run,
+        batch_size=batch_size,
+        delay=delay,
+        output_format=format,
+        console=console,
+        error_console=error_console,
+    )
 
-        if recheck_count > 0:
-            console.print(
-                f"[dim]Including {recheck_count} stale items for re-checking "
-                f"(>{config.tags.recheck_days} days old)[/dim]"
-            )
-
-    # Check items
-    results: list[SearchResult] = []
-    has_4k_count = 0
-    skipped_count = 0
-    processed_this_run = 0
-    batch_limit_reached = False
-
-    async def run_checks() -> None:
-        nonlocal has_4k_count, skipped_count, processed_this_run, batch_limit_reached
-
-        # Create clients for --all-* processing
-        movies_to_check: list[Movie] = []
-        series_to_check: list[Series] = []
-
-        # Get tag IDs to skip and fetch all items using context managers
-        movie_skip_tags: set[int] = set()
-        series_skip_tags: set[int] = set()
-
-        if all_movies:
-            radarr = config.require_radarr()
-            async with RadarrClient(radarr.url, radarr.api_key, timeout=config.timeout) as client:
-                # Get tags to skip (based on current criteria)
-                if skip_tagged:
-                    available_tag, unavailable_tag = config.tags.get_tag_names(
-                        search_criteria.value
-                    )
-                    tag_names = {available_tag, unavailable_tag}
-                    all_tags = await client.get_tags()
-                    for tag in all_tags:
-                        if tag.label in tag_names:
-                            movie_skip_tags.add(tag.id)
-
-                # Fetch all movies
-                console.print("[dim]Fetching all movies from Radarr...[/dim]")
-                all_movies_list = await client.get_all_movies()
-                if skip_tagged:
-                    movies_to_check = _filter_movies_by_tags(all_movies_list, movie_skip_tags)
-                    skipped = len(all_movies_list) - len(movies_to_check)
-                    if skipped > 0:
-                        console.print(f"[dim]Skipping {skipped} already-tagged movies[/dim]")
-                else:
-                    movies_to_check = all_movies_list
-                console.print(f"[dim]Found {len(movies_to_check)} movies to check[/dim]")
-
-        if all_series:
-            sonarr = config.require_sonarr()
-            async with SonarrClient(sonarr.url, sonarr.api_key, timeout=config.timeout) as client:
-                # Get tags to skip (based on current criteria)
-                if skip_tagged:
-                    available_tag, unavailable_tag = config.tags.get_tag_names(
-                        search_criteria.value
-                    )
-                    tag_names = {available_tag, unavailable_tag}
-                    all_tags = await client.get_tags()
-                    for tag in all_tags:
-                        if tag.label in tag_names:
-                            series_skip_tags.add(tag.id)
-
-                # Fetch all series
-                console.print("[dim]Fetching all series from Sonarr...[/dim]")
-                all_series_list = await client.get_all_series()
-                if skip_tagged:
-                    series_to_check = _filter_series_by_tags(all_series_list, series_skip_tags)
-                    skipped = len(all_series_list) - len(series_to_check)
-                    if skipped > 0:
-                        console.print(f"[dim]Skipping {skipped} already-tagged series[/dim]")
-                else:
-                    series_to_check = all_series_list
-                console.print(f"[dim]Found {len(series_to_check)} series to check[/dim]")
-
-        # Build combined item list: (type, id, title)
-        all_items: list[tuple[str, int, str]] = []
-
-        # Add movies
-        for movie in movies_to_check:
-            all_items.append(("movie", movie.id, movie.title))
-
-        # Add series
-        for series in series_to_check:
-            all_items.append(("series", series.id, series.title))
-
-        # Add file items (resolve names to IDs)
-        for item_type, item_value in file_items:
-            if item_value.isdigit():
-                all_items.append((item_type, int(item_value), f"ID:{item_value}"))
-            else:
-                # Will resolve during processing
-                all_items.append((item_type, -1, item_value))
-
-        if not all_items:
-            error_console.print("[red]No items to check[/red]")
-            return
-
-        # Start or resume batch progress tracking
-        nonlocal existing_progress
-        batch_progress: BatchProgress | None = None
-        if all_movies or all_series:
-            if existing_progress:
-                batch_progress = existing_progress
-            else:
-                batch_id = str(uuid.uuid4())[:8]
-                batch_progress = state_manager.start_batch(
-                    batch_id,
-                    batch_type,
-                    len(all_items),
-                )
-
-        # Process items with progress bar
-        with Progress(
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TaskProgressColumn(),
-            TimeRemainingColumn(),
-            console=console,
-            disable=len(all_items) < 3,  # Don't show progress for small batches
-        ) as progress:
-            task = progress.add_task("Checking items...", total=len(all_items))
-
-            for item_type, item_id, item_name in all_items:
-                # Skip if already processed (resume mode)
-                if batch_progress and item_id > 0 and batch_progress.is_processed(item_id):
-                    progress.advance(task)
-                    skipped_count += 1
-                    continue
-
-                try:
-                    result: SearchResult | None = None
-
-                    if item_type == "movie":
-                        checker = get_checker(config, need_radarr=True)
-                        if item_id > 0:
-                            result = await checker.check_movie(
-                                item_id,
-                                criteria=search_criteria,
-                                apply_tags=apply_tags,
-                                dry_run=dry_run,
-                            )
-                        else:
-                            # Search by name
-                            matches = await checker.search_movies(item_name)
-                            if not matches:
-                                error_console.print(
-                                    f"[yellow]Movie not found:[/yellow] {item_name}"
-                                )
-                            elif len(matches) > 1:
-                                error_console.print(
-                                    f"[yellow]Multiple movies match '{item_name}':[/yellow] "
-                                    f"{', '.join(f'{t} ({y})' for _, t, y in matches[:3])}"
-                                    f"{'...' if len(matches) > 3 else ''}"
-                                )
-                            else:
-                                movie_id, movie_title, _ = matches[0]
-                                console.print(f"[dim]Found: {movie_title}[/dim]")
-                                result = await checker.check_movie(
-                                    movie_id,
-                                    criteria=search_criteria,
-                                    apply_tags=apply_tags,
-                                    dry_run=dry_run,
-                                )
-                    else:
-                        # For series, use 4K if movie-only criteria was specified
-                        # (This handles file-based items with movie-only criteria)
-                        if search_criteria in MOVIE_ONLY_CRITERIA:
-                            console.print(
-                                f"[yellow]Warning:[/yellow] {criteria} criteria is movie-only. "
-                                f"Using 4K for series '{item_name}'"
-                            )
-                            series_criteria = SearchCriteria.FOUR_K
-                        else:
-                            series_criteria = search_criteria
-                        checker = get_checker(config, need_sonarr=True)
-                        if item_id > 0:
-                            result = await checker.check_series(
-                                item_id,
-                                criteria=series_criteria,
-                                strategy=sampling_strategy,
-                                seasons_to_check=seasons,
-                                apply_tags=apply_tags,
-                                dry_run=dry_run,
-                            )
-                        else:
-                            # Search by name
-                            matches = await checker.search_series(item_name)
-                            if not matches:
-                                error_console.print(
-                                    f"[yellow]Series not found:[/yellow] {item_name}"
-                                )
-                            elif len(matches) > 1:
-                                error_console.print(
-                                    f"[yellow]Multiple series match '{item_name}':[/yellow] "
-                                    f"{', '.join(f'{t} ({y})' for _, t, y in matches[:3])}"
-                                    f"{'...' if len(matches) > 3 else ''}"
-                                )
-                            else:
-                                series_id, series_title, _ = matches[0]
-                                console.print(f"[dim]Found: {series_title}[/dim]")
-                                result = await checker.check_series(
-                                    series_id,
-                                    criteria=series_criteria,
-                                    strategy=sampling_strategy,
-                                    seasons_to_check=seasons,
-                                    apply_tags=apply_tags,
-                                    dry_run=dry_run,
-                                )
-
-                    if result:
-                        results.append(result)
-                        if result.has_match:
-                            has_4k_count += 1
-
-                        # Record in state file (unless dry run)
-                        if not dry_run and apply_tags and result.tag_result:
-                            state_manager.record_check(
-                                result.item_type,  # type: ignore[arg-type]
-                                result.item_id,
-                                result.has_match,
-                                result.tag_result.tag_applied,
-                            )
-
-                        # Update batch progress
-                        if batch_progress and item_id > 0:
-                            state_manager.update_batch_progress(item_id)
-
-                        print_result(result, format)
-                        processed_this_run += 1
-
-                        # Check if batch size limit reached
-                        if batch_size > 0 and processed_this_run >= batch_size:
-                            batch_limit_reached = True
-                            break
-
-                except ConfigurationError as e:
-                    error_console.print(f"[red]Config error for {item_type}:{item_name}:[/red] {e}")
-                    # Track failed items to avoid infinite retries on resume
-                    if batch_progress and item_id > 0:
-                        state_manager.update_batch_progress(item_id)
-                except Exception as e:
-                    error_console.print(f"[red]Error checking {item_type}:{item_name}:[/red] {e}")
-                    # Track failed items to avoid infinite retries on resume
-                    if batch_progress and item_id > 0:
-                        state_manager.update_batch_progress(item_id)
-
-                progress.advance(task)
-
-                # Apply delay between checks
-                if delay > 0:
-                    await asyncio.sleep(delay)
-
-        # Clear batch progress on successful completion (not if stopped by batch size limit)
-        if batch_progress and not batch_limit_reached:
-            state_manager.clear_batch_progress()
-
-    asyncio.run(run_checks())
+    # Run batch checks
+    asyncio.run(
+        _run_batch_checks(
+            ctx, all_movies, all_series, skip_tagged, file_items, batch_type, existing_progress
+        )
+    )
 
     # Print summary
-    console.print()
-    display_criteria = _format_result_type(search_criteria.value)
-    summary_parts = [f"{has_4k_count}/{len(results)} items have {display_criteria} available"]
-    if skipped_count > 0:
-        summary_parts.append(f"{skipped_count} resumed/skipped")
-    if batch_limit_reached:
-        summary_parts.append(f"batch limit ({batch_size}) reached - run again to continue")
-    console.print(f"[bold]Summary:[/bold] {', '.join(summary_parts)}")
+    _print_batch_summary(ctx)
 
-    raise typer.Exit(0 if has_4k_count == len(results) else 1)
+    raise typer.Exit(0 if ctx.has_match_count == len(ctx.results) else 1)
 
 
 # =============================================================================
