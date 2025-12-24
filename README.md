@@ -383,21 +383,30 @@ docker run -d \
 
 #### Docker Compose
 
+Create a `.env` file with your configuration:
+
+```bash
+# .env
+FILTARR_RADARR_URL=http://radarr:7878
+FILTARR_RADARR_API_KEY=your-radarr-key
+FILTARR_SONARR_URL=http://sonarr:8989
+FILTARR_SONARR_API_KEY=your-sonarr-key
+
+# Optional: customize tags
+FILTARR_TAG_AVAILABLE=4k-available
+FILTARR_TAG_UNAVAILABLE=4k-unavailable
+```
+
+Then use this `docker-compose.yml`:
+
 ```yaml
 services:
   filtarr:
     image: ghcr.io/dabigc/filtarr:latest
     container_name: filtarr
+    env_file: .env  # Required - Docker Compose doesn't auto-read .env
     ports:
       - "8080:8080"
-    environment:
-      - FILTARR_RADARR_URL=http://radarr:7878
-      - FILTARR_RADARR_API_KEY=your-radarr-key
-      - FILTARR_SONARR_URL=http://sonarr:8989
-      - FILTARR_SONARR_API_KEY=your-sonarr-key
-      # Optional: customize tags
-      - FILTARR_TAG_AVAILABLE=4k-available
-      - FILTARR_TAG_UNAVAILABLE=4k-unavailable
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -414,6 +423,8 @@ services:
     image: linuxserver/sonarr:latest
     # ... your sonarr config
 ```
+
+> **Note:** The `env_file: .env` directive is required. Docker Compose does not automatically load `.env` files for variable substitution in the compose file.
 
 #### Building Locally
 
