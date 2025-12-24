@@ -127,7 +127,7 @@ def create_app(config: Config | None = None) -> Any:
     app = FastAPI(
         title="Filtarr Webhook Server",
         description="Receive Radarr/Sonarr webhooks and check 4K availability",
-        version="1.1.3",  # x-release-please-version
+        version="1.1.4",  # x-release-please-version
     )
 
     # Store background tasks to prevent garbage collection
