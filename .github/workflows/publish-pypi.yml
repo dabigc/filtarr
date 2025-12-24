@@ -1,0 +1,114 @@
+name: Publish to PyPI
+
+on:
+  workflow_call:
+    inputs:
+      tag_name:
+        description: "The tag name to publish"
+        required: true
+        type: string
+
+jobs:
+  build:
+    name: Build Distribution
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag_name }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Build package
+        run: uv build
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  publish-testpypi:
+    name: Publish to Test PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/filtarr
+    permissions:
+      id-token: write  # Required for OIDC trusted publishing
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to Test PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: publish-testpypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/p/filtarr
+    permissions:
+      id-token: write  # Required for OIDC trusted publishing
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  update-release:
+    name: Update GitHub Release
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Update GitHub Release with PyPI info
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag_name }}
+          append_body: true
+          body: |
+
+            ## PyPI Package
+
+            Install from PyPI:
+
+            ```bash
+            pip install filtarr
+            ```
+
+            Or with extras:
+
+            ```bash
+            pip install filtarr[cli]           # CLI support
+            pip install filtarr[webhook]       # Webhook server
+            pip install filtarr[scheduler]     # Scheduled jobs
+            pip install filtarr[cli,webhook,scheduler]  # Everything
+            ```
