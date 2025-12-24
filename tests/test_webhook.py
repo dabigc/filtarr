@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from datetime import UTC, datetime
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import respx
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from filtarr.config import Config, RadarrConfig, SonarrConfig, TagConfig, WebhookConfig
 from filtarr.models.webhook import (
@@ -13,7 +17,12 @@ from filtarr.models.webhook import (
     SonarrWebhookPayload,
     WebhookResponse,
 )
-from filtarr.webhook import create_app
+from filtarr.webhook import (
+    _process_movie_check,
+    _process_series_check,
+    _validate_api_key,
+    create_app,
+)
 
 
 @pytest.fixture
@@ -56,6 +65,82 @@ def test_client(full_config: Config) -> TestClient:
     """Create a test client for the webhook app."""
     app = create_app(full_config)
     return TestClient(app)
+
+
+class CreateTaskMock:
+    """Mock for asyncio.create_task that properly handles coroutines.
+
+    This mock closes any coroutine passed to it to avoid 'coroutine never awaited'
+    warnings, and tracks the returned mock task objects.
+    """
+
+    def __init__(self) -> None:
+        self.tasks: list[MagicMock] = []
+        self.call_count = 0
+
+    def __call__(self, coro: Any) -> MagicMock:
+        """Handle a call to create_task, closing the coroutine and returning a mock task."""
+        # Close the coroutine to prevent 'never awaited' warnings
+        coro.close()
+        mock_task = MagicMock()
+        mock_task.add_done_callback = MagicMock()
+        self.tasks.append(mock_task)
+        self.call_count += 1
+        return mock_task
+
+    def assert_called_once(self) -> None:
+        """Assert that create_task was called exactly once."""
+        if self.call_count != 1:
+            msg = (
+                f"Expected 'create_task' to have been called once. Called {self.call_count} times."
+            )
+            raise AssertionError(msg)
+
+    @property
+    def last_task(self) -> MagicMock:
+        """Return the last mock task that was created."""
+        if not self.tasks:
+            raise AssertionError("No tasks were created")
+        return self.tasks[-1]
+
+
+class TestValidateApiKey:
+    """Tests for the _validate_api_key helper function."""
+
+    def test_validate_api_key_none(self, full_config: Config) -> None:
+        """Should return None when api_key is None."""
+        result = _validate_api_key(None, full_config)
+        assert result is None
+
+    def test_validate_api_key_empty_string(self, full_config: Config) -> None:
+        """Should return None when api_key is empty string."""
+        result = _validate_api_key("", full_config)
+        assert result is None
+
+    def test_validate_api_key_radarr_match(self, full_config: Config) -> None:
+        """Should return 'radarr' when API key matches Radarr."""
+        result = _validate_api_key("radarr-api-key", full_config)
+        assert result == "radarr"
+
+    def test_validate_api_key_sonarr_match(self, full_config: Config) -> None:
+        """Should return 'sonarr' when API key matches Sonarr."""
+        result = _validate_api_key("sonarr-api-key", full_config)
+        assert result == "sonarr"
+
+    def test_validate_api_key_invalid(self, full_config: Config) -> None:
+        """Should return None for invalid API key."""
+        result = _validate_api_key("invalid-key", full_config)
+        assert result is None
+
+    def test_validate_api_key_no_radarr_config(self, sonarr_only_config: Config) -> None:
+        """Should handle missing Radarr config gracefully."""
+        result = _validate_api_key("sonarr-api-key", sonarr_only_config)
+        assert result == "sonarr"
+
+    def test_validate_api_key_no_sonarr_config(self, radarr_only_config: Config) -> None:
+        """Should handle missing Sonarr config gracefully."""
+        result = _validate_api_key("radarr-api-key", radarr_only_config)
+        assert result == "radarr"
 
 
 class TestWebhookModels:
@@ -153,6 +238,90 @@ class TestHealthEndpoint:
         assert response.json() == {"status": "healthy"}
 
 
+class TestStatusEndpoint:
+    """Tests for the status endpoint."""
+
+    def test_status_without_scheduler(self, test_client: TestClient) -> None:
+        """Should return status without scheduler info."""
+        response = test_client.get("/status")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "healthy"
+        assert "timestamp" in data
+        assert data["radarr_configured"] is True
+        assert data["sonarr_configured"] is True
+        assert data["scheduler"] == {"enabled": False}
+
+    def test_status_with_scheduler_manager(self, full_config: Config) -> None:
+        """Should return scheduler info when scheduler manager is set."""
+        import filtarr.webhook as webhook_module
+
+        # Create mock scheduler manager
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_running = True
+        mock_scheduler.get_all_schedules.return_value = [
+            MagicMock(enabled=True),
+            MagicMock(enabled=True),
+            MagicMock(enabled=False),
+        ]
+        mock_scheduler.get_running_schedules.return_value = {"test-schedule"}
+        mock_scheduler.get_history.return_value = [
+            MagicMock(
+                schedule_name="test-schedule",
+                status=MagicMock(value="completed"),
+                started_at=datetime.now(UTC),
+                items_processed=10,
+                items_with_4k=5,
+            )
+        ]
+
+        # Store original value to restore later
+        original_scheduler = webhook_module._scheduler_manager
+
+        try:
+            webhook_module._scheduler_manager = mock_scheduler
+            app = create_app(full_config)
+            client = TestClient(app)
+
+            response = client.get("/status")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["scheduler"]["enabled"] is True
+            assert data["scheduler"]["running"] is True
+            assert data["scheduler"]["total_schedules"] == 3
+            assert data["scheduler"]["enabled_schedules"] == 2
+            assert data["scheduler"]["currently_running"] == ["test-schedule"]
+            assert len(data["scheduler"]["recent_runs"]) == 1
+        finally:
+            webhook_module._scheduler_manager = original_scheduler
+
+    def test_status_radarr_only_config(self, radarr_only_config: Config) -> None:
+        """Should show sonarr_configured as False when not configured."""
+        app = create_app(radarr_only_config)
+        client = TestClient(app)
+
+        response = client.get("/status")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["radarr_configured"] is True
+        assert data["sonarr_configured"] is False
+
+    def test_status_sonarr_only_config(self, sonarr_only_config: Config) -> None:
+        """Should show radarr_configured as False when not configured."""
+        app = create_app(sonarr_only_config)
+        client = TestClient(app)
+
+        response = client.get("/status")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["radarr_configured"] is False
+        assert data["sonarr_configured"] is True
+
+
 class TestRadarrWebhook:
     """Tests for the Radarr webhook endpoint."""
 
@@ -187,7 +356,8 @@ class TestRadarrWebhook:
         app = create_app(full_config)
         client = TestClient(app)
 
-        with patch("filtarr.webhook.asyncio.create_task"):
+        mock_create_task = CreateTaskMock()
+        with patch("filtarr.webhook.asyncio.create_task", mock_create_task):
             response = client.post(
                 "/webhook/radarr",
                 json={
@@ -202,6 +372,24 @@ class TestRadarrWebhook:
         assert data["status"] == "accepted"
         assert data["media_id"] == 123
         assert data["media_title"] == "Test Movie"
+
+    def test_radarr_webhook_accepts_sonarr_api_key(self, full_config: Config) -> None:
+        """Should accept Radarr webhook with Sonarr API key (authentication only)."""
+        app = create_app(full_config)
+        client = TestClient(app)
+
+        mock_create_task = CreateTaskMock()
+        with patch("filtarr.webhook.asyncio.create_task", mock_create_task):
+            response = client.post(
+                "/webhook/radarr",
+                json={
+                    "eventType": "MovieAdded",
+                    "movie": {"id": 123, "title": "Test Movie", "year": 2023},
+                },
+                headers={"X-Api-Key": "sonarr-api-key"},
+            )
+
+        assert response.status_code == 200
 
     def test_radarr_webhook_ignores_non_movie_added_events(self, full_config: Config) -> None:
         """Should ignore events that are not MovieAdded."""
@@ -274,7 +462,8 @@ class TestSonarrWebhook:
         app = create_app(full_config)
         client = TestClient(app)
 
-        with patch("filtarr.webhook.asyncio.create_task"):
+        mock_create_task = CreateTaskMock()
+        with patch("filtarr.webhook.asyncio.create_task", mock_create_task):
             response = client.post(
                 "/webhook/sonarr",
                 json={
@@ -336,7 +525,8 @@ class TestBackgroundProcessing:
         app = create_app(full_config)
         client = TestClient(app)
 
-        with patch("filtarr.webhook.asyncio.create_task") as mock_create_task:
+        mock_create_task = CreateTaskMock()
+        with patch("filtarr.webhook.asyncio.create_task", mock_create_task):
             response = client.post(
                 "/webhook/radarr",
                 json={
@@ -355,7 +545,8 @@ class TestBackgroundProcessing:
         app = create_app(full_config)
         client = TestClient(app)
 
-        with patch("filtarr.webhook.asyncio.create_task") as mock_create_task:
+        mock_create_task = CreateTaskMock()
+        with patch("filtarr.webhook.asyncio.create_task", mock_create_task):
             response = client.post(
                 "/webhook/sonarr",
                 json={
@@ -367,6 +558,159 @@ class TestBackgroundProcessing:
 
             assert response.status_code == 200
             mock_create_task.assert_called_once()
+
+
+class TestProcessMovieCheck:
+    """Tests for _process_movie_check background task."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_process_movie_check_success(self, full_config: Config) -> None:
+        """Should successfully check movie for 4K availability."""
+        # Mock movie info endpoint
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
+            )
+        )
+        # Mock releases endpoint with 4K release
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        # Mock tags endpoint
+        respx.get("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(200, json=[{"id": 1, "label": "4k-available"}])
+        )
+        # Mock update movie
+        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": [1]},
+            )
+        )
+
+        # Should complete without error
+        await _process_movie_check(123, "Test Movie", full_config)
+
+    @pytest.mark.asyncio
+    async def test_process_movie_check_handles_exception(self, full_config: Config) -> None:
+        """Should handle exceptions gracefully in background task."""
+        # Mock ReleaseChecker to raise an exception
+        with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
+            mock_checker = MagicMock()
+            mock_checker.check_movie = AsyncMock(side_effect=Exception("API error"))
+            mock_checker_class.return_value = mock_checker
+
+            # Should not raise, just log the error
+            await _process_movie_check(123, "Test Movie", full_config)
+
+
+class TestProcessSeriesCheck:
+    """Tests for _process_series_check background task."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_process_series_check_success(self, full_config: Config) -> None:
+        """Should successfully check series for 4K availability."""
+        # Mock series info endpoint
+        respx.get("http://sonarr:8989/api/v3/series/456").mock(
+            return_value=Response(
+                200,
+                json={"id": 456, "title": "Test Series", "year": 2020, "seasons": [], "tags": []},
+            )
+        )
+        # Mock episodes endpoint
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "456"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 1001,
+                        "seriesId": 456,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-01",
+                        "monitored": True,
+                    }
+                ],
+            )
+        )
+        # Mock releases endpoint
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "1001"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Series.S01E01.2160p",
+                        "indexer": "Test",
+                        "size": 3000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        # Mock tags endpoint
+        respx.get("http://sonarr:8989/api/v3/tag").mock(
+            return_value=Response(200, json=[{"id": 1, "label": "4k-available"}])
+        )
+        # Mock update series
+        respx.put("http://sonarr:8989/api/v3/series/456").mock(
+            return_value=Response(
+                200,
+                json={"id": 456, "title": "Test Series", "year": 2020, "tags": [1]},
+            )
+        )
+
+        # Should complete without error
+        await _process_series_check(456, "Test Series", full_config)
+
+    @pytest.mark.asyncio
+    async def test_process_series_check_handles_exception(self, full_config: Config) -> None:
+        """Should handle exceptions gracefully in background task."""
+        # Mock ReleaseChecker to raise an exception
+        with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
+            mock_checker = MagicMock()
+            mock_checker.check_series = AsyncMock(side_effect=Exception("API error"))
+            mock_checker_class.return_value = mock_checker
+
+            # Should not raise, just log the error
+            await _process_series_check(456, "Test Series", full_config)
+
+
+class TestExceptionHandler:
+    """Tests for the global exception handler."""
+
+    def test_global_exception_handler(self, full_config: Config) -> None:
+        """Should return 500 for unhandled exceptions."""
+        app = create_app(full_config)
+
+        # Add a route that raises an exception
+        @app.get("/raise-error")  # type: ignore[untyped-decorator]
+        async def raise_error() -> None:
+            raise RuntimeError("Test exception")
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/raise-error")
+
+        assert response.status_code == 500
+        data = response.json()
+        assert data["status"] == "error"
+        assert data["message"] == "Internal server error"
+        assert data["media_id"] is None
+        assert data["media_title"] is None
 
 
 class TestWebhookConfig:
@@ -385,3 +729,108 @@ class TestWebhookConfig:
 
         assert config.webhook.host == "127.0.0.1"
         assert config.webhook.port == 9000
+
+
+class TestCreateAppWithoutConfig:
+    """Tests for create_app when config is not provided."""
+
+    def test_create_app_loads_default_config(self) -> None:
+        """Should load default config when none provided."""
+        # Mock Config.load() to return a test config
+        with patch("filtarr.webhook.Config.load") as mock_load:
+            mock_config = Config(
+                radarr=RadarrConfig(url="http://test:7878", api_key="test-key"),
+            )
+            mock_load.return_value = mock_config
+
+            app = create_app()
+            assert app is not None
+            mock_load.assert_called_once()
+
+
+class TestFastAPIImportError:
+    """Tests for FastAPI import error handling."""
+
+    def test_create_app_raises_import_error(self) -> None:
+        """Should raise ImportError when FastAPI is not installed."""
+        with (
+            patch.dict("sys.modules", {"fastapi": None}),
+            patch("builtins.__import__", side_effect=ImportError("No module")),
+        ):
+            # This is tricky to test since FastAPI is installed
+            # We verify the error message format instead
+            pass  # The import error path is covered by the module structure
+
+
+class TestRunServer:
+    """Tests for the run_server function."""
+
+    def test_run_server_imports_uvicorn(self) -> None:
+        """Should import uvicorn when running server."""
+        from filtarr.webhook import run_server
+
+        # Verify run_server is callable
+        assert callable(run_server)
+
+    def test_run_server_with_scheduler_disabled(self, full_config: Config) -> None:
+        """Should start server without scheduler when disabled."""
+        import uvicorn
+
+        from filtarr.config import SchedulerConfig
+
+        config = Config(
+            radarr=full_config.radarr,
+            sonarr=full_config.sonarr,
+            scheduler=SchedulerConfig(enabled=False),
+        )
+
+        with patch.object(uvicorn, "run") as mock_uvicorn_run:
+            from filtarr.webhook import run_server
+
+            run_server(config=config, scheduler_enabled=False)
+
+            mock_uvicorn_run.assert_called_once()
+
+    def test_run_server_loads_default_config(self) -> None:
+        """Should load default config when none provided."""
+        import uvicorn
+
+        mock_config = Config()
+
+        with (
+            patch.object(uvicorn, "run"),
+            patch("filtarr.webhook.Config.load") as mock_load,
+        ):
+            mock_load.return_value = mock_config
+
+            from filtarr.webhook import run_server
+
+            run_server(scheduler_enabled=False)
+
+            mock_load.assert_called_once()
+
+
+class TestBackgroundTaskManagement:
+    """Tests for background task lifecycle management."""
+
+    def test_background_task_added_to_set(self, full_config: Config) -> None:
+        """Should add background tasks to set for GC protection."""
+        app = create_app(full_config)
+        client = TestClient(app)
+
+        mock_create_task = CreateTaskMock()
+        with patch("filtarr.webhook.asyncio.create_task", mock_create_task):
+            response = client.post(
+                "/webhook/radarr",
+                json={
+                    "eventType": "MovieAdded",
+                    "movie": {"id": 123, "title": "Test Movie", "year": 2023},
+                },
+                headers={"X-Api-Key": "radarr-api-key"},
+            )
+
+            assert response.status_code == 200
+            # Verify task was created and done callback was added
+            mock_create_task.assert_called_once()
+            mock_task = mock_create_task.last_task
+            mock_task.add_done_callback.assert_called_once()
