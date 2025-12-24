@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0](https://github.com/dabigc/4k-findarr/compare/v0.1.1...v0.2.0) (2025-12-24)
+
+
+### Features
+
+* add batch operations, tagging, and state management ([#6](https://github.com/dabigc/4k-findarr/issues/6)) ([b43781a](https://github.com/dabigc/4k-findarr/commit/b43781acf6e66bb95fd346851528dc55d760f20c))
+* add Release Please for automated release tagging ([#11](https://github.com/dabigc/4k-findarr/issues/11)) ([2afa2e4](https://github.com/dabigc/4k-findarr/commit/2afa2e45f16ae0ddba8ba47affd84c0814bd21fe))
+* add scheduler for automated batch operations ([#9](https://github.com/dabigc/4k-findarr/issues/9)) ([77dca9c](https://github.com/dabigc/4k-findarr/commit/77dca9cda7366ad4f4c100af8bd7fba9e93a8458))
+* add webhook endpoint and Docker container with CI/CD ([#8](https://github.com/dabigc/4k-findarr/issues/8)) ([bde879f](https://github.com/dabigc/4k-findarr/commit/bde879f22f7d12fa80050bdc3c935b6d1fa064dc))
+* findarr 4K availability checker library ([#1](https://github.com/dabigc/4k-findarr/issues/1)) ([21961f6](https://github.com/dabigc/4k-findarr/commit/21961f65ef91faa1f078f7dc4033efda6b3309a7))
+
+
+### Bug Fixes
+
+* chain release workflow from release-please to trigger Docker builds ([#14](https://github.com/dabigc/4k-findarr/issues/14)) ([5a27363](https://github.com/dabigc/4k-findarr/commit/5a2736378962468830e26e86102a4d8d439d5b65))
+* exclude non-code paths from triggering releases ([#19](https://github.com/dabigc/4k-findarr/issues/19)) ([351a533](https://github.com/dabigc/4k-findarr/commit/351a53310e2381dac8730af3fbf0a712a1a3dfa6))
+* include scheduler extra in Docker image ([#12](https://github.com/dabigc/4k-findarr/issues/12)) ([0835992](https://github.com/dabigc/4k-findarr/commit/083599293149b3f4327822f08392a9ae1df6bd7e))
+
 ## [0.1.1](https://github.com/dabigc/4k-findarr/compare/v0.1.0...v0.1.1) (2025-12-23)
 
 
