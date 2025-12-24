@@ -6,7 +6,7 @@ import pytest
 import respx
 from httpx import Response
 
-from findarr.clients.sonarr import SonarrClient
+from filtarr.clients.sonarr import SonarrClient
 
 
 class TestGetSeries:
@@ -328,7 +328,7 @@ class TestSonarrModels:
 
     def test_episode_model_with_aliases(self) -> None:
         """Should parse episode data with field aliases."""
-        from findarr.models.sonarr import Episode
+        from filtarr.models.sonarr import Episode
 
         episode = Episode.model_validate(
             {
@@ -354,7 +354,7 @@ class TestSonarrModels:
 
     def test_season_model_with_aliases(self) -> None:
         """Should parse season data with field aliases."""
-        from findarr.models.sonarr import Season
+        from filtarr.models.sonarr import Season
 
         season = Season(
             seasonNumber=3,
@@ -372,7 +372,7 @@ class TestSonarrModels:
 
     def test_series_model(self) -> None:
         """Should parse series data with seasons."""
-        from findarr.models.sonarr import Season, Series
+        from filtarr.models.sonarr import Season, Series
 
         series = Series(
             id=200,

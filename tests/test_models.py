@@ -1,6 +1,6 @@
 """Tests for data models."""
 
-from findarr.models.common import Quality, Release
+from filtarr.models.common import Quality, Release
 
 
 class TestQuality:

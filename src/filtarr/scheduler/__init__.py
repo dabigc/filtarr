@@ -1,6 +1,6 @@
 """Scheduler module for scheduled batch operations.
 
-This module provides scheduling capabilities for findarr batch operations,
+This module provides scheduling capabilities for filtarr batch operations,
 allowing automatic 4K availability checks on configurable schedules.
 
 Example:
@@ -16,15 +16,15 @@ Example:
 
     Or manage dynamically via CLI::
 
-        findarr schedule add daily-movies --target movies --cron "0 3 * * *"
-        findarr schedule list
-        findarr schedule run daily-movies
+        filtarr schedule add daily-movies --target movies --cron "0 3 * * *"
+        filtarr schedule list
+        filtarr schedule run daily-movies
 """
 
-from findarr.scheduler.executor import JobExecutor, execute_schedule
-from findarr.scheduler.exporter import export_cron, export_systemd, export_systemd_timer
-from findarr.scheduler.manager import SchedulerManager
-from findarr.scheduler.models import (
+from filtarr.scheduler.executor import JobExecutor, execute_schedule
+from filtarr.scheduler.exporter import export_cron, export_systemd, export_systemd_timer
+from filtarr.scheduler.manager import SchedulerManager
+from filtarr.scheduler.models import (
     CronTrigger,
     IntervalTrigger,
     RunStatus,
@@ -36,7 +36,7 @@ from findarr.scheduler.models import (
     Trigger,
     TriggerType,
 )
-from findarr.scheduler.triggers import (
+from filtarr.scheduler.triggers import (
     format_trigger_description,
     get_next_run_time,
     parse_interval_string,

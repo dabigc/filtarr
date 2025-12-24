@@ -29,26 +29,26 @@ FROM python:3.12-alpine AS runtime
 # Install runtime dependencies, create non-root user, and set up directories
 # Combined into single layer to minimize image size
 RUN apk add --no-cache libffi curl && \
-    addgroup -g 1000 findarr && \
-    adduser -u 1000 -G findarr -D -h /app findarr && \
+    addgroup -g 1000 filtarr && \
+    adduser -u 1000 -G filtarr -D -h /app filtarr && \
     mkdir -p /config && \
-    chown findarr:findarr /config
+    chown filtarr:filtarr /config
 
 WORKDIR /app
 
 # Copy virtual environment and source from builder
-COPY --from=builder --chown=findarr:findarr /app/.venv /app/.venv
-COPY --from=builder --chown=findarr:findarr /app/src /app/src
+COPY --from=builder --chown=filtarr:filtarr /app/.venv /app/.venv
+COPY --from=builder --chown=filtarr:filtarr /app/src /app/src
 
 # Set environment variables
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    FINDARR_WEBHOOK_HOST="0.0.0.0" \
-    FINDARR_WEBHOOK_PORT="8080"
+    FILTARR_WEBHOOK_HOST="0.0.0.0" \
+    FILTARR_WEBHOOK_PORT="8080"
 
 # Switch to non-root user
-USER findarr
+USER filtarr
 
 # Expose webhook port
 EXPOSE 8080
@@ -58,4 +58,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
 # Default command: run the webhook server
-CMD ["findarr", "serve", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["filtarr", "serve", "--host", "0.0.0.0", "--port", "8080"]

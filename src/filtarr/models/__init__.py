@@ -1,9 +1,9 @@
 """Pydantic models for API responses."""
 
-from findarr.models.common import Quality, Release, Tag
-from findarr.models.radarr import Movie
-from findarr.models.sonarr import Episode, Season, Series
-from findarr.models.webhook import (
+from filtarr.models.common import Quality, Release, Tag
+from filtarr.models.radarr import Movie
+from filtarr.models.sonarr import Episode, Season, Series
+from filtarr.models.webhook import (
     RadarrMovie,
     RadarrWebhookPayload,
     SonarrSeries,

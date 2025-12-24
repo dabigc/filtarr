@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from findarr.scheduler.models import (
+from filtarr.scheduler.models import (
     CronTrigger,
     IntervalTrigger,
     Trigger,

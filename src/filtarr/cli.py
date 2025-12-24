@@ -1,4 +1,4 @@
-"""Command-line interface for findarr."""
+"""Command-line interface for filtarr."""
 
 from __future__ import annotations
 
@@ -14,20 +14,20 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, TimeRemainingColumn
 from rich.table import Table
 
-from findarr.checker import FourKChecker, FourKResult, SamplingStrategy
-from findarr.clients.radarr import RadarrClient
-from findarr.clients.sonarr import SonarrClient
-from findarr.config import Config, ConfigurationError
-from findarr.state import BatchProgress, StateManager
+from filtarr.checker import ReleaseChecker, SamplingStrategy, SearchResult
+from filtarr.clients.radarr import RadarrClient
+from filtarr.clients.sonarr import SonarrClient
+from filtarr.config import Config, ConfigurationError
+from filtarr.state import BatchProgress, StateManager
 
 if TYPE_CHECKING:
-    from findarr.models.radarr import Movie
-    from findarr.models.sonarr import Series
-    from findarr.scheduler import SchedulerManager
+    from filtarr.models.radarr import Movie
+    from filtarr.models.sonarr import Series
+    from filtarr.scheduler import SchedulerManager
 
 app = typer.Typer(
-    name="findarr",
-    help="Check 4K availability for movies and TV shows via Radarr/Sonarr.",
+    name="filtarr",
+    help="Check release availability for movies and TV shows via Radarr/Sonarr.",
     no_args_is_help=True,
 )
 check_app = typer.Typer(help="Check 4K availability for media items.")
@@ -48,15 +48,16 @@ class OutputFormat(str, Enum):
     SIMPLE = "simple"
 
 
-def format_result_json(result: FourKResult) -> str:
+def format_result_json(result: SearchResult) -> str:
     """Format result as JSON."""
     data: dict[str, object] = {
         "item_id": result.item_id,
         "item_type": result.item_type,
         "item_name": result.item_name,
-        "has_4k": result.has_4k,
+        "has_match": result.has_match,
+        "result_type": result.result_type.value,
         "releases_count": len(result.releases),
-        "four_k_releases_count": len(result.four_k_releases),
+        "matched_releases_count": len(result.matched_releases),
     }
     if result.episodes_checked:
         data["episodes_checked"] = result.episodes_checked
@@ -76,20 +77,21 @@ def format_result_json(result: FourKResult) -> str:
     return json.dumps(data, indent=2)
 
 
-def format_result_table(result: FourKResult) -> Table:
+def format_result_table(result: SearchResult) -> Table:
     """Format result as a rich table."""
     if result.item_name:
-        title = f"4K Check: {result.item_name} ({result.item_id})"
+        title = f"Release Check: {result.item_name} ({result.item_id})"
     else:
-        title = f"4K Check: {result.item_type.title()} {result.item_id}"
+        title = f"Release Check: {result.item_type.title()} {result.item_id}"
     table = Table(title=title)
 
     table.add_column("Property", style="cyan")
-    table.add_column("Value", style="green" if result.has_4k else "red")
+    table.add_column("Value", style="green" if result.has_match else "red")
 
-    table.add_row("4K Available", "Yes" if result.has_4k else "No")
+    table.add_row("Match Found", "Yes" if result.has_match else "No")
+    table.add_row("Search Type", _format_result_type(result.result_type.value))
     table.add_row("Total Releases", str(len(result.releases)))
-    table.add_row("4K Releases", str(len(result.four_k_releases)))
+    table.add_row("Matched Releases", str(len(result.matched_releases)))
 
     if result.seasons_checked:
         table.add_row("Seasons Checked", ", ".join(map(str, result.seasons_checked)))
@@ -108,9 +110,29 @@ def format_result_table(result: FourKResult) -> Table:
     return table
 
 
-def format_result_simple(result: FourKResult) -> str:
+def _format_result_type(result_type_value: str) -> str:
+    """Format result type for user-friendly display.
+
+    Converts enum values to user-friendly display strings.
+    E.g., "4k" -> "4K", "directors_cut" -> "Director's Cut"
+    """
+    display_names = {
+        "4k": "4K",
+        "hdr": "HDR",
+        "dolby_vision": "Dolby Vision",
+        "directors_cut": "Director's Cut",
+        "extended": "Extended",
+        "remaster": "Remaster",
+        "imax": "IMAX",
+        "custom": "Custom",
+    }
+    return display_names.get(result_type_value, result_type_value)
+
+
+def format_result_simple(result: SearchResult) -> str:
     """Format result as simple text."""
-    status = "4K available" if result.has_4k else "No 4K"
+    display_type = _format_result_type(result.result_type.value)
+    status = f"{display_type} available" if result.has_match else f"No {display_type}"
     tag_info = ""
     if result.tag_result:
         if result.tag_result.dry_run:
@@ -124,11 +146,11 @@ def format_result_simple(result: FourKResult) -> str:
     return f"{result.item_type}:{result.item_id}: {status}{tag_info}"
 
 
-def print_result(result: FourKResult, format: OutputFormat) -> None:
+def print_result(result: SearchResult, output_format: OutputFormat) -> None:
     """Print result in the specified format."""
-    if format == OutputFormat.JSON:
+    if output_format == OutputFormat.JSON:
         console.print(format_result_json(result))
-    elif format == OutputFormat.TABLE:
+    elif output_format == OutputFormat.TABLE:
         console.print(format_result_table(result))
     else:
         console.print(format_result_simple(result))
@@ -136,8 +158,8 @@ def print_result(result: FourKResult, format: OutputFormat) -> None:
 
 def get_checker(
     config: Config, need_radarr: bool = False, need_sonarr: bool = False
-) -> FourKChecker:
-    """Create a FourKChecker from config."""
+) -> ReleaseChecker:
+    """Create a ReleaseChecker from config."""
     radarr_url = None
     radarr_key = None
     sonarr_url = None
@@ -153,7 +175,7 @@ def get_checker(
         sonarr_url = sonarr.url
         sonarr_key = sonarr.api_key
 
-    return FourKChecker(
+    return ReleaseChecker(
         radarr_url=radarr_url,
         radarr_api_key=radarr_key,
         sonarr_url=sonarr_url,
@@ -187,7 +209,7 @@ def display_series_choices(matches: list[tuple[int, str, int]]) -> None:
 @check_app.command("movie")
 def check_movie(
     movie: Annotated[str, typer.Argument(help="Movie ID or name to check")],
-    format: Annotated[
+    output_format: Annotated[
         OutputFormat, typer.Option("--format", "-f", help="Output format")
     ] = OutputFormat.TABLE,
     no_tag: Annotated[bool, typer.Option("--no-tag", help="Disable automatic tagging")] = False,
@@ -202,10 +224,10 @@ def check_movie(
     If a name matches multiple movies, you'll be shown the options.
 
     Examples:
-        findarr check movie 123
-        findarr check movie "The Matrix"
-        findarr check movie 123 --no-tag
-        findarr check movie 123 --dry-run
+        filtarr check movie 123
+        filtarr check movie "The Matrix"
+        filtarr check movie 123 --no-tag
+        filtarr check movie 123 --dry-run
     """
     try:
         config = Config.load()
@@ -241,12 +263,12 @@ def check_movie(
             state_manager.record_check(
                 "movie",
                 result.item_id,
-                result.has_4k,
+                result.has_match,
                 result.tag_result.tag_applied,
             )
 
-        print_result(result, format)
-        raise typer.Exit(0 if result.has_4k else 1)
+        print_result(result, output_format)
+        raise typer.Exit(0 if result.has_match else 1)
     except typer.Exit:
         raise
     except ConfigurationError as e:
@@ -258,7 +280,7 @@ def check_movie(
 
 
 @check_app.command("series")
-def check_series(
+def check_series_cmd(
     series: Annotated[str, typer.Argument(help="Series ID or name to check")],
     seasons: Annotated[
         int,
@@ -267,7 +289,7 @@ def check_series(
     strategy: Annotated[
         str, typer.Option("--strategy", help="Sampling strategy: recent, distributed, or all")
     ] = "recent",
-    format: Annotated[
+    output_format: Annotated[
         OutputFormat, typer.Option("--format", "-f", help="Output format")
     ] = OutputFormat.TABLE,
     no_tag: Annotated[bool, typer.Option("--no-tag", help="Disable automatic tagging")] = False,
@@ -282,10 +304,10 @@ def check_series(
     If a name matches multiple series, you'll be shown the options.
 
     Examples:
-        findarr check series 456
-        findarr check series "Breaking Bad"
-        findarr check series 456 --no-tag
-        findarr check series 456 --dry-run
+        filtarr check series 456
+        filtarr check series "Breaking Bad"
+        filtarr check series 456 --no-tag
+        filtarr check series 456 --dry-run
     """
     try:
         # Parse strategy
@@ -347,12 +369,12 @@ def check_series(
             state_manager.record_check(
                 "series",
                 result.item_id,
-                result.has_4k,
+                result.has_match,
                 result.tag_result.tag_applied,
             )
 
-        print_result(result, format)
-        raise typer.Exit(0 if result.has_4k else 1)
+        print_result(result, output_format)
+        raise typer.Exit(0 if result.has_match else 1)
     except ConfigurationError as e:
         error_console.print(f"[red]Configuration error:[/red] {e}")
         raise typer.Exit(2) from e
@@ -423,11 +445,11 @@ def check_batch(
     Use --batch-size to limit items per run (avoids overloading indexers).
 
     Examples:
-        findarr check batch --file items.txt
-        findarr check batch --all-movies
-        findarr check batch --all-movies --batch-size 100
-        findarr check batch --all-series --delay 1.0
-        findarr check batch --all-movies --all-series
+        filtarr check batch --file items.txt
+        filtarr check batch --all-movies
+        filtarr check batch --all-movies --batch-size 100
+        filtarr check batch --all-series --delay 1.0
+        filtarr check batch --all-movies --all-series
     """
     # Validate: need either file or --all-* flags
     if not file and not all_movies and not all_series:
@@ -524,7 +546,7 @@ def check_batch(
             )
 
     # Check items
-    results: list[FourKResult] = []
+    results: list[SearchResult] = []
     has_4k_count = 0
     skipped_count = 0
     processed_this_run = 0
@@ -643,7 +665,7 @@ def check_batch(
                     continue
 
                 try:
-                    result: FourKResult | None = None
+                    result: SearchResult | None = None
 
                     if item_type == "movie":
                         checker = get_checker(config, need_radarr=True)
@@ -706,7 +728,7 @@ def check_batch(
 
                     if result:
                         results.append(result)
-                        if result.has_4k:
+                        if result.has_match:
                             has_4k_count += 1
 
                         # Record in state file (unless dry run)
@@ -714,7 +736,7 @@ def check_batch(
                             state_manager.record_check(
                                 result.item_type,  # type: ignore[arg-type]
                                 result.item_id,
-                                result.has_4k,
+                                result.has_match,
                                 result.tag_result.tag_applied,
                             )
 
@@ -772,7 +794,7 @@ def check_batch(
 
 def _get_scheduler_manager() -> SchedulerManager:
     """Get a SchedulerManager instance."""
-    from findarr.scheduler import SchedulerManager
+    from filtarr.scheduler import SchedulerManager
 
     config = Config.load()
     state_manager = get_state_manager(config)
@@ -789,7 +811,7 @@ def schedule_list(
     ] = OutputFormat.TABLE,
 ) -> None:
     """List all configured schedules."""
-    from findarr.scheduler import format_trigger_description, get_next_run_time
+    from filtarr.scheduler import format_trigger_description, get_next_run_time
 
     manager = _get_scheduler_manager()
     schedules = manager.get_all_schedules()
@@ -859,17 +881,17 @@ def schedule_add(
     """Add a new dynamic schedule.
 
     Examples:
-        findarr schedule add daily-movies --target movies --cron "0 3 * * *"
-        findarr schedule add hourly-check --target both --interval 6h
-        findarr schedule add weekly-series --target series --interval 1w --strategy recent
+        filtarr schedule add daily-movies --target movies --cron "0 3 * * *"
+        filtarr schedule add hourly-check --target both --interval 6h
+        filtarr schedule add weekly-series --target series --interval 1w --strategy recent
     """
-    from findarr.scheduler import (
+    from filtarr.scheduler import (
         ScheduleDefinition,
         ScheduleTarget,
         SeriesStrategy,
         parse_interval_string,
     )
-    from findarr.scheduler.models import CronTrigger, IntervalTrigger
+    from filtarr.scheduler.models import CronTrigger, IntervalTrigger
 
     # Validate trigger
     if not cron and not interval:
@@ -941,7 +963,7 @@ def schedule_add(
         raise typer.Exit(2) from e
 
     console.print(f"[green]Schedule '{schedule.name}' added successfully[/green]")
-    console.print("[dim]Note: Restart 'findarr serve' to activate new schedule[/dim]")
+    console.print("[dim]Note: Restart 'filtarr serve' to activate new schedule[/dim]")
 
 
 @schedule_app.command("remove")
@@ -979,7 +1001,7 @@ def schedule_enable(
 
     if updated:
         console.print(f"[green]Schedule '{name}' enabled[/green]")
-        console.print("[dim]Note: Restart 'findarr serve' to apply changes[/dim]")
+        console.print("[dim]Note: Restart 'filtarr serve' to apply changes[/dim]")
     else:
         error_console.print(f"[red]Schedule not found:[/red] {name}")
         raise typer.Exit(1)
@@ -1000,7 +1022,7 @@ def schedule_disable(
 
     if updated:
         console.print(f"[green]Schedule '{name}' disabled[/green]")
-        console.print("[dim]Note: Restart 'findarr serve' to apply changes[/dim]")
+        console.print("[dim]Note: Restart 'filtarr serve' to apply changes[/dim]")
     else:
         error_console.print(f"[red]Schedule not found:[/red] {name}")
         raise typer.Exit(1)
@@ -1112,14 +1134,14 @@ def schedule_export(
     """Export schedules to external scheduler format.
 
     Generates configuration for cron or systemd timers that run
-    'findarr check batch' commands equivalent to the configured schedules.
+    'filtarr check batch' commands equivalent to the configured schedules.
 
     Examples:
-        findarr schedule export --format cron
-        findarr schedule export --format cron > /etc/cron.d/findarr
-        findarr schedule export --format systemd --output /etc/systemd/system/
+        filtarr schedule export --format cron
+        filtarr schedule export --format cron > /etc/cron.d/findarr
+        filtarr schedule export --format systemd --output /etc/systemd/system/
     """
-    from findarr.scheduler import export_cron, export_systemd
+    from filtarr.scheduler import export_cron, export_systemd
 
     manager = _get_scheduler_manager()
     schedules = manager.get_all_schedules()
@@ -1149,20 +1171,20 @@ def schedule_export(
             results = export_systemd(enabled_schedules, output_dir=output)
             console.print(f"[green]Generated {len(results)} systemd timer/service pairs:[/green]")
             for name, _, _ in results:
-                console.print(f"  - findarr-{name}.timer")
-                console.print(f"  - findarr-{name}.service")
+                console.print(f"  - filtarr-{name}.timer")
+                console.print(f"  - filtarr-{name}.service")
             console.print()
             console.print("[dim]To install:[/dim]")
-            console.print(f"  sudo cp {output}/findarr-*.{{timer,service}} /etc/systemd/system/")
+            console.print(f"  sudo cp {output}/filtarr-*.{{timer,service}} /etc/systemd/system/")
             console.print("  sudo systemctl daemon-reload")
             for name, _, _ in results:
-                console.print(f"  sudo systemctl enable --now findarr-{name}.timer")
+                console.print(f"  sudo systemctl enable --now filtarr-{name}.timer")
         else:
             results = export_systemd(enabled_schedules)
             for name, timer_content, service_content in results:
-                console.print(f"[bold cyan]# findarr-{name}.timer[/bold cyan]")
+                console.print(f"[bold cyan]# filtarr-{name}.timer[/bold cyan]")
                 console.print(timer_content)
-                console.print(f"[bold cyan]# findarr-{name}.service[/bold cyan]")
+                console.print(f"[bold cyan]# filtarr-{name}.service[/bold cyan]")
                 console.print(service_content)
                 console.print()
 
@@ -1170,9 +1192,9 @@ def schedule_export(
 @app.command()
 def version() -> None:
     """Show version information."""
-    from findarr import __version__
+    from filtarr import __version__
 
-    console.print(f"findarr version {__version__}")
+    console.print(f"filtarr version {__version__}")
 
 
 @app.command()
@@ -1216,7 +1238,7 @@ def serve(
     automatically check 4K availability and apply tags based on your config.
 
     The scheduler runs batch operations on configured schedules. Use
-    'findarr schedule list' to see configured schedules. Disable with
+    'filtarr schedule list' to see configured schedules. Disable with
     --no-scheduler if you only want webhook functionality.
 
     Configure webhooks in Radarr/Sonarr:
@@ -1226,16 +1248,16 @@ def serve(
     - Add header: X-Api-Key with your Radarr/Sonarr API key
 
     Example:
-        findarr serve --port 8080
-        findarr serve --host 0.0.0.0 --port 9000 --log-level debug
-        findarr serve --no-scheduler  # Webhooks only, no scheduled batches
+        filtarr serve --port 8080
+        filtarr serve --host 0.0.0.0 --port 9000 --log-level debug
+        filtarr serve --no-scheduler  # Webhooks only, no scheduled batches
     """
     try:
-        from findarr.webhook import run_server
+        from filtarr.webhook import run_server
     except ImportError:
         error_console.print(
             "[red]Error:[/red] Webhook server requires additional dependencies.\n"
-            "Install with: [bold]pip install findarr[webhook][/bold]"
+            "Install with: [bold]pip install filtarr[webhook][/bold]"
         )
         raise typer.Exit(1) from None
 
@@ -1246,7 +1268,7 @@ def serve(
     server_port = port or config.webhook.port
     scheduler_enabled = scheduler and config.scheduler.enabled
 
-    console.print("[bold green]Starting findarr server[/bold green]")
+    console.print("[bold green]Starting filtarr server[/bold green]")
     console.print(f"  Host: {server_host}")
     console.print(f"  Port: {server_port}")
     console.print(f"  Radarr configured: {'Yes' if config.radarr else 'No'}")
@@ -1254,7 +1276,7 @@ def serve(
     console.print(f"  Scheduler: {'Enabled' if scheduler_enabled else 'Disabled'}")
 
     if scheduler_enabled:
-        from findarr.scheduler import SchedulerManager
+        from filtarr.scheduler import SchedulerManager
 
         state_manager = get_state_manager(config)
         manager = SchedulerManager(config, state_manager)

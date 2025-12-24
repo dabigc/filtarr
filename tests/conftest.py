@@ -2,7 +2,7 @@
 
 import pytest
 
-from findarr.models.common import Quality, Release
+from filtarr.models.common import Quality, Release
 
 
 @pytest.fixture

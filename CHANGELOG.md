@@ -5,24 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.1](https://github.com/dabigc/4k-findarr/compare/v0.1.0...v0.1.1) (2025-12-23)
+## [0.1.1](https://github.com/dabigc/filtarr/compare/v0.1.0...v0.1.1) (2025-12-23)
 
 
 ### Bug Fixes
 
-* chain release workflow from release-please to trigger Docker builds ([#14](https://github.com/dabigc/4k-findarr/issues/14)) ([e1d4935](https://github.com/dabigc/4k-findarr/commit/e1d4935ede6e6bb4362547583d1c4d5e4ecd87b3))
+* chain release workflow from release-please to trigger Docker builds ([#14](https://github.com/dabigc/filtarr/issues/14)) ([e1d4935](https://github.com/dabigc/filtarr/commit/e1d4935ede6e6bb4362547583d1c4d5e4ecd87b3))
 
-## [0.1.0](https://github.com/dabigc/4k-findarr/compare/v0.0.2...v0.1.0) (2025-12-23)
+## [0.1.0](https://github.com/dabigc/filtarr/compare/v0.0.2...v0.1.0) (2025-12-23)
 
 
 ### Features
 
-* add Release Please for automated release tagging ([#11](https://github.com/dabigc/4k-findarr/issues/11)) ([9518d90](https://github.com/dabigc/4k-findarr/commit/9518d907f704936487f404774766d96057a7e5ea))
+* add Release Please for automated release tagging ([#11](https://github.com/dabigc/filtarr/issues/11)) ([9518d90](https://github.com/dabigc/filtarr/commit/9518d907f704936487f404774766d96057a7e5ea))
 
 
 ### Bug Fixes
 
-* include scheduler extra in Docker image ([#12](https://github.com/dabigc/4k-findarr/issues/12)) ([8ca02a2](https://github.com/dabigc/4k-findarr/commit/8ca02a23c6f2148b7382f5d60e641f60c654a705))
+* include scheduler extra in Docker image ([#12](https://github.com/dabigc/filtarr/issues/12)) ([8ca02a2](https://github.com/dabigc/filtarr/commit/8ca02a23c6f2148b7382f5d60e641f60c654a705))
 
 ## [Unreleased]
 
@@ -30,22 +30,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Scheduler Module** (`pip install findarr[scheduler]`)
+- **Scheduler Module** (`pip install filtarr[scheduler]`)
   - Built-in job scheduler using APScheduler for automated batch operations
   - Support for cron expressions and interval-based triggers
   - Configurable schedules in config.toml with `[[scheduler.schedules]]` array
   - Dynamic schedule management via CLI commands
   - Schedule CLI commands:
-    - `findarr schedule list` - List all configured schedules
-    - `findarr schedule add <name>` - Add a new dynamic schedule
-    - `findarr schedule remove <name>` - Remove a dynamic schedule
-    - `findarr schedule enable/disable <name>` - Toggle schedule status
-    - `findarr schedule run <name>` - Execute a schedule immediately
-    - `findarr schedule history` - View run history with status and statistics
-    - `findarr schedule export --format cron|systemd` - Export for external schedulers
+    - `filtarr schedule list` - List all configured schedules
+    - `filtarr schedule add <name>` - Add a new dynamic schedule
+    - `filtarr schedule remove <name>` - Remove a dynamic schedule
+    - `filtarr schedule enable/disable <name>` - Toggle schedule status
+    - `filtarr schedule run <name>` - Execute a schedule immediately
+    - `filtarr schedule history` - View run history with status and statistics
+    - `filtarr schedule export --format cron|systemd` - Export for external schedulers
 
 - **Server Integration**
-  - Scheduler runs alongside webhook server in `findarr serve`
+  - Scheduler runs alongside webhook server in `filtarr serve`
   - New `--scheduler/--no-scheduler` flag to enable/disable scheduler
   - `/status` endpoint for monitoring scheduler state
   - Graceful shutdown with job completion
@@ -64,7 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - State file version bumped to v2 with scheduler state fields
-- `findarr serve` now shows scheduler status and schedule count
+- `filtarr serve` now shows scheduler status and schedule count
 
 ### Dependencies
 
@@ -77,7 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Core Library**
-  - `FourKChecker` - High-level API for checking 4K availability
+  - `ReleaseChecker` - High-level API for checking 4K availability
   - `RadarrClient` - Async client for Radarr API v3
   - `SonarrClient` - Async client for Sonarr API v3
   - Pydantic models for API responses (`Movie`, `Series`, `Episode`, `Release`)
@@ -96,17 +96,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Episode-level release checking with short-circuit optimization
   - Search series in library by title
 
-- **CLI Interface** (`pip install findarr[cli]`)
-  - `findarr check movie <id_or_name>` - Check movie for 4K
-  - `findarr check series <id_or_name>` - Check series for 4K
-  - `findarr check batch --file <file>` - Batch check from file
+- **CLI Interface** (`pip install filtarr[cli]`)
+  - `filtarr check movie <id_or_name>` - Check movie for 4K
+  - `filtarr check series <id_or_name>` - Check series for 4K
+  - `filtarr check batch --file <file>` - Batch check from file
   - Multiple output formats: `--format json|table|simple`
   - Strategy selection: `--strategy recent|distributed|all`
 
 - **Batch Operations**
-  - `findarr batch check` - Check multiple items for 4K availability
-  - `findarr batch tag` - Tag items based on 4K status
-  - `findarr batch report` - Generate availability reports
+  - `filtarr batch check` - Check multiple items for 4K availability
+  - `filtarr batch tag` - Tag items based on 4K status
+  - `filtarr batch report` - Generate availability reports
   - Configurable batch size and delay between requests
   - Progress tracking with rich console output
 
@@ -120,15 +120,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Resume capability for interrupted batch operations
   - Configurable state file location
 
-- **Webhook Server** (`pip install findarr[webhook]`)
+- **Webhook Server** (`pip install filtarr[webhook]`)
   - FastAPI-based webhook endpoint
-  - `findarr serve` command to run the server
+  - `filtarr serve` command to run the server
   - Receive notifications from Radarr/Sonarr
   - Docker container with GitHub Container Registry publishing
 
 - **Configuration**
   - Environment variables: `RADARR_URL`, `RADARR_API_KEY`, `SONARR_URL`, `SONARR_API_KEY`
-  - TOML config file support: `~/.config/findarr/config.toml`
+  - TOML config file support: `~/.config/filtarr/config.toml`
 
 - **Infrastructure**
   - Exponential backoff retry with tenacity (network resilience)

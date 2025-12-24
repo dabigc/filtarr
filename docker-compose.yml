@@ -1,5 +1,5 @@
-# Docker Compose configuration for findarr
-# https://github.com/dabigc/4k-findarr
+# Docker Compose configuration for filtarr
+# https://github.com/dabigc/filtarr
 #
 # Quick start:
 #   1. Copy docker-compose.yml to your deployment directory
@@ -9,29 +9,29 @@
 # For development/building locally, use: docker compose --profile build up -d
 
 services:
-  findarr:
-    image: ghcr.io/dabigc/4k-findarr:latest
-    container_name: findarr
+  filtarr:
+    image: ghcr.io/dabigc/filtarr:latest
+    container_name: filtarr
     restart: unless-stopped
     ports:
-      - "${FINDARR_PORT:-8080}:8080"
+      - "${FILTARR_PORT:-8080}:8080"
     environment:
       # Required: Radarr configuration
-      - FINDARR_RADARR_URL=${FINDARR_RADARR_URL:-http://radarr:7878}
-      - FINDARR_RADARR_API_KEY=${FINDARR_RADARR_API_KEY:?Radarr API key required}
+      - FILTARR_RADARR_URL=${FILTARR_RADARR_URL:-http://radarr:7878}
+      - FILTARR_RADARR_API_KEY=${FILTARR_RADARR_API_KEY:?Radarr API key required}
       # Required: Sonarr configuration
-      - FINDARR_SONARR_URL=${FINDARR_SONARR_URL:-http://sonarr:8989}
-      - FINDARR_SONARR_API_KEY=${FINDARR_SONARR_API_KEY:?Sonarr API key required}
+      - FILTARR_SONARR_URL=${FILTARR_SONARR_URL:-http://sonarr:8989}
+      - FILTARR_SONARR_API_KEY=${FILTARR_SONARR_API_KEY:?Sonarr API key required}
       # Optional: Custom tag names
-      - FINDARR_TAG_AVAILABLE=${FINDARR_TAG_AVAILABLE:-4k-available}
-      - FINDARR_TAG_UNAVAILABLE=${FINDARR_TAG_UNAVAILABLE:-4k-unavailable}
+      - FILTARR_TAG_AVAILABLE=${FILTARR_TAG_AVAILABLE:-4k-available}
+      - FILTARR_TAG_UNAVAILABLE=${FILTARR_TAG_UNAVAILABLE:-4k-unavailable}
       # Optional: Scheduler (enabled by default)
-      - FINDARR_SCHEDULER_ENABLED=${FINDARR_SCHEDULER_ENABLED:-true}
+      - FILTARR_SCHEDULER_ENABLED=${FILTARR_SCHEDULER_ENABLED:-true}
       # Optional: Request timeout (seconds)
-      - FINDARR_TIMEOUT=${FINDARR_TIMEOUT:-120}
+      - FILTARR_TIMEOUT=${FILTARR_TIMEOUT:-120}
     volumes:
       # Persist state and configuration
-      - findarr_config:/config
+      - filtarr_config:/config
       # Optional: Mount custom config file
       # - ./config.toml:/config/config.toml:ro
     healthcheck:
@@ -41,33 +41,33 @@ services:
       start_period: 5s
       retries: 3
     networks:
-      - findarr-net
+      - filtarr-net
     # Uncomment to join your existing arr network
     # networks:
     #   - arr-network
 
   # Optional: Build from source instead of using pre-built image
   # Activate with: docker compose --profile build up -d
-  findarr-dev:
+  filtarr-dev:
     profiles:
       - build
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: findarr-dev
+    container_name: filtarr-dev
     restart: unless-stopped
     ports:
-      - "${FINDARR_DEV_PORT:-8081}:8080"
+      - "${FILTARR_DEV_PORT:-8081}:8080"
     environment:
-      - FINDARR_RADARR_URL=${FINDARR_RADARR_URL:-http://radarr:7878}
-      - FINDARR_RADARR_API_KEY=${FINDARR_RADARR_API_KEY:?Radarr API key required}
-      - FINDARR_SONARR_URL=${FINDARR_SONARR_URL:-http://sonarr:8989}
-      - FINDARR_SONARR_API_KEY=${FINDARR_SONARR_API_KEY:?Sonarr API key required}
-      - FINDARR_TAG_AVAILABLE=${FINDARR_TAG_AVAILABLE:-4k-available}
-      - FINDARR_TAG_UNAVAILABLE=${FINDARR_TAG_UNAVAILABLE:-4k-unavailable}
-      - FINDARR_SCHEDULER_ENABLED=${FINDARR_SCHEDULER_ENABLED:-true}
+      - FILTARR_RADARR_URL=${FILTARR_RADARR_URL:-http://radarr:7878}
+      - FILTARR_RADARR_API_KEY=${FILTARR_RADARR_API_KEY:?Radarr API key required}
+      - FILTARR_SONARR_URL=${FILTARR_SONARR_URL:-http://sonarr:8989}
+      - FILTARR_SONARR_API_KEY=${FILTARR_SONARR_API_KEY:?Sonarr API key required}
+      - FILTARR_TAG_AVAILABLE=${FILTARR_TAG_AVAILABLE:-4k-available}
+      - FILTARR_TAG_UNAVAILABLE=${FILTARR_TAG_UNAVAILABLE:-4k-unavailable}
+      - FILTARR_SCHEDULER_ENABLED=${FILTARR_SCHEDULER_ENABLED:-true}
     volumes:
-      - findarr_dev_config:/config
+      - filtarr_dev_config:/config
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -75,15 +75,15 @@ services:
       start_period: 5s
       retries: 3
     networks:
-      - findarr-net
+      - filtarr-net
 
 volumes:
-  findarr_config:
-    name: findarr_config
-  findarr_dev_config:
-    name: findarr_dev_config
+  filtarr_config:
+    name: filtarr_config
+  filtarr_dev_config:
+    name: filtarr_dev_config
 
 networks:
-  findarr-net:
-    name: findarr-net
+  filtarr-net:
+    name: filtarr-net
     driver: bridge

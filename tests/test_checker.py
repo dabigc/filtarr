@@ -1,4 +1,4 @@
-"""Tests for FourKChecker and sampling strategies."""
+"""Tests for ReleaseChecker and sampling strategies."""
 
 from datetime import date, timedelta
 
@@ -6,10 +6,10 @@ import pytest
 import respx
 from httpx import Response
 
-from findarr.checker import (
-    FourKChecker,
-    FourKResult,
+from filtarr.checker import (
+    ReleaseChecker,
     SamplingStrategy,
+    SearchResult,
     select_seasons_to_check,
 )
 
@@ -65,12 +65,12 @@ class TestSelectSeasonsToCheck:
         assert result == [4, 5]
 
 
-class TestFourKResult:
-    """Tests for FourKResult dataclass."""
+class TestSearchResult:
+    """Tests for SearchResult dataclass."""
 
-    def test_four_k_releases_property(self) -> None:
+    def test_matched_releases_property(self) -> None:
         """Should filter to only 4K releases."""
-        from findarr.models.common import Quality, Release
+        from filtarr.models.common import Quality, Release
 
         releases = [
             Release(
@@ -96,16 +96,16 @@ class TestFourKResult:
             ),
         ]
 
-        result = FourKResult(
+        result = SearchResult(
             item_id=123,
             item_type="movie",
-            has_4k=True,
+            has_match=True,
             releases=releases,
         )
 
-        four_k = result.four_k_releases
-        assert len(four_k) == 2
-        assert all(r.is_4k() for r in four_k)
+        matched = result.matched_releases
+        assert len(matched) == 2
+        assert all(r.is_4k() for r in matched)
 
 
 class TestCheckSeriesWithSampling:
@@ -204,12 +204,12 @@ class TestCheckSeriesWithSampling:
                 )
             )
 
-        checker = FourKChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
         result = await checker.check_series(
             123, strategy=SamplingStrategy.RECENT, seasons_to_check=3
         )
 
-        assert result.has_4k is False
+        assert result.has_match is False
         assert result.strategy_used == SamplingStrategy.RECENT
         assert sorted(result.seasons_checked) == [3, 4, 5]
         assert len(result.episodes_checked) == 3
@@ -295,10 +295,10 @@ class TestCheckSeriesWithSampling:
         # Season 3 should NOT be called due to short-circuit
         # (we don't mock it - if called, test would fail)
 
-        checker = FourKChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
         result = await checker.check_series(123, strategy=SamplingStrategy.ALL)
 
-        assert result.has_4k is True
+        assert result.has_match is True
         # Should have stopped after finding 4K in season 2
         assert result.seasons_checked == [1, 2]
         assert len(result.episodes_checked) == 2
@@ -332,10 +332,10 @@ class TestCheckSeriesWithSampling:
             )
         )
 
-        checker = FourKChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
         result = await checker.check_series(123)
 
-        assert result.has_4k is False
+        assert result.has_match is False
         assert result.episodes_checked == []
         assert result.seasons_checked == []
         assert result.strategy_used == SamplingStrategy.RECENT
@@ -405,17 +405,17 @@ class TestCheckSeriesWithSampling:
                 return_value=Response(200, json=[])
             )
 
-        checker = FourKChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
         result = await checker.check_series(123, strategy=SamplingStrategy.DISTRIBUTED)
 
-        assert result.has_4k is False
+        assert result.has_match is False
         assert result.strategy_used == SamplingStrategy.DISTRIBUTED
         assert sorted(result.seasons_checked) == [1, 3, 5]
 
     @pytest.mark.asyncio
     async def test_check_series_raises_when_not_configured(self) -> None:
         """Should raise ValueError when Sonarr not configured."""
-        checker = FourKChecker()  # No Sonarr config
+        checker = ReleaseChecker()  # No Sonarr config
 
         with pytest.raises(ValueError, match="Sonarr is not configured"):
             await checker.check_series(123)
@@ -444,17 +444,17 @@ class TestCheckSeriesWithSampling:
             )
         )
 
-        checker = FourKChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
         result = await checker.check_movie(456)
 
-        assert result.has_4k is True
+        assert result.has_match is True
         assert result.item_type == "movie"
         assert result.item_id == 456
 
     @pytest.mark.asyncio
     async def test_check_movie_raises_when_not_configured(self) -> None:
         """Should raise ValueError when Radarr not configured."""
-        checker = FourKChecker()  # No Radarr config
+        checker = ReleaseChecker()  # No Radarr config
 
         with pytest.raises(ValueError, match="Radarr is not configured"):
             await checker.check_movie(456)
@@ -477,7 +477,7 @@ class TestNameBasedLookup:
             )
         )
 
-        checker = FourKChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
         results = await checker.search_movies("Matrix")
 
         assert len(results) == 2
@@ -497,7 +497,7 @@ class TestNameBasedLookup:
             )
         )
 
-        checker = FourKChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
         results = await checker.search_series("Breaking")
 
         assert len(results) == 1
@@ -530,10 +530,10 @@ class TestNameBasedLookup:
             )
         )
 
-        checker = FourKChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
         result = await checker.check_movie_by_name("The Matrix")
 
-        assert result.has_4k is True
+        assert result.has_match is True
         assert result.item_id == 123
         assert result.item_type == "movie"
 
@@ -543,7 +543,7 @@ class TestNameBasedLookup:
         """Should raise ValueError when movie not found."""
         respx.get("http://radarr:7878/api/v3/movie").mock(return_value=Response(200, json=[]))
 
-        checker = FourKChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
 
         with pytest.raises(ValueError, match="Movie not found"):
             await checker.check_movie_by_name("Nonexistent Movie")
@@ -597,10 +597,10 @@ class TestNameBasedLookup:
             )
         )
 
-        checker = FourKChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
         result = await checker.check_series_by_name("Breaking Bad")
 
-        assert result.has_4k is True
+        assert result.has_match is True
         assert result.item_id == 456
         assert result.item_type == "series"
 
@@ -610,7 +610,7 @@ class TestNameBasedLookup:
         """Should raise ValueError when series not found."""
         respx.get("http://sonarr:8989/api/v3/series").mock(return_value=Response(200, json=[]))
 
-        checker = FourKChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
 
         with pytest.raises(ValueError, match="Series not found"):
             await checker.check_series_by_name("Nonexistent Series")
@@ -618,7 +618,7 @@ class TestNameBasedLookup:
     @pytest.mark.asyncio
     async def test_search_movies_raises_when_not_configured(self) -> None:
         """Should raise ValueError when Radarr not configured."""
-        checker = FourKChecker()
+        checker = ReleaseChecker()
 
         with pytest.raises(ValueError, match="Radarr is not configured"):
             await checker.search_movies("Test")
@@ -626,20 +626,20 @@ class TestNameBasedLookup:
     @pytest.mark.asyncio
     async def test_search_series_raises_when_not_configured(self) -> None:
         """Should raise ValueError when Sonarr not configured."""
-        checker = FourKChecker()
+        checker = ReleaseChecker()
 
         with pytest.raises(ValueError, match="Sonarr is not configured"):
             await checker.search_series("Test")
 
 
 class TestTagApplication:
-    """Tests for tag application logic in FourKChecker."""
+    """Tests for tag application logic in ReleaseChecker."""
 
     @respx.mock
     @pytest.mark.asyncio
     async def test_check_movie_creates_and_applies_tag(self) -> None:
         """Should create tag if not exists and apply to movie via check_movie."""
-        from findarr.config import TagConfig
+        from filtarr.config import TagConfig
 
         # Mock get_movie for name lookup
         respx.get("http://radarr:7878/api/v3/movie/123").mock(
@@ -678,7 +678,7 @@ class TestTagApplication:
         )
 
         tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             radarr_url="http://radarr:7878",
             radarr_api_key="test",
             tag_config=tag_config,
@@ -686,7 +686,7 @@ class TestTagApplication:
 
         result = await checker.check_movie(123, apply_tags=True, dry_run=False)
 
-        assert result.has_4k is True
+        assert result.has_match is True
         assert result.tag_result is not None
         assert result.tag_result.tag_applied == "4k-available"
         assert result.tag_result.tag_created is True
@@ -696,7 +696,7 @@ class TestTagApplication:
     @pytest.mark.asyncio
     async def test_check_movie_uses_existing_tag(self) -> None:
         """Should use existing tag without creating new one."""
-        from findarr.config import TagConfig
+        from filtarr.config import TagConfig
 
         respx.get("http://radarr:7878/api/v3/movie/123").mock(
             return_value=Response(
@@ -737,7 +737,7 @@ class TestTagApplication:
         )
 
         tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             radarr_url="http://radarr:7878",
             radarr_api_key="test",
             tag_config=tag_config,
@@ -754,7 +754,7 @@ class TestTagApplication:
     @pytest.mark.asyncio
     async def test_check_movie_removes_opposite_tag(self) -> None:
         """Should remove opposite tag when applying new one."""
-        from findarr.config import TagConfig
+        from filtarr.config import TagConfig
 
         respx.get("http://radarr:7878/api/v3/movie/123").mock(
             return_value=Response(
@@ -793,7 +793,7 @@ class TestTagApplication:
         )
 
         tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             radarr_url="http://radarr:7878",
             radarr_api_key="test",
             tag_config=tag_config,
@@ -809,7 +809,7 @@ class TestTagApplication:
     @pytest.mark.asyncio
     async def test_check_movie_dry_run_no_api_calls(self) -> None:
         """Should not make tag API calls in dry run mode."""
-        from findarr.config import TagConfig
+        from filtarr.config import TagConfig
 
         respx.get("http://radarr:7878/api/v3/movie/123").mock(
             return_value=Response(
@@ -834,7 +834,7 @@ class TestTagApplication:
         # No tag mocks needed - dry run shouldn't call them
 
         tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             radarr_url="http://radarr:7878",
             radarr_api_key="test",
             tag_config=tag_config,
@@ -851,8 +851,8 @@ class TestTagApplication:
     @respx.mock
     @pytest.mark.asyncio
     async def test_check_movie_unavailable_applies_unavailable_tag(self) -> None:
-        """Should apply unavailable tag when has_4k is False."""
-        from findarr.config import TagConfig
+        """Should apply unavailable tag when has_match is False."""
+        from filtarr.config import TagConfig
 
         respx.get("http://radarr:7878/api/v3/movie/123").mock(
             return_value=Response(
@@ -892,7 +892,7 @@ class TestTagApplication:
         )
 
         tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             radarr_url="http://radarr:7878",
             radarr_api_key="test",
             tag_config=tag_config,
@@ -900,7 +900,7 @@ class TestTagApplication:
 
         result = await checker.check_movie(123, apply_tags=True, dry_run=False)
 
-        assert result.has_4k is False
+        assert result.has_match is False
         assert result.tag_result is not None
         assert result.tag_result.tag_applied == "4k-unavailable"
 
@@ -908,7 +908,7 @@ class TestTagApplication:
     @pytest.mark.asyncio
     async def test_check_movie_no_tags_when_disabled(self) -> None:
         """Should not apply tags when apply_tags is False."""
-        from findarr.config import TagConfig
+        from filtarr.config import TagConfig
 
         respx.get("http://radarr:7878/api/v3/movie/123").mock(
             return_value=Response(
@@ -933,7 +933,7 @@ class TestTagApplication:
         # No tag mocks needed - tagging is disabled
 
         tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             radarr_url="http://radarr:7878",
             radarr_api_key="test",
             tag_config=tag_config,
@@ -941,14 +941,14 @@ class TestTagApplication:
 
         result = await checker.check_movie(123, apply_tags=False)
 
-        assert result.has_4k is True
+        assert result.has_match is True
         assert result.tag_result is None
 
     @respx.mock
     @pytest.mark.asyncio
     async def test_check_movie_tag_error_handling(self) -> None:
         """Should catch tag errors and return them in result."""
-        from findarr.config import TagConfig
+        from filtarr.config import TagConfig
 
         respx.get("http://radarr:7878/api/v3/movie/123").mock(
             return_value=Response(
@@ -976,7 +976,7 @@ class TestTagApplication:
         )
 
         tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             radarr_url="http://radarr:7878",
             radarr_api_key="test",
             tag_config=tag_config,
@@ -985,7 +985,7 @@ class TestTagApplication:
         result = await checker.check_movie(123, apply_tags=True, dry_run=False)
 
         # Should still return result even if tagging failed
-        assert result.has_4k is True
+        assert result.has_match is True
         assert result.tag_result is not None
         assert result.tag_result.tag_error is not None
 
@@ -993,7 +993,7 @@ class TestTagApplication:
     @pytest.mark.asyncio
     async def test_check_movie_case_insensitive_tag_matching(self) -> None:
         """Should find tags case-insensitively."""
-        from findarr.config import TagConfig
+        from filtarr.config import TagConfig
 
         respx.get("http://radarr:7878/api/v3/movie/123").mock(
             return_value=Response(
@@ -1029,7 +1029,7 @@ class TestTagApplication:
         )
 
         tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             radarr_url="http://radarr:7878",
             radarr_api_key="test",
             tag_config=tag_config,

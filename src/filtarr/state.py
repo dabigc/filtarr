@@ -1,4 +1,4 @@
-"""State file management for tracking 4K check history."""
+"""State file management for tracking release check history."""
 
 from __future__ import annotations
 

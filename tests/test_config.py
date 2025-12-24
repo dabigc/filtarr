@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from findarr.config import Config, ConfigurationError, RadarrConfig, SonarrConfig
+from filtarr.config import Config, ConfigurationError, RadarrConfig, SonarrConfig
 
 
 class TestConfigFromEnv:
@@ -17,8 +17,8 @@ class TestConfigFromEnv:
         with patch.dict(
             os.environ,
             {
-                "FINDARR_RADARR_URL": "http://radarr:7878",
-                "FINDARR_RADARR_API_KEY": "test-key",
+                "FILTARR_RADARR_URL": "http://radarr:7878",
+                "FILTARR_RADARR_API_KEY": "test-key",
             },
             clear=False,
         ):
@@ -33,8 +33,8 @@ class TestConfigFromEnv:
         with patch.dict(
             os.environ,
             {
-                "FINDARR_SONARR_URL": "http://sonarr:8989",
-                "FINDARR_SONARR_API_KEY": "sonarr-key",
+                "FILTARR_SONARR_URL": "http://sonarr:8989",
+                "FILTARR_SONARR_API_KEY": "sonarr-key",
             },
             clear=False,
         ):
@@ -51,7 +51,7 @@ class TestConfigFromEnv:
             patch.object(Path, "home", return_value=tmp_path),
             patch.dict(
                 os.environ,
-                {"FINDARR_RADARR_URL": "http://radarr:7878"},
+                {"FILTARR_RADARR_URL": "http://radarr:7878"},
                 clear=True,
             ),
         ):
@@ -65,7 +65,7 @@ class TestConfigFromFile:
 
     def test_load_from_toml_file(self, tmp_path: Path) -> None:
         """Should load config from TOML file."""
-        config_dir = tmp_path / ".config" / "findarr"
+        config_dir = tmp_path / ".config" / "filtarr"
         config_dir.mkdir(parents=True)
         config_file = config_dir / "config.toml"
         config_file.write_text("""
@@ -92,7 +92,7 @@ api_key = "file-sonarr-key"
 
     def test_env_overrides_file(self, tmp_path: Path) -> None:
         """Environment variables should override file config."""
-        config_dir = tmp_path / ".config" / "findarr"
+        config_dir = tmp_path / ".config" / "filtarr"
         config_dir.mkdir(parents=True)
         config_file = config_dir / "config.toml"
         config_file.write_text("""
@@ -106,8 +106,8 @@ api_key = "file-key"
             patch.dict(
                 os.environ,
                 {
-                    "FINDARR_RADARR_URL": "http://env-url:7878",
-                    "FINDARR_RADARR_API_KEY": "env-key",
+                    "FILTARR_RADARR_URL": "http://env-url:7878",
+                    "FILTARR_RADARR_API_KEY": "env-key",
                 },
                 clear=True,
             ),
@@ -120,7 +120,7 @@ api_key = "file-key"
 
     def test_invalid_toml_raises_error(self, tmp_path: Path) -> None:
         """Should raise ConfigurationError for invalid TOML."""
-        config_dir = tmp_path / ".config" / "findarr"
+        config_dir = tmp_path / ".config" / "filtarr"
         config_dir.mkdir(parents=True)
         config_file = config_dir / "config.toml"
         config_file.write_text("invalid [ toml content")

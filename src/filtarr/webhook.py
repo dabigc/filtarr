@@ -7,16 +7,16 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from findarr.checker import FourKChecker
-from findarr.config import Config, TagConfig
-from findarr.models.webhook import (
+from filtarr.checker import ReleaseChecker
+from filtarr.config import Config, TagConfig
+from filtarr.models.webhook import (
     RadarrWebhookPayload,
     SonarrWebhookPayload,
     WebhookResponse,
 )
 
 if TYPE_CHECKING:
-    from findarr.scheduler import SchedulerManager
+    from filtarr.scheduler import SchedulerManager
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
             create_if_missing=config.tags.create_if_missing,
             recheck_days=config.tags.recheck_days,
         )
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             radarr_url=radarr_config.url,
             radarr_api_key=radarr_config.api_key,
             timeout=config.timeout,
@@ -70,7 +70,7 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
         result = await checker.check_movie(movie_id, apply_tags=True)
         logger.info(
             f"4K check complete for '{movie_title}': "
-            f"has_4k={result.has_4k}, releases={len(result.releases)}"
+            f"has_match={result.has_match}, releases={len(result.releases)}"
         )
     except Exception:
         logger.exception(f"Failed to check 4K availability for movie {movie_id}")
@@ -88,7 +88,7 @@ async def _process_series_check(series_id: int, series_title: str, config: Confi
             create_if_missing=config.tags.create_if_missing,
             recheck_days=config.tags.recheck_days,
         )
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             sonarr_url=sonarr_config.url,
             sonarr_api_key=sonarr_config.api_key,
             timeout=config.timeout,
@@ -98,7 +98,7 @@ async def _process_series_check(series_id: int, series_title: str, config: Confi
         result = await checker.check_series(series_id, apply_tags=True)
         logger.info(
             f"4K check complete for '{series_title}': "
-            f"has_4k={result.has_4k}, releases={len(result.releases)}"
+            f"has_match={result.has_match}, releases={len(result.releases)}"
         )
     except Exception:
         logger.exception(f"Failed to check 4K availability for series {series_id}")
@@ -118,14 +118,14 @@ def create_app(config: Config | None = None) -> Any:
         from fastapi.responses import JSONResponse
     except ImportError as e:
         raise ImportError(
-            "FastAPI is required for webhook server. Install with: pip install findarr[webhook]"
+            "FastAPI is required for webhook server. Install with: pip install filtarr[webhook]"
         ) from e
 
     if config is None:
         config = Config.load()
 
     app = FastAPI(
-        title="findarr Webhook Server",
+        title="Filtarr Webhook Server",
         description="Receive Radarr/Sonarr webhooks and check 4K availability",
         version="0.1.1",  # x-release-please-version
     )
@@ -323,7 +323,7 @@ def run_server(
         import uvicorn
     except ImportError as e:
         raise ImportError(
-            "uvicorn is required for webhook server. Install with: pip install findarr[webhook]"
+            "uvicorn is required for webhook server. Install with: pip install filtarr[webhook]"
         ) from e
 
     if config is None:
@@ -335,8 +335,8 @@ def run_server(
     scheduler_manager: SchedulerManager | None = None
     if scheduler_enabled and config.scheduler.enabled:
         try:
-            from findarr.scheduler import SchedulerManager
-            from findarr.state import StateManager
+            from filtarr.scheduler import SchedulerManager
+            from filtarr.state import StateManager
 
             state_manager = StateManager(config.state.path)
             scheduler_manager = SchedulerManager(config, state_manager)
@@ -344,7 +344,7 @@ def run_server(
             logger.info("Scheduler configured and will start with server")
         except ImportError:
             logger.warning(
-                "Scheduler dependencies not installed. Install with: pip install findarr[scheduler]"
+                "Scheduler dependencies not installed. Install with: pip install filtarr[scheduler]"
             )
 
     async def run_with_scheduler() -> None:

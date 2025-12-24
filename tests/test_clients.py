@@ -4,8 +4,8 @@ import pytest
 import respx
 from httpx import Response
 
-from findarr.clients.radarr import RadarrClient
-from findarr.clients.sonarr import SonarrClient
+from filtarr.clients.radarr import RadarrClient
+from filtarr.clients.sonarr import SonarrClient
 
 
 class TestRadarrClient:

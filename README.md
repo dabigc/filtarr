@@ -1,4 +1,4 @@
-# findarr
+# Filtarr
 
 A Python library and CLI for checking 4K availability of media via Radarr/Sonarr search results.
 
@@ -8,7 +8,7 @@ A Python library and CLI for checking 4K availability of media via Radarr/Sonarr
 
 ```bash
 # Install with CLI support
-pip install findarr[cli]
+pip install filtarr[cli]
 
 # Or for development
 pip install -e ".[dev]"
@@ -20,15 +20,15 @@ Set environment variables:
 
 ```bash
 # Radarr (for movies)
-export FINDARR_RADARR_URL="http://localhost:7878"
-export FINDARR_RADARR_API_KEY="your-radarr-api-key"
+export FILTARR_RADARR_URL="http://localhost:7878"
+export FILTARR_RADARR_API_KEY="your-radarr-api-key"
 
 # Sonarr (for TV series)
-export FINDARR_SONARR_URL="http://localhost:8989"
-export FINDARR_SONARR_API_KEY="your-sonarr-api-key"
+export FILTARR_SONARR_URL="http://localhost:8989"
+export FILTARR_SONARR_API_KEY="your-sonarr-api-key"
 ```
 
-Or create a config file at `~/.config/findarr/config.toml`:
+Or create a config file at `~/.config/filtarr/config.toml`:
 
 ```toml
 [radarr]
@@ -46,13 +46,13 @@ api_key = "your-sonarr-api-key"
 
 ```bash
 # Check a movie by Radarr ID
-findarr check movie 123
+filtarr check movie 123
 
 # Check a TV series by Sonarr ID
-findarr check series 456
+filtarr check series 456
 
 # Check multiple items from a file
-findarr check batch --file items.txt
+filtarr check batch --file items.txt
 ```
 
 ## CLI Usage
@@ -60,7 +60,7 @@ findarr check batch --file items.txt
 ### Check Movie
 
 ```bash
-findarr check movie <MOVIE_ID> [OPTIONS]
+filtarr check movie <MOVIE_ID> [OPTIONS]
 
 Options:
   -f, --format [json|table|simple]  Output format (default: table)
@@ -68,14 +68,14 @@ Options:
 
 Example:
 ```bash
-$ findarr check movie 123 --format simple
+$ filtarr check movie 123 --format simple
 movie:123: 4K available
 ```
 
 ### Check Series
 
 ```bash
-findarr check series <SERIES_ID> [OPTIONS]
+filtarr check series <SERIES_ID> [OPTIONS]
 
 Options:
   -s, --seasons INTEGER             Seasons to check (default: 3)
@@ -90,7 +90,7 @@ Strategies:
 
 Example:
 ```bash
-$ findarr check series 456 --strategy recent --seasons 2 --format json
+$ filtarr check series 456 --strategy recent --seasons 2 --format json
 {
   "item_id": 456,
   "item_type": "series",
@@ -107,7 +107,7 @@ $ findarr check series 456 --strategy recent --seasons 2 --format json
 Process your entire library or a subset with automatic tagging and resume support.
 
 ```bash
-findarr check batch [OPTIONS]
+filtarr check batch [OPTIONS]
 
 Options:
   -f, --file PATH                   File with items to check (optional)
@@ -127,19 +127,19 @@ Options:
 Examples:
 ```bash
 # Check all movies and tag them
-findarr check batch --all-movies
+filtarr check batch --all-movies
 
 # Check all movies, 100 at a time (good for large libraries)
-findarr check batch --all-movies --batch-size 100
+filtarr check batch --all-movies --batch-size 100
 
 # Check all series with 1 second delay between checks
-findarr check batch --all-series --delay 1.0
+filtarr check batch --all-series --delay 1.0
 
 # Check specific items from a file
-findarr check batch --file items.txt
+filtarr check batch --file items.txt
 
 # Preview what would be tagged (no changes made)
-findarr check batch --all-movies --dry-run
+filtarr check batch --all-movies --dry-run
 ```
 
 Batch file format (one item per line):
@@ -165,7 +165,7 @@ Tags are created automatically if they don't exist. Use `--no-tag` to disable ta
 
 Batch operations track progress and can resume after interruption:
 
-- Progress is saved to `~/.config/findarr/state.json`
+- Progress is saved to `~/.config/filtarr/state.json`
 - Use `--resume` (default) to continue where you left off
 - Use `--no-resume` to start fresh
 - Items are marked with check timestamps to avoid re-checking recently scanned items
@@ -180,7 +180,7 @@ Batch operations track progress and can resume after interruption:
 
 Use exit codes in scripts:
 ```bash
-if findarr check movie 123 --format simple; then
+if filtarr check movie 123 --format simple; then
   echo "4K is available!"
 else
   echo "No 4K found"
@@ -195,51 +195,51 @@ Run a webhook server to automatically check 4K availability when new movies or s
 
 ```bash
 # Install with webhook support
-pip install findarr[webhook]
+pip install filtarr[webhook]
 ```
 
 ### Starting the Server
 
 ```bash
 # Start with default settings (port 8080)
-findarr serve
+filtarr serve
 
 # Custom host and port
-findarr serve --host 0.0.0.0 --port 9000
+filtarr serve --host 0.0.0.0 --port 9000
 
 # With debug logging
-findarr serve --log-level debug
+filtarr serve --log-level debug
 ```
 
 ### Configuring Webhooks in Radarr
 
 1. Go to **Settings > Connect > Add > Webhook**
 2. Configure:
-   - **Name**: `findarr`
-   - **URL**: `http://<findarr-host>:8080/webhook/radarr`
+   - **Name**: `filtarr`
+   - **URL**: `http://<filtarr-host>:8080/webhook/radarr`
    - **Method**: `POST`
    - **On Movie Added**: ✓ (enable)
 3. Add custom header:
    - **Key**: `X-Api-Key`
-   - **Value**: Your Radarr API key (same one in your findarr config)
+   - **Value**: Your Radarr API key (same one in your filtarr config)
 4. Save and test
 
 ### Configuring Webhooks in Sonarr
 
 1. Go to **Settings > Connect > Add > Webhook**
 2. Configure:
-   - **Name**: `findarr`
-   - **URL**: `http://<findarr-host>:8080/webhook/sonarr`
+   - **Name**: `filtarr`
+   - **URL**: `http://<filtarr-host>:8080/webhook/sonarr`
    - **Method**: `POST`
    - **On Series Add**: ✓ (enable)
 3. Add custom header:
    - **Key**: `X-Api-Key`
-   - **Value**: Your Sonarr API key (same one in your findarr config)
+   - **Value**: Your Sonarr API key (same one in your filtarr config)
 4. Save and test
 
 ### Webhook Configuration
 
-Add to your `~/.config/findarr/config.toml`:
+Add to your `~/.config/filtarr/config.toml`:
 
 ```toml
 [webhook]
@@ -250,15 +250,15 @@ port = 8080       # Default port
 Or use environment variables:
 
 ```bash
-export FINDARR_WEBHOOK_HOST="0.0.0.0"
-export FINDARR_WEBHOOK_PORT="8080"
+export FILTARR_WEBHOOK_HOST="0.0.0.0"
+export FILTARR_WEBHOOK_PORT="8080"
 ```
 
 ### How It Works
 
-1. When you add a movie/series to Radarr/Sonarr, it sends a webhook to findarr
-2. findarr immediately returns `200 OK` and processes the check in the background
-3. After checking, findarr applies the appropriate tag (`4k-available` or `4k-unavailable`)
+1. When you add a movie/series to Radarr/Sonarr, it sends a webhook to filtarr
+2. filtarr immediately returns `200 OK` and processes the check in the background
+3. After checking, filtarr applies the appropriate tag (`4k-available` or `4k-unavailable`)
 
 The webhook uses your existing tag configuration from `[tags]` section.
 
@@ -272,17 +272,17 @@ The webhook uses your existing tag configuration from `[tags]` section.
 
 ### Running as a Service (systemd)
 
-Create `/etc/systemd/system/findarr-webhook.service`:
+Create `/etc/systemd/system/filtarr-webhook.service`:
 
 ```ini
 [Unit]
-Description=findarr Webhook Server
+Description=filtarr Webhook Server
 After=network.target
 
 [Service]
 Type=simple
 User=your-user
-ExecStart=/path/to/findarr serve --host 0.0.0.0 --port 8080
+ExecStart=/path/to/filtarr serve --host 0.0.0.0 --port 8080
 Restart=on-failure
 RestartSec=10
 
@@ -293,8 +293,8 @@ WantedBy=multi-user.target
 Then:
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable findarr-webhook
-sudo systemctl start findarr-webhook
+sudo systemctl enable filtarr-webhook
+sudo systemctl start filtarr-webhook
 ```
 
 ### Running with Docker
@@ -305,13 +305,13 @@ The official Docker image is available on GitHub Container Registry.
 
 ```bash
 docker run -d \
-  --name findarr \
+  --name filtarr \
   -p 8080:8080 \
-  -e FINDARR_RADARR_URL="http://radarr:7878" \
-  -e FINDARR_RADARR_API_KEY="your-radarr-key" \
-  -e FINDARR_SONARR_URL="http://sonarr:8989" \
-  -e FINDARR_SONARR_API_KEY="your-sonarr-key" \
-  ghcr.io/dabigc/4k-findarr:latest
+  -e FILTARR_RADARR_URL="http://radarr:7878" \
+  -e FILTARR_RADARR_API_KEY="your-radarr-key" \
+  -e FILTARR_SONARR_URL="http://sonarr:8989" \
+  -e FILTARR_SONARR_API_KEY="your-sonarr-key" \
+  ghcr.io/dabigc/filtarr:latest
 ```
 
 #### Using a Config File
@@ -320,29 +320,29 @@ Mount your config file to `/config/config.toml`:
 
 ```bash
 docker run -d \
-  --name findarr \
+  --name filtarr \
   -p 8080:8080 \
   -v /path/to/config.toml:/config/config.toml:ro \
-  ghcr.io/dabigc/4k-findarr:latest
+  ghcr.io/dabigc/filtarr:latest
 ```
 
 #### Docker Compose
 
 ```yaml
 services:
-  findarr:
-    image: ghcr.io/dabigc/4k-findarr:latest
-    container_name: findarr
+  filtarr:
+    image: ghcr.io/dabigc/filtarr:latest
+    container_name: filtarr
     ports:
       - "8080:8080"
     environment:
-      - FINDARR_RADARR_URL=http://radarr:7878
-      - FINDARR_RADARR_API_KEY=your-radarr-key
-      - FINDARR_SONARR_URL=http://sonarr:8989
-      - FINDARR_SONARR_API_KEY=your-sonarr-key
+      - FILTARR_RADARR_URL=http://radarr:7878
+      - FILTARR_RADARR_API_KEY=your-radarr-key
+      - FILTARR_SONARR_URL=http://sonarr:8989
+      - FILTARR_SONARR_API_KEY=your-sonarr-key
       # Optional: customize tags
-      - FINDARR_TAG_AVAILABLE=4k-available
-      - FINDARR_TAG_UNAVAILABLE=4k-unavailable
+      - FILTARR_TAG_AVAILABLE=4k-available
+      - FILTARR_TAG_UNAVAILABLE=4k-unavailable
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -364,13 +364,13 @@ services:
 
 ```bash
 # Build the image
-docker build -t findarr .
+docker build -t filtarr .
 
 # Run it
 docker run -d -p 8080:8080 \
-  -e FINDARR_RADARR_URL="http://radarr:7878" \
-  -e FINDARR_RADARR_API_KEY="your-key" \
-  findarr
+  -e FILTARR_RADARR_URL="http://radarr:7878" \
+  -e FILTARR_RADARR_API_KEY="your-key" \
+  filtarr
 ```
 
 ## Scheduler
@@ -381,15 +381,15 @@ Run batch operations automatically on configurable schedules.
 
 ```bash
 # Install with scheduler support
-pip install findarr[scheduler]
+pip install filtarr[scheduler]
 
 # Or with everything (CLI, webhook, scheduler)
-pip install findarr[cli,webhook,scheduler]
+pip install filtarr[cli,webhook,scheduler]
 ```
 
 ### Quick Start
 
-Add schedules to your `~/.config/findarr/config.toml`:
+Add schedules to your `~/.config/filtarr/config.toml`:
 
 ```toml
 [scheduler]
@@ -414,37 +414,37 @@ seasons = 3
 Then start the server with the scheduler:
 
 ```bash
-findarr serve  # Scheduler is enabled by default
-findarr serve --no-scheduler  # Webhooks only
+filtarr serve  # Scheduler is enabled by default
+filtarr serve --no-scheduler  # Webhooks only
 ```
 
 ### CLI Commands
 
 ```bash
 # List all schedules
-findarr schedule list
+filtarr schedule list
 
 # Add a dynamic schedule
-findarr schedule add daily-check --target movies --cron "0 3 * * *"
-findarr schedule add hourly-all --target both --interval 6h
+filtarr schedule add daily-check --target movies --cron "0 3 * * *"
+filtarr schedule add hourly-all --target both --interval 6h
 
 # Remove a schedule
-findarr schedule remove daily-check
+filtarr schedule remove daily-check
 
 # Enable/disable a schedule
-findarr schedule enable daily-check
-findarr schedule disable daily-check
+filtarr schedule enable daily-check
+filtarr schedule disable daily-check
 
 # Run a schedule immediately
-findarr schedule run daily-movies
+filtarr schedule run daily-movies
 
 # View run history
-findarr schedule history
-findarr schedule history --name daily-movies --limit 10
+filtarr schedule history
+filtarr schedule history --name daily-movies --limit 10
 
 # Export to external schedulers
-findarr schedule export --format cron
-findarr schedule export --format systemd --output /etc/systemd/system/
+filtarr schedule export --format cron
+filtarr schedule export --format systemd --output /etc/systemd/system/
 ```
 
 ### Schedule Triggers
@@ -495,15 +495,15 @@ If you prefer to use cron or systemd instead of the built-in scheduler:
 
 ```bash
 # Generate cron configuration
-findarr schedule export --format cron
+filtarr schedule export --format cron
 # Output:
-# 0 3 * * * /usr/local/bin/findarr check batch --all-movies --batch-size 100
+# 0 3 * * * /usr/local/bin/filtarr check batch --all-movies --batch-size 100
 
 # Generate systemd timers
-findarr schedule export --format systemd --output ./systemd-units/
+filtarr schedule export --format systemd --output ./systemd-units/
 # Creates:
-#   findarr-daily-movies.timer
-#   findarr-daily-movies.service
+#   filtarr-daily-movies.timer
+#   filtarr-daily-movies.service
 ```
 
 ### Monitoring
@@ -541,7 +541,7 @@ curl http://localhost:8080/status
 
 ```python
 import asyncio
-from findarr import RadarrClient
+from filtarr import RadarrClient
 
 async def main():
     async with RadarrClient("http://localhost:7878", "your-api-key") as client:
@@ -562,7 +562,7 @@ asyncio.run(main())
 
 ```python
 import asyncio
-from findarr import SonarrClient
+from filtarr import SonarrClient
 
 async def main():
     async with SonarrClient("http://localhost:8989", "your-api-key") as client:
@@ -576,10 +576,10 @@ asyncio.run(main())
 
 ```python
 import asyncio
-from findarr import FourKChecker, SamplingStrategy
+from filtarr import ReleaseChecker, SamplingStrategy
 
 async def main():
-    checker = FourKChecker(
+    checker = ReleaseChecker(
         radarr_url="http://localhost:7878",
         radarr_api_key="your-radarr-key",
         sonarr_url="http://localhost:8989",
@@ -608,15 +608,15 @@ asyncio.run(main())
 
 | Variable | Description |
 |----------|-------------|
-| `FINDARR_RADARR_URL` | Radarr instance URL (e.g., `http://localhost:7878`) |
-| `FINDARR_RADARR_API_KEY` | Radarr API key |
-| `FINDARR_SONARR_URL` | Sonarr instance URL (e.g., `http://localhost:8989`) |
-| `FINDARR_SONARR_API_KEY` | Sonarr API key |
-| `FINDARR_TIMEOUT` | Request timeout in seconds (default: `120`) |
+| `FILTARR_RADARR_URL` | Radarr instance URL (e.g., `http://localhost:7878`) |
+| `FILTARR_RADARR_API_KEY` | Radarr API key |
+| `FILTARR_SONARR_URL` | Sonarr instance URL (e.g., `http://localhost:8989`) |
+| `FILTARR_SONARR_API_KEY` | Sonarr API key |
+| `FILTARR_TIMEOUT` | Request timeout in seconds (default: `120`) |
 
 ### Config File
 
-Location: `~/.config/findarr/config.toml`
+Location: `~/.config/filtarr/config.toml`
 
 ```toml
 # Request timeout in seconds (default: 120)
@@ -639,14 +639,14 @@ recheck_days = 30                # Days before rechecking tagged items
 
 # State file location (optional)
 [state]
-path = "~/.config/findarr/state.json"
+path = "~/.config/filtarr/state.json"
 ```
 
 ### Timeout Considerations
 
 Searching for releases on popular media (e.g., "The Matrix") can take significant time as Radarr/Sonarr queries multiple indexers. The default timeout is 120 seconds.
 
-**If you're behind a reverse proxy** (nginx, Caddy, Traefik, Nginx Proxy Manager, etc.), you may need to increase the proxy timeout as well. The findarr client timeout won't help if your reverse proxy times out first.
+**If you're behind a reverse proxy** (nginx, Caddy, Traefik, Nginx Proxy Manager, etc.), you may need to increase the proxy timeout as well. The filtarr client timeout won't help if your reverse proxy times out first.
 
 #### Nginx Proxy Manager
 
@@ -709,7 +709,7 @@ uv sync --dev
 uv run pytest
 
 # Run tests with coverage
-uv run pytest --cov=findarr --cov-report=term-missing
+uv run pytest --cov=filtarr --cov-report=term-missing
 
 # Lint
 uv run ruff check src tests

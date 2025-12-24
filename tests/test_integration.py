@@ -1,4 +1,4 @@
-"""Integration tests for findarr.
+"""Integration tests for filtarr.
 
 These tests verify the full flow from high-level API through to mocked HTTP responses.
 They are marked with @pytest.mark.integration for selective running.
@@ -10,7 +10,7 @@ import pytest
 import respx
 from httpx import Response
 
-from findarr import FourKChecker, FourKResult, SamplingStrategy
+from filtarr import ReleaseChecker, SamplingStrategy, SearchResult
 
 
 @pytest.mark.integration
@@ -52,20 +52,20 @@ class TestMovieCheckIntegration:
             )
         )
 
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             radarr_url="http://radarr.local:7878",
             radarr_api_key="test-key",
         )
 
         result = await checker.check_movie(123)
 
-        assert isinstance(result, FourKResult)
-        assert result.has_4k is True
+        assert isinstance(result, SearchResult)
+        assert result.has_match is True
         assert result.item_id == 123
         assert result.item_type == "movie"
         assert len(result.releases) == 2
-        assert len(result.four_k_releases) == 1
-        assert result.four_k_releases[0].title == "Movie.2024.2160p.UHD.BluRay.x265-GROUP"
+        assert len(result.matched_releases) == 1
+        assert result.matched_releases[0].title == "Movie.2024.2160p.UHD.BluRay.x265-GROUP"
 
     @respx.mock
     @pytest.mark.asyncio
@@ -107,7 +107,7 @@ class TestMovieCheckIntegration:
             )
         )
 
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             radarr_url="http://radarr.local:7878",
             radarr_api_key="test-key",
         )
@@ -119,7 +119,7 @@ class TestMovieCheckIntegration:
 
         # Check the first match
         result = await checker.check_movie(matches[0][0])
-        assert result.has_4k is True
+        assert result.has_match is True
         assert result.item_id == 100
 
 
@@ -234,7 +234,7 @@ class TestSeriesCheckIntegration:
             )
         )
 
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             sonarr_url="http://sonarr.local:8989",
             sonarr_api_key="test-key",
         )
@@ -245,7 +245,7 @@ class TestSeriesCheckIntegration:
             seasons_to_check=2,
         )
 
-        assert result.has_4k is True
+        assert result.has_match is True
         assert result.item_type == "series"
         assert result.strategy_used == SamplingStrategy.RECENT
         # Should have checked seasons 2 and 3 (most recent 2)
@@ -334,14 +334,14 @@ class TestSeriesCheckIntegration:
                 )
             )
 
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             sonarr_url="http://sonarr.local:8989",
             sonarr_api_key="test-key",
         )
 
         result = await checker.check_series(789, strategy=SamplingStrategy.DISTRIBUTED)
 
-        assert result.has_4k is False
+        assert result.has_match is False
         assert result.strategy_used == SamplingStrategy.DISTRIBUTED
         # Should have checked first (1), middle (3), and last (5) seasons
         assert sorted(result.seasons_checked) == [1, 3, 5]
@@ -407,7 +407,7 @@ class TestSeriesCheckIntegration:
             )
         )
 
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             sonarr_url="http://sonarr.local:8989",
             sonarr_api_key="test-key",
         )
@@ -419,12 +419,12 @@ class TestSeriesCheckIntegration:
 
         # Check the match
         result = await checker.check_series(matches[0][0])
-        assert result.has_4k is True
+        assert result.has_match is True
 
 
 @pytest.mark.integration
 class TestCombinedCheckerIntegration:
-    """Tests for FourKChecker with both Radarr and Sonarr configured."""
+    """Tests for ReleaseChecker with both Radarr and Sonarr configured."""
 
     @respx.mock
     @pytest.mark.asyncio
@@ -500,7 +500,7 @@ class TestCombinedCheckerIntegration:
             )
         )
 
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             radarr_url="http://radarr.local:7878",
             radarr_api_key="radarr-key",
             sonarr_url="http://sonarr.local:8989",
@@ -510,9 +510,9 @@ class TestCombinedCheckerIntegration:
         movie_result = await checker.check_movie(10)
         series_result = await checker.check_series(20)
 
-        assert movie_result.has_4k is True
+        assert movie_result.has_match is True
         assert movie_result.item_type == "movie"
-        assert series_result.has_4k is False
+        assert series_result.has_match is False
         assert series_result.item_type == "series"
 
 
@@ -523,7 +523,7 @@ class TestErrorHandlingIntegration:
     @pytest.mark.asyncio
     async def test_check_movie_without_radarr_config(self) -> None:
         """Should raise ValueError when checking movie without Radarr configured."""
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             sonarr_url="http://sonarr.local:8989",
             sonarr_api_key="key",
         )
@@ -534,7 +534,7 @@ class TestErrorHandlingIntegration:
     @pytest.mark.asyncio
     async def test_check_series_without_sonarr_config(self) -> None:
         """Should raise ValueError when checking series without Sonarr configured."""
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             radarr_url="http://radarr.local:7878",
             radarr_api_key="key",
         )
@@ -556,12 +556,12 @@ class TestErrorHandlingIntegration:
             params={"movieId": "999"},
         ).mock(return_value=Response(200, json=[]))
 
-        checker = FourKChecker(
+        checker = ReleaseChecker(
             radarr_url="http://radarr.local:7878",
             radarr_api_key="key",
         )
 
         result = await checker.check_movie(999)
 
-        assert result.has_4k is False
+        assert result.has_match is False
         assert result.releases == []

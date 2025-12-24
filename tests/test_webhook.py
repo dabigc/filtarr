@@ -7,13 +7,13 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from findarr.config import Config, RadarrConfig, SonarrConfig, TagConfig, WebhookConfig
-from findarr.models.webhook import (
+from filtarr.config import Config, RadarrConfig, SonarrConfig, TagConfig, WebhookConfig
+from filtarr.models.webhook import (
     RadarrWebhookPayload,
     SonarrWebhookPayload,
     WebhookResponse,
 )
-from findarr.webhook import create_app
+from filtarr.webhook import create_app
 
 
 @pytest.fixture
@@ -187,7 +187,7 @@ class TestRadarrWebhook:
         app = create_app(full_config)
         client = TestClient(app)
 
-        with patch("findarr.webhook.asyncio.create_task"):
+        with patch("filtarr.webhook.asyncio.create_task"):
             response = client.post(
                 "/webhook/radarr",
                 json={
@@ -274,7 +274,7 @@ class TestSonarrWebhook:
         app = create_app(full_config)
         client = TestClient(app)
 
-        with patch("findarr.webhook.asyncio.create_task"):
+        with patch("filtarr.webhook.asyncio.create_task"):
             response = client.post(
                 "/webhook/sonarr",
                 json={
@@ -336,7 +336,7 @@ class TestBackgroundProcessing:
         app = create_app(full_config)
         client = TestClient(app)
 
-        with patch("findarr.webhook.asyncio.create_task") as mock_create_task:
+        with patch("filtarr.webhook.asyncio.create_task") as mock_create_task:
             response = client.post(
                 "/webhook/radarr",
                 json={
@@ -355,7 +355,7 @@ class TestBackgroundProcessing:
         app = create_app(full_config)
         client = TestClient(app)
 
-        with patch("findarr.webhook.asyncio.create_task") as mock_create_task:
+        with patch("filtarr.webhook.asyncio.create_task") as mock_create_task:
             response = client.post(
                 "/webhook/sonarr",
                 json={
