@@ -7,8 +7,11 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+import httpx
+from pydantic import ValidationError
+
 from filtarr.checker import ReleaseChecker
-from filtarr.config import Config, TagConfig
+from filtarr.config import Config, ConfigurationError, TagConfig
 from filtarr.models.webhook import (
     RadarrWebhookPayload,
     SonarrWebhookPayload,
@@ -72,8 +75,20 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
             f"4K check complete for '{movie_title}': "
             f"has_match={result.has_match}, releases={len(result.releases)}"
         )
+    except ConfigurationError as e:
+        logger.error(f"Configuration error checking movie {movie_id} ({movie_title}): {e}")
+    except httpx.HTTPStatusError as e:
+        logger.error(
+            f"HTTP error checking movie {movie_id} ({movie_title}): "
+            f"{e.response.status_code} {e.response.reason_phrase}"
+        )
+    except (httpx.ConnectError, httpx.TimeoutException) as e:
+        logger.error(f"Network error checking movie {movie_id} ({movie_title}): {e}")
+    except ValidationError as e:
+        logger.error(f"Validation error checking movie {movie_id} ({movie_title}): {e}")
     except Exception:
-        logger.exception(f"Failed to check 4K availability for movie {movie_id}")
+        # Catch-all for unexpected errors - use exception() for full traceback
+        logger.exception(f"Unexpected error checking 4K availability for movie {movie_id}")
 
 
 async def _process_series_check(series_id: int, series_title: str, config: Config) -> None:
@@ -100,8 +115,20 @@ async def _process_series_check(series_id: int, series_title: str, config: Confi
             f"4K check complete for '{series_title}': "
             f"has_match={result.has_match}, releases={len(result.releases)}"
         )
+    except ConfigurationError as e:
+        logger.error(f"Configuration error checking series {series_id} ({series_title}): {e}")
+    except httpx.HTTPStatusError as e:
+        logger.error(
+            f"HTTP error checking series {series_id} ({series_title}): "
+            f"{e.response.status_code} {e.response.reason_phrase}"
+        )
+    except (httpx.ConnectError, httpx.TimeoutException) as e:
+        logger.error(f"Network error checking series {series_id} ({series_title}): {e}")
+    except ValidationError as e:
+        logger.error(f"Validation error checking series {series_id} ({series_title}): {e}")
     except Exception:
-        logger.exception(f"Failed to check 4K availability for series {series_id}")
+        # Catch-all for unexpected errors - use exception() for full traceback
+        logger.exception(f"Unexpected error checking 4K availability for series {series_id}")
 
 
 def create_app(config: Config | None = None) -> Any:
@@ -361,8 +388,13 @@ def run_server(
         if scheduler_manager is not None:
             try:
                 await scheduler_manager.start()
-            except Exception as e:
+            except (ImportError, ValueError) as e:
+                # ImportError: APScheduler not installed
+                # ValueError: Invalid schedule configuration
                 logger.error("Failed to start scheduler: %s", e)
+            except RuntimeError as e:
+                # RuntimeError: Scheduler already running or other state issues
+                logger.error("Scheduler runtime error: %s", e)
 
         try:
             await server.serve()
@@ -371,8 +403,12 @@ def run_server(
             if scheduler_manager is not None:
                 try:
                     await scheduler_manager.stop(wait=True)
-                except Exception as e:
-                    logger.error("Error stopping scheduler: %s", e)
+                except asyncio.CancelledError:
+                    # Expected during shutdown
+                    logger.debug("Scheduler stop cancelled during shutdown")
+                except RuntimeError as e:
+                    # RuntimeError: Scheduler state issues during shutdown
+                    logger.warning("Error during scheduler shutdown: %s", e)
 
     if scheduler_manager is not None:
         # Run with asyncio to manage scheduler lifecycle

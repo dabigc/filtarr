@@ -8,6 +8,9 @@ from datetime import date
 from enum import Enum
 from typing import TYPE_CHECKING
 
+import httpx
+from pydantic import ValidationError
+
 from filtarr.clients.radarr import RadarrClient
 from filtarr.clients.sonarr import SonarrClient
 from filtarr.config import TagConfig
@@ -292,9 +295,20 @@ class ReleaseChecker:
                 await client.remove_tag_from_movie(movie_id, opposite_tag.id)
                 result.tag_removed = tag_to_remove
 
-        except Exception as e:
-            logger.warning("Failed to apply tags to movie %d: %s", movie_id, e)
-            result.tag_error = str(e)
+        except httpx.HTTPStatusError as e:
+            logger.warning(
+                "HTTP error applying tags to movie %d: %s %s",
+                movie_id,
+                e.response.status_code,
+                e.response.reason_phrase,
+            )
+            result.tag_error = f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            logger.warning("Network error applying tags to movie %d: %s", movie_id, e)
+            result.tag_error = f"Network error: {e}"
+        except ValidationError as e:
+            logger.warning("Validation error applying tags to movie %d: %s", movie_id, e)
+            result.tag_error = f"Validation error: {e}"
 
         return result
 
@@ -356,9 +370,20 @@ class ReleaseChecker:
                 await client.remove_tag_from_series(series_id, opposite_tag.id)
                 result.tag_removed = tag_to_remove
 
-        except Exception as e:
-            logger.warning("Failed to apply tags to series %d: %s", series_id, e)
-            result.tag_error = str(e)
+        except httpx.HTTPStatusError as e:
+            logger.warning(
+                "HTTP error applying tags to series %d: %s %s",
+                series_id,
+                e.response.status_code,
+                e.response.reason_phrase,
+            )
+            result.tag_error = f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            logger.warning("Network error applying tags to series %d: %s", series_id, e)
+            result.tag_error = f"Network error: {e}"
+        except ValidationError as e:
+            logger.warning("Validation error applying tags to series %d: %s", series_id, e)
+            result.tag_error = f"Validation error: {e}"
 
         return result
 
