@@ -144,16 +144,45 @@ def _match_imax(release: Release) -> bool:
     return "imax" in title_lower
 
 
+def _contains_edition_phrase(title_lower: str, phrase: str) -> bool:
+    """Return True if `phrase` appears in `title_lower` with word/separator boundaries.
+
+    A valid match must be surrounded (on both sides) by either the start/end of the string
+    or a common separator character (space, dot, dash, underscore). This prevents matches
+    where the phrase is embedded inside a larger word, e.g. "aspecial.edition" or
+    "collectors editions".
+    """
+    separators = " .-_"
+    start = 0
+
+    while True:
+        index = title_lower.find(phrase, start)
+        if index == -1:
+            return False
+
+        before_ok = index == 0 or title_lower[index - 1] in separators
+        end_index = index + len(phrase)
+        after_ok = end_index == len(title_lower) or title_lower[end_index] in separators
+
+        if before_ok and after_ok:
+            return True
+
+        start = index + 1
+
+
 def _match_special_edition(release: Release) -> bool:
     """Check if release is a Special/Collector's/Anniversary/Ultimate/Definitive Edition."""
     title_lower = release.title.lower()
-    return (
-        "special edition" in title_lower
-        or "special.edition" in title_lower
-        or "collector's edition" in title_lower
-        or "collectors edition" in title_lower
-        or "collector edition" in title_lower
-        or "anniversary edition" in title_lower
-        or "ultimate edition" in title_lower
-        or "definitive edition" in title_lower
+    return any(
+        _contains_edition_phrase(title_lower, phrase)
+        for phrase in (
+            "special edition",
+            "special.edition",
+            "collector's edition",
+            "collectors edition",
+            "collector edition",
+            "anniversary edition",
+            "ultimate edition",
+            "definitive edition",
+        )
     )

@@ -818,11 +818,14 @@ def check_batch(
                     else:
                         # For series, use 4K if movie-only criteria was specified
                         # (This handles file-based items with movie-only criteria)
-                        series_criteria = (
-                            SearchCriteria.FOUR_K
-                            if search_criteria in MOVIE_ONLY_CRITERIA
-                            else search_criteria
-                        )
+                        if search_criteria in MOVIE_ONLY_CRITERIA:
+                            console.print(
+                                f"[yellow]Warning:[/yellow] {criteria} criteria is movie-only. "
+                                f"Using 4K for series '{item_name}'"
+                            )
+                            series_criteria = SearchCriteria.FOUR_K
+                        else:
+                            series_criteria = search_criteria
                         checker = get_checker(config, need_sonarr=True)
                         if item_id > 0:
                             result = await checker.check_series(

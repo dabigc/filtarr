@@ -1040,3 +1040,54 @@ class TestTagApplication:
         assert result.tag_result is not None
         assert result.tag_result.tag_applied == "4k-available"
         assert result.tag_result.tag_created is False  # Used existing tag
+
+
+class TestMovieOnlyCriteriaEnforcement:
+    """Tests for movie-only criteria enforcement in check_series."""
+
+    @pytest.mark.asyncio
+    async def test_check_series_rejects_directors_cut(self) -> None:
+        """check_series should raise ValueError for DIRECTORS_CUT criteria."""
+        from filtarr.criteria import SearchCriteria
+
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        with pytest.raises(ValueError, match="DIRECTORS_CUT criteria is only applicable to movies"):
+            await checker.check_series(123, criteria=SearchCriteria.DIRECTORS_CUT)
+
+    @pytest.mark.asyncio
+    async def test_check_series_rejects_extended(self) -> None:
+        """check_series should raise ValueError for EXTENDED criteria."""
+        from filtarr.criteria import SearchCriteria
+
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        with pytest.raises(ValueError, match="EXTENDED criteria is only applicable to movies"):
+            await checker.check_series(123, criteria=SearchCriteria.EXTENDED)
+
+    @pytest.mark.asyncio
+    async def test_check_series_rejects_remaster(self) -> None:
+        """check_series should raise ValueError for REMASTER criteria."""
+        from filtarr.criteria import SearchCriteria
+
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        with pytest.raises(ValueError, match="REMASTER criteria is only applicable to movies"):
+            await checker.check_series(123, criteria=SearchCriteria.REMASTER)
+
+    @pytest.mark.asyncio
+    async def test_check_series_rejects_imax(self) -> None:
+        """check_series should raise ValueError for IMAX criteria."""
+        from filtarr.criteria import SearchCriteria
+
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        with pytest.raises(ValueError, match="IMAX criteria is only applicable to movies"):
+            await checker.check_series(123, criteria=SearchCriteria.IMAX)
+
+    @pytest.mark.asyncio
+    async def test_check_series_rejects_special_edition(self) -> None:
+        """check_series should raise ValueError for SPECIAL_EDITION criteria."""
+        from filtarr.criteria import SearchCriteria
+
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        with pytest.raises(
+            ValueError, match="SPECIAL_EDITION criteria is only applicable to movies"
+        ):
+            await checker.check_series(123, criteria=SearchCriteria.SPECIAL_EDITION)

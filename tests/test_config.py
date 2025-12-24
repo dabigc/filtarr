@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from filtarr.config import Config, ConfigurationError, RadarrConfig, SonarrConfig
+from filtarr.config import Config, ConfigurationError, RadarrConfig, SonarrConfig, TagConfig
 
 
 class TestConfigFromEnv:
@@ -159,3 +159,52 @@ class TestConfigRequireMethods:
         config = Config()
         with pytest.raises(ConfigurationError, match="Sonarr is not configured"):
             config.require_sonarr()
+
+
+class TestTagConfig:
+    """Tests for TagConfig get_tag_names method."""
+
+    def test_get_tag_names_with_simple_criteria(self) -> None:
+        """Should format tag names with simple criteria values."""
+        tag_config = TagConfig()
+        available, unavailable = tag_config.get_tag_names("4k")
+        assert available == "4k-available"
+        assert unavailable == "4k-unavailable"
+
+    def test_get_tag_names_with_underscore_criteria(self) -> None:
+        """Should convert underscores to hyphens in tag names."""
+        tag_config = TagConfig()
+        available, unavailable = tag_config.get_tag_names("directors_cut")
+        assert available == "directors-cut-available"
+        assert unavailable == "directors-cut-unavailable"
+
+    def test_get_tag_names_with_imax(self) -> None:
+        """Should format IMAX tag names correctly."""
+        tag_config = TagConfig()
+        available, unavailable = tag_config.get_tag_names("imax")
+        assert available == "imax-available"
+        assert unavailable == "imax-unavailable"
+
+    def test_get_tag_names_with_special_edition(self) -> None:
+        """Should format special_edition tag names correctly."""
+        tag_config = TagConfig()
+        available, unavailable = tag_config.get_tag_names("special_edition")
+        assert available == "special-edition-available"
+        assert unavailable == "special-edition-unavailable"
+
+    def test_get_tag_names_with_custom_pattern(self) -> None:
+        """Should use custom patterns if configured."""
+        tag_config = TagConfig(
+            pattern_available="has-{criteria}",
+            pattern_unavailable="no-{criteria}",
+        )
+        available, unavailable = tag_config.get_tag_names("hdr")
+        assert available == "has-hdr"
+        assert unavailable == "no-hdr"
+
+    def test_get_tag_names_with_multiple_underscores(self) -> None:
+        """Should convert all underscores to hyphens."""
+        tag_config = TagConfig()
+        available, unavailable = tag_config.get_tag_names("very_long_criteria_name")
+        assert available == "very-long-criteria-name-available"
+        assert unavailable == "very-long-criteria-name-unavailable"

@@ -9,9 +9,11 @@
 
 **Running multiple Radarr/Sonarr instances?** You know the problem: your 4K instance fills up with movies that will *never* be available in 4K, your indexers get hammered searching for releases that don't exist, and tools like [Huntarr](https://github.com/plexguide/Huntarr.io) waste API calls hunting for content you'll never find.
 
-**Filtarr solves this.** Instead of blindly syncing your entire library to secondary instances, filtarr checks what's *actually available* from your indexers and tags items accordingly. Filter by 4K, HDR, Director's Cut, IMAX, Special Editions, and more—only sync what you can actually get.
+**Filtarr solves this.** Instead of blindly syncing your entire library to secondary instances, filtarr checks what's *actually available* from your indexers and tags items accordingly. Filter by 4K, HDR, Director's Cut, IMAX, Special Editions, and more. Only sync what you can actually get.
 
 ## How It Works
+
+### Movies (Radarr)
 
 ```
 ┌─────────────────┐     ┌──────────┐     ┌─────────────────────────┐
@@ -28,6 +30,26 @@
                               │  "4k-available" tag         │
                               └─────────────────────────────┘
 ```
+
+### TV Shows (Sonarr)
+
+```
+┌─────────────────┐     ┌──────────┐     ┌─────────────────────────┐
+│  Primary Sonarr │────▶│  Filtarr │────▶│  Tags Applied           │
+│  (All Shows)    │     │          │     │  • 4k-available         │
+└─────────────────┘     │ Searches │     │  • 4k-unavailable       │
+                        │ Indexers │     │                         │
+                        └──────────┘     └────────────┬────────────┘
+                                                      │
+                                                      ▼
+                              ┌─────────────────────────────┐
+                              │  Secondary Sonarr (4K)      │
+                              │  Import List filtered by    │
+                              │  "4k-available" tag         │
+                              └─────────────────────────────┘
+```
+
+> **Note:** For TV shows, 4K is the primary use case. Movie-specific criteria like Director's Cut, IMAX, and Special Edition are not applicable to series.
 
 1. **Filtarr queries your indexers** through Radarr/Sonarr's search API—using the same sources *you* have access to
 2. **Tags are applied** based on availability (e.g., `4k-available`, `imax-available`, `directors-cut-unavailable`)
