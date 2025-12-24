@@ -479,7 +479,7 @@ class TestHelpOutput:
         """Should show main help."""
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        assert "Check 4K availability" in result.stdout
+        assert "Check release availability" in result.stdout
 
     def test_check_help(self) -> None:
         """Should show check subcommand help."""

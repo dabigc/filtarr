@@ -31,12 +31,39 @@ class SonarrConfig:
 
 @dataclass
 class TagConfig:
-    """Configuration for 4K availability tagging."""
+    """Configuration for release criteria tagging.
 
-    available: str = "4k-available"
-    unavailable: str = "4k-unavailable"
+    Tags are generated using patterns with {criteria} placeholder.
+    For example, with default patterns:
+        - 4K criteria → "4k-available" / "4k-unavailable"
+        - IMAX criteria → "imax-available" / "imax-unavailable"
+        - Director's Cut → "directors-cut-available" / "directors-cut-unavailable"
+    """
+
+    pattern_available: str = "{criteria}-available"
+    pattern_unavailable: str = "{criteria}-unavailable"
     create_if_missing: bool = True
     recheck_days: int = 30
+
+    # Legacy fields for backward compatibility (deprecated)
+    available: str = "4k-available"
+    unavailable: str = "4k-unavailable"
+
+    def get_tag_names(self, criteria_value: str) -> tuple[str, str]:
+        """Get tag names for a specific criteria.
+
+        Args:
+            criteria_value: The criteria value (e.g., "4k", "imax", "directors_cut")
+
+        Returns:
+            Tuple of (available_tag, unavailable_tag)
+        """
+        # Convert underscores to hyphens for tag slugs (e.g., "directors_cut" → "directors-cut")
+        slug = criteria_value.replace("_", "-")
+        return (
+            self.pattern_available.format(criteria=slug),
+            self.pattern_unavailable.format(criteria=slug),
+        )
 
 
 def _default_state_path() -> Path:
@@ -162,11 +189,15 @@ class Config:
         tags = TagConfig()
         if "tags" in data:
             tags_data = data["tags"]
+            # Support both new pattern-based and legacy field names
             tags = TagConfig(
-                available=tags_data.get("available", tags.available),
-                unavailable=tags_data.get("unavailable", tags.unavailable),
+                pattern_available=tags_data.get("pattern_available", tags.pattern_available),
+                pattern_unavailable=tags_data.get("pattern_unavailable", tags.pattern_unavailable),
                 create_if_missing=tags_data.get("create_if_missing", tags.create_if_missing),
                 recheck_days=tags_data.get("recheck_days", tags.recheck_days),
+                # Legacy fields for backward compatibility
+                available=tags_data.get("available", tags.available),
+                unavailable=tags_data.get("unavailable", tags.unavailable),
             )
 
         # Parse state configuration
@@ -240,15 +271,20 @@ class Config:
         if timeout_str:
             timeout = float(timeout_str)
 
-        # Check for tag env vars
+        # Check for tag env vars (new pattern-based and legacy)
+        pattern_available = os.environ.get("FILTARR_TAG_PATTERN_AVAILABLE")
+        pattern_unavailable = os.environ.get("FILTARR_TAG_PATTERN_UNAVAILABLE")
         tag_available = os.environ.get("FILTARR_TAG_AVAILABLE")
         tag_unavailable = os.environ.get("FILTARR_TAG_UNAVAILABLE")
-        if tag_available or tag_unavailable:
+        if pattern_available or pattern_unavailable or tag_available or tag_unavailable:
             tags = TagConfig(
-                available=tag_available or tags.available,
-                unavailable=tag_unavailable or tags.unavailable,
+                pattern_available=pattern_available or tags.pattern_available,
+                pattern_unavailable=pattern_unavailable or tags.pattern_unavailable,
                 create_if_missing=tags.create_if_missing,
                 recheck_days=tags.recheck_days,
+                # Legacy fields
+                available=tag_available or tags.available,
+                unavailable=tag_unavailable or tags.unavailable,
             )
 
         # Check for state path env var

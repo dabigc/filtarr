@@ -18,7 +18,22 @@ from filtarr.checker import ReleaseChecker, SamplingStrategy, SearchResult
 from filtarr.clients.radarr import RadarrClient
 from filtarr.clients.sonarr import SonarrClient
 from filtarr.config import Config, ConfigurationError
+from filtarr.criteria import MOVIE_ONLY_CRITERIA, SearchCriteria
 from filtarr.state import BatchProgress, StateManager
+
+# Map CLI criteria names to SearchCriteria enum values
+CRITERIA_MAP: dict[str, SearchCriteria] = {
+    "4k": SearchCriteria.FOUR_K,
+    "hdr": SearchCriteria.HDR,
+    "dolby-vision": SearchCriteria.DOLBY_VISION,
+    "directors-cut": SearchCriteria.DIRECTORS_CUT,
+    "extended": SearchCriteria.EXTENDED,
+    "remaster": SearchCriteria.REMASTER,
+    "imax": SearchCriteria.IMAX,
+    "special-edition": SearchCriteria.SPECIAL_EDITION,
+}
+
+VALID_CRITERIA_NAMES = list(CRITERIA_MAP.keys())
 
 if TYPE_CHECKING:
     from filtarr.models.radarr import Movie
@@ -30,7 +45,7 @@ app = typer.Typer(
     help="Check release availability for movies and TV shows via Radarr/Sonarr.",
     no_args_is_help=True,
 )
-check_app = typer.Typer(help="Check 4K availability for media items.")
+check_app = typer.Typer(help="Check release availability for movies and TV shows.")
 app.add_typer(check_app, name="check")
 
 schedule_app = typer.Typer(help="Manage scheduled batch operations.")
@@ -124,6 +139,7 @@ def _format_result_type(result_type_value: str) -> str:
         "extended": "Extended",
         "remaster": "Remaster",
         "imax": "IMAX",
+        "special_edition": "Special Edition",
         "custom": "Custom",
     }
     return display_names.get(result_type_value, result_type_value)
@@ -209,6 +225,14 @@ def display_series_choices(matches: list[tuple[int, str, int]]) -> None:
 @check_app.command("movie")
 def check_movie(
     movie: Annotated[str, typer.Argument(help="Movie ID or name to check")],
+    criteria: Annotated[
+        str,
+        typer.Option(
+            "--criteria",
+            "-c",
+            help="Search criteria: 4k, hdr, dolby-vision, directors-cut, extended, remaster, imax, special-edition",
+        ),
+    ] = "4k",
     output_format: Annotated[
         OutputFormat, typer.Option("--format", "-f", help="Output format")
     ] = OutputFormat.TABLE,
@@ -218,18 +242,38 @@ def check_movie(
         typer.Option("--dry-run", help="Show what tags would be applied without applying them"),
     ] = False,
 ) -> None:
-    """Check if a movie has 4K releases available.
+    """Check if a movie has releases matching criteria.
 
     You can specify either a numeric Radarr movie ID or a movie name.
     If a name matches multiple movies, you'll be shown the options.
 
+    Criteria options:
+      4k             - 4K/2160p resolution
+      hdr            - HDR content
+      dolby-vision   - Dolby Vision content
+      directors-cut  - Director's Cut editions
+      extended       - Extended editions
+      remaster       - Remastered editions
+      imax           - IMAX editions
+      special-edition - Special/Collector's/Anniversary editions
+
     Examples:
         filtarr check movie 123
-        filtarr check movie "The Matrix"
-        filtarr check movie 123 --no-tag
+        filtarr check movie "The Matrix" --criteria directors-cut
+        filtarr check movie 123 --criteria imax --no-tag
         filtarr check movie 123 --dry-run
     """
     try:
+        # Validate criteria
+        criteria_lower = criteria.lower()
+        if criteria_lower not in CRITERIA_MAP:
+            error_console.print(
+                f"[red]Invalid criteria:[/red] {criteria}. "
+                f"Valid options: {', '.join(VALID_CRITERIA_NAMES)}"
+            )
+            raise typer.Exit(2)
+        search_criteria = CRITERIA_MAP[criteria_lower]
+
         config = Config.load()
         checker = get_checker(config, need_radarr=True)
         state_manager = get_state_manager(config)
@@ -239,7 +283,9 @@ def check_movie(
         # Check if argument is numeric (ID) or name
         if movie.isdigit():
             result = asyncio.run(
-                checker.check_movie(int(movie), apply_tags=apply_tags, dry_run=dry_run)
+                checker.check_movie(
+                    int(movie), criteria=search_criteria, apply_tags=apply_tags, dry_run=dry_run
+                )
             )
         else:
             # Search by name
@@ -255,7 +301,9 @@ def check_movie(
             movie_title = matches[0][1]
             console.print(f"[dim]Found: {movie_title}[/dim]")
             result = asyncio.run(
-                checker.check_movie(movie_id, apply_tags=apply_tags, dry_run=dry_run)
+                checker.check_movie(
+                    movie_id, criteria=search_criteria, apply_tags=apply_tags, dry_run=dry_run
+                )
             )
 
         # Record check in state file (unless dry run)
@@ -282,6 +330,14 @@ def check_movie(
 @check_app.command("series")
 def check_series_cmd(
     series: Annotated[str, typer.Argument(help="Series ID or name to check")],
+    criteria: Annotated[
+        str,
+        typer.Option(
+            "--criteria",
+            "-c",
+            help="Search criteria: 4k, hdr, dolby-vision (movie-only criteria not allowed)",
+        ),
+    ] = "4k",
     seasons: Annotated[
         int,
         typer.Option("--seasons", "-s", help="Number of seasons to check (for recent strategy)"),
@@ -298,18 +354,39 @@ def check_series_cmd(
         typer.Option("--dry-run", help="Show what tags would be applied without applying them"),
     ] = False,
 ) -> None:
-    """Check if a TV series has 4K releases available.
+    """Check if a TV series has releases matching criteria.
 
     You can specify either a numeric Sonarr series ID or a series name.
     If a name matches multiple series, you'll be shown the options.
 
+    Note: Movie-only criteria (directors-cut, extended, remaster, imax,
+    special-edition) cannot be used for TV series.
+
     Examples:
         filtarr check series 456
-        filtarr check series "Breaking Bad"
+        filtarr check series "Breaking Bad" --criteria hdr
         filtarr check series 456 --no-tag
         filtarr check series 456 --dry-run
     """
     try:
+        # Validate criteria
+        criteria_lower = criteria.lower()
+        if criteria_lower not in CRITERIA_MAP:
+            error_console.print(
+                f"[red]Invalid criteria:[/red] {criteria}. "
+                f"Valid options: {', '.join(VALID_CRITERIA_NAMES)}"
+            )
+            raise typer.Exit(2)
+        search_criteria = CRITERIA_MAP[criteria_lower]
+
+        # Check for movie-only criteria
+        if search_criteria in MOVIE_ONLY_CRITERIA:
+            error_console.print(
+                f"[red]Error:[/red] {criteria} criteria is only applicable to movies, not TV series. "
+                f"Valid options for series: 4k, hdr, dolby-vision"
+            )
+            raise typer.Exit(2)
+
         # Parse strategy
         strategy_map = {
             "recent": SamplingStrategy.RECENT,
@@ -335,6 +412,7 @@ def check_series_cmd(
             result = asyncio.run(
                 checker.check_series(
                     int(series),
+                    criteria=search_criteria,
                     strategy=sampling_strategy,
                     seasons_to_check=seasons,
                     apply_tags=apply_tags,
@@ -357,6 +435,7 @@ def check_series_cmd(
             result = asyncio.run(
                 checker.check_series(
                     series_id,
+                    criteria=search_criteria,
                     strategy=sampling_strategy,
                     seasons_to_check=seasons,
                     apply_tags=apply_tags,
@@ -406,6 +485,14 @@ def check_batch(
     all_series: Annotated[
         bool, typer.Option("--all-series", "-as", help="Process all series from Sonarr")
     ] = False,
+    criteria: Annotated[
+        str,
+        typer.Option(
+            "--criteria",
+            "-c",
+            help="Search criteria (movie-only criteria not allowed with --all-series)",
+        ),
+    ] = "4k",
     format: Annotated[
         OutputFormat, typer.Option("--format", help="Output format")
     ] = OutputFormat.SIMPLE,
@@ -423,7 +510,7 @@ def check_batch(
     ] = 0,
     skip_tagged: Annotated[
         bool,
-        typer.Option("--skip-tagged/--no-skip-tagged", help="Skip items with existing 4k tags"),
+        typer.Option("--skip-tagged/--no-skip-tagged", help="Skip items with existing tags"),
     ] = True,
     resume: Annotated[
         bool, typer.Option("--resume/--no-resume", help="Resume interrupted batch run")
@@ -444,9 +531,15 @@ def check_batch(
     Use --all-movies and/or --all-series to process entire libraries.
     Use --batch-size to limit items per run (avoids overloading indexers).
 
+    Criteria options: 4k, hdr, dolby-vision, directors-cut, extended, remaster, imax, special-edition
+
+    Note: Movie-only criteria (directors-cut, extended, remaster, imax, special-edition)
+    cannot be used with --all-series.
+
     Examples:
         filtarr check batch --file items.txt
         filtarr check batch --all-movies
+        filtarr check batch --all-movies --criteria imax
         filtarr check batch --all-movies --batch-size 100
         filtarr check batch --all-series --delay 1.0
         filtarr check batch --all-movies --all-series
@@ -458,6 +551,24 @@ def check_batch(
 
     if file and not file.exists():
         error_console.print(f"[red]File not found:[/red] {file}")
+        raise typer.Exit(2)
+
+    # Validate criteria
+    criteria_lower = criteria.lower()
+    if criteria_lower not in CRITERIA_MAP:
+        error_console.print(
+            f"[red]Invalid criteria:[/red] {criteria}. "
+            f"Valid options: {', '.join(VALID_CRITERIA_NAMES)}"
+        )
+        raise typer.Exit(2)
+    search_criteria = CRITERIA_MAP[criteria_lower]
+
+    # Check for movie-only criteria with series
+    if all_series and search_criteria in MOVIE_ONLY_CRITERIA:
+        error_console.print(
+            f"[red]Error:[/red] {criteria} criteria is only applicable to movies. "
+            f"Cannot use with --all-series. Valid options for series: 4k, hdr, dolby-vision"
+        )
         raise typer.Exit(2)
 
     strategy_map = {
@@ -566,9 +677,12 @@ def check_batch(
         if all_movies:
             radarr = config.require_radarr()
             async with RadarrClient(radarr.url, radarr.api_key, timeout=config.timeout) as client:
-                # Get tags to skip
+                # Get tags to skip (based on current criteria)
                 if skip_tagged:
-                    tag_names = {config.tags.available, config.tags.unavailable}
+                    available_tag, unavailable_tag = config.tags.get_tag_names(
+                        search_criteria.value
+                    )
+                    tag_names = {available_tag, unavailable_tag}
                     all_tags = await client.get_tags()
                     for tag in all_tags:
                         if tag.label in tag_names:
@@ -589,9 +703,12 @@ def check_batch(
         if all_series:
             sonarr = config.require_sonarr()
             async with SonarrClient(sonarr.url, sonarr.api_key, timeout=config.timeout) as client:
-                # Get tags to skip
+                # Get tags to skip (based on current criteria)
                 if skip_tagged:
-                    tag_names = {config.tags.available, config.tags.unavailable}
+                    available_tag, unavailable_tag = config.tags.get_tag_names(
+                        search_criteria.value
+                    )
+                    tag_names = {available_tag, unavailable_tag}
                     all_tags = await client.get_tags()
                     for tag in all_tags:
                         if tag.label in tag_names:
@@ -671,7 +788,10 @@ def check_batch(
                         checker = get_checker(config, need_radarr=True)
                         if item_id > 0:
                             result = await checker.check_movie(
-                                item_id, apply_tags=apply_tags, dry_run=dry_run
+                                item_id,
+                                criteria=search_criteria,
+                                apply_tags=apply_tags,
+                                dry_run=dry_run,
                             )
                         else:
                             # Search by name
@@ -690,13 +810,24 @@ def check_batch(
                                 movie_id, movie_title, _ = matches[0]
                                 console.print(f"[dim]Found: {movie_title}[/dim]")
                                 result = await checker.check_movie(
-                                    movie_id, apply_tags=apply_tags, dry_run=dry_run
+                                    movie_id,
+                                    criteria=search_criteria,
+                                    apply_tags=apply_tags,
+                                    dry_run=dry_run,
                                 )
                     else:
+                        # For series, use 4K if movie-only criteria was specified
+                        # (This handles file-based items with movie-only criteria)
+                        series_criteria = (
+                            SearchCriteria.FOUR_K
+                            if search_criteria in MOVIE_ONLY_CRITERIA
+                            else search_criteria
+                        )
                         checker = get_checker(config, need_sonarr=True)
                         if item_id > 0:
                             result = await checker.check_series(
                                 item_id,
+                                criteria=series_criteria,
                                 strategy=sampling_strategy,
                                 seasons_to_check=seasons,
                                 apply_tags=apply_tags,
@@ -720,6 +851,7 @@ def check_batch(
                                 console.print(f"[dim]Found: {series_title}[/dim]")
                                 result = await checker.check_series(
                                     series_id,
+                                    criteria=series_criteria,
                                     strategy=sampling_strategy,
                                     seasons_to_check=seasons,
                                     apply_tags=apply_tags,
@@ -777,7 +909,8 @@ def check_batch(
 
     # Print summary
     console.print()
-    summary_parts = [f"{has_4k_count}/{len(results)} items have 4K available"]
+    display_criteria = _format_result_type(search_criteria.value)
+    summary_parts = [f"{has_4k_count}/{len(results)} items have {display_criteria} available"]
     if skipped_count > 0:
         summary_parts.append(f"{skipped_count} resumed/skipped")
     if batch_limit_reached:

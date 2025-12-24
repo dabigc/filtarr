@@ -9,18 +9,19 @@
 
 **Running multiple Radarr/Sonarr instances?** You know the problem: your 4K instance fills up with movies that will *never* be available in 4K, your indexers get hammered searching for releases that don't exist, and tools like [Huntarr](https://github.com/plexguide/Huntarr.io) waste API calls hunting for content you'll never find.
 
-**Filtarr solves this.** Instead of blindly syncing your entire library to secondary instances, filtarr checks what's *actually available* from your indexers and tags items accordingly. Only sync what you can actually get.
+**Filtarr solves this.** Instead of blindly syncing your entire library to secondary instances, filtarr checks what's *actually available* from your indexers and tags items accordingly. Filter by 4K, HDR, Director's Cut, IMAX, Special Editions, and more—only sync what you can actually get.
 
 ## How It Works
 
 ```
-┌─────────────────┐     ┌──────────┐     ┌─────────────────┐
-│  Primary Radarr │────▶│  Filtarr │────▶│  Tags Applied   │
-│  (All Movies)   │     │          │     │  • 4k-available │
-└─────────────────┘     │ Searches │     │  • 4k-unavailable│
-                        │ Indexers │     └────────┬────────┘
-                        └──────────┘              │
-                                                  ▼
+┌─────────────────┐     ┌──────────┐     ┌─────────────────────────┐
+│  Primary Radarr │────▶│  Filtarr │────▶│  Tags Applied           │
+│  (All Movies)   │     │          │     │  • 4k-available         │
+└─────────────────┘     │ Searches │     │  • directors-cut-available│
+                        │ Indexers │     │  • imax-available       │
+                        └──────────┘     └────────────┬────────────┘
+                                                      │
+                                                      ▼
                               ┌─────────────────────────────┐
                               │  Secondary Radarr (4K)      │
                               │  Import List filtered by    │
@@ -29,7 +30,7 @@
 ```
 
 1. **Filtarr queries your indexers** through Radarr/Sonarr's search API—using the same sources *you* have access to
-2. **Tags are applied** based on availability: `4k-available` or `4k-unavailable`
+2. **Tags are applied** based on availability (e.g., `4k-available`, `imax-available`, `directors-cut-unavailable`)
 3. **Use import lists** with tag filters to sync only available content to secondary instances
 
 ## Why Filtarr?
@@ -51,8 +52,8 @@
 ## Features
 
 - **Multiple Check Methods**: CLI, Python API, webhooks, or scheduled jobs
-- **Flexible Criteria**: Built-in presets (4K, HDR, Director's Cut) or custom matching functions
-- **Smart Tagging**: Automatic tag creation and management in Radarr/Sonarr
+- **Flexible Criteria**: Built-in presets (4K, HDR, Dolby Vision, Director's Cut, Extended, IMAX, Remaster, Special Edition) or custom matching functions
+- **Smart Tagging**: Automatic criteria-specific tag creation (e.g., `imax-available`, `directors-cut-unavailable`)
 - **Series Sampling**: Efficiently check TV shows without querying every season
 - **Resume Support**: Batch operations can be interrupted and resumed
 - **Docker Ready**: Official image at `ghcr.io/dabigc/filtarr`
@@ -97,17 +98,26 @@ api_key = "your-sonarr-api-key"
 
 > Environment variables take precedence over the config file.
 
-### 3. Check 4K Availability
+### 3. Check Release Availability
 
 ```bash
-# Check a movie by Radarr ID
+# Check a movie for 4K (default)
 filtarr check movie 123
 
-# Check a TV series by Sonarr ID
+# Check a movie for Director's Cut
+filtarr check movie 123 --criteria directors-cut
+
+# Check a movie for IMAX
+filtarr check movie "The Dark Knight" --criteria imax
+
+# Check a TV series for 4K
 filtarr check series 456
 
 # Check multiple items from a file
 filtarr check batch --file items.txt
+
+# Check all movies for Special Edition
+filtarr check batch --all-movies --criteria special-edition
 ```
 
 ## CLI Usage
@@ -118,13 +128,21 @@ filtarr check batch --file items.txt
 filtarr check movie <MOVIE_ID> [OPTIONS]
 
 Options:
+  -c, --criteria TEXT               Search criteria (default: 4k)
   -f, --format [json|table|simple]  Output format (default: table)
+  --no-tag                          Disable automatic tagging
+  --dry-run                         Show what tags would be applied
 ```
+
+Available criteria: `4k`, `hdr`, `dolby-vision`, `directors-cut`, `extended`, `remaster`, `imax`, `special-edition`
 
 Example:
 ```bash
 $ filtarr check movie 123 --format simple
 movie:123: 4K available
+
+$ filtarr check movie 123 --criteria directors-cut --format simple
+movie:123: Director's Cut available
 ```
 
 ### Check Series
@@ -133,10 +151,17 @@ movie:123: 4K available
 filtarr check series <SERIES_ID> [OPTIONS]
 
 Options:
+  -c, --criteria TEXT               Search criteria (default: 4k)
   -s, --seasons INTEGER             Seasons to check (default: 3)
   --strategy [recent|distributed|all]  Sampling strategy (default: recent)
   -f, --format [json|table|simple]  Output format (default: table)
+  --no-tag                          Disable automatic tagging
+  --dry-run                         Show what tags would be applied
 ```
+
+Available criteria for series: `4k`, `hdr`, `dolby-vision`
+
+> **Note:** Movie-only criteria (directors-cut, extended, remaster, imax, special-edition) cannot be used for TV series.
 
 Strategies:
 - `recent` - Check most recent N seasons (fastest)
@@ -149,9 +174,10 @@ $ filtarr check series 456 --strategy recent --seasons 2 --format json
 {
   "item_id": 456,
   "item_type": "series",
-  "has_4k": true,
+  "has_match": true,
+  "result_type": "4k",
   "releases_count": 42,
-  "four_k_releases_count": 8,
+  "matched_releases_count": 8,
   "seasons_checked": [3, 4],
   "strategy_used": "recent"
 }
@@ -168,9 +194,10 @@ Options:
   -f, --file PATH                   File with items to check (optional)
   --all-movies                      Check all movies in Radarr
   --all-series                      Check all series in Sonarr
+  -c, --criteria TEXT               Search criteria (default: 4k)
   --batch-size INTEGER              Max items per run (0=unlimited, default: 0)
   -d, --delay FLOAT                 Delay between checks in seconds (default: 0.5)
-  --skip-tagged/--no-skip-tagged    Skip items with existing 4k tags (default: skip)
+  --skip-tagged/--no-skip-tagged    Skip items with existing tags (default: skip)
   --resume/--no-resume              Resume interrupted batch run (default: resume)
   --no-tag                          Disable automatic tagging
   --dry-run                         Show what would be tagged without making changes
@@ -179,13 +206,18 @@ Options:
   --strategy [recent|distributed|all]  Strategy for series (default: recent)
 ```
 
+> **Note:** Movie-only criteria cannot be used with `--all-series`.
+
 Examples:
 ```bash
-# Check all movies and tag them
+# Check all movies for 4K and tag them
 filtarr check batch --all-movies
 
-# Check all movies, 100 at a time (good for large libraries)
-filtarr check batch --all-movies --batch-size 100
+# Check all movies for IMAX
+filtarr check batch --all-movies --criteria imax
+
+# Check all movies for Director's Cut, 100 at a time
+filtarr check batch --all-movies --criteria directors-cut --batch-size 100
 
 # Check all series with 1 second delay between checks
 filtarr check batch --all-series --delay 1.0
@@ -207,12 +239,18 @@ series:789
 
 ### Automatic Tagging
 
-Batch operations automatically tag items in Radarr/Sonarr based on 4K availability:
+Batch operations automatically tag items in Radarr/Sonarr based on the criteria used:
 
-| Tag | Meaning |
-|-----|---------|
-| `4k-available` | 4K releases were found |
-| `4k-unavailable` | No 4K releases found |
+| Criteria | Available Tag | Unavailable Tag |
+|----------|---------------|-----------------|
+| 4k | `4k-available` | `4k-unavailable` |
+| hdr | `hdr-available` | `hdr-unavailable` |
+| dolby-vision | `dolby-vision-available` | `dolby-vision-unavailable` |
+| directors-cut | `directors-cut-available` | `directors-cut-unavailable` |
+| extended | `extended-available` | `extended-unavailable` |
+| remaster | `remaster-available` | `remaster-unavailable` |
+| imax | `imax-available` | `imax-unavailable` |
+| special-edition | `special-edition-available` | `special-edition-unavailable` |
 
 Tags are created automatically if they don't exist. Use `--no-tag` to disable tagging.
 
@@ -229,22 +267,22 @@ Batch operations track progress and can resume after interruption:
 
 | Code | Meaning |
 |------|---------|
-| 0    | 4K releases found |
-| 1    | No 4K releases found |
+| 0    | Matching releases found |
+| 1    | No matching releases found |
 | 2    | Error (config, API, etc.) |
 
 Use exit codes in scripts:
 ```bash
-if filtarr check movie 123 --format simple; then
-  echo "4K is available!"
+if filtarr check movie 123 --criteria imax --format simple; then
+  echo "IMAX is available!"
 else
-  echo "No 4K found"
+  echo "No IMAX found"
 fi
 ```
 
 ## Webhook Server
 
-Run a webhook server to automatically check 4K availability when new movies or series are added to Radarr/Sonarr.
+Run a webhook server to automatically check release availability when new movies or series are added to Radarr/Sonarr.
 
 ### Installation
 
@@ -691,10 +729,11 @@ api_key = "your-sonarr-api-key"
 
 # Tag configuration (optional)
 [tags]
-available = "4k-available"       # Tag for items with 4K releases
-unavailable = "4k-unavailable"   # Tag for items without 4K releases
-create_if_missing = true         # Create tags if they don't exist
-recheck_days = 30                # Days before rechecking tagged items
+# Tag patterns use {criteria} placeholder (e.g., "4k", "imax", "directors-cut")
+pattern_available = "{criteria}-available"     # Pattern for available tags
+pattern_unavailable = "{criteria}-unavailable" # Pattern for unavailable tags
+create_if_missing = true                       # Create tags if they don't exist
+recheck_days = 30                              # Days before rechecking tagged items
 
 # State file location (optional)
 [state]
