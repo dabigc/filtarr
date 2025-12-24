@@ -106,7 +106,7 @@ d = movie.model_dump()
 - Always set timeouts
 - Use `raise_for_status()` for error handling
 
-## Project-Specific: findarr
+## Project-Specific: filtarr
 
 - 4K detection should check both quality name AND title
 - API responses must be validated with Pydantic models
