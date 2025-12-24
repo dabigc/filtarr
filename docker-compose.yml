@@ -6,6 +6,9 @@
 #   2. Create .env file with your API keys (see .env.example)
 #   3. Run: docker compose up -d
 #
+# Note: The env_file directive is required - Docker Compose does not
+# automatically read .env files for variable substitution.
+#
 # For development/building locally, use: docker compose --profile build up -d
 
 services:
@@ -13,6 +16,7 @@ services:
     image: ghcr.io/dabigc/filtarr:latest
     container_name: filtarr
     restart: unless-stopped
+    env_file: .env
     ports:
       - "${FILTARR_PORT:-8080}:8080"
     environment:
@@ -56,6 +60,7 @@ services:
       dockerfile: Dockerfile
     container_name: filtarr-dev
     restart: unless-stopped
+    env_file: .env
     ports:
       - "${FILTARR_DEV_PORT:-8081}:8080"
     environment:
