@@ -9,6 +9,7 @@ permissions:
   contents: write
   pull-requests: write
   packages: write
+  id-token: write  # Required for PyPI OIDC trusted publishing
 
 jobs:
   release-please:
@@ -33,3 +34,116 @@ jobs:
     permissions:
       contents: write
       packages: write
+
+  # Build Python package for PyPI
+  pypi-build:
+    name: Build Python Package
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Build package
+        run: uv build
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  # Publish to Test PyPI
+  pypi-publish-testpypi:
+    name: Publish to Test PyPI
+    needs: [release-please, pypi-build]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/filtarr
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to Test PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  # Publish to PyPI
+  pypi-publish:
+    name: Publish to PyPI
+    needs: [release-please, pypi-publish-testpypi]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/p/filtarr
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  # Update GitHub Release with PyPI info
+  pypi-update-release:
+    name: Update Release with PyPI Info
+    needs: [release-please, pypi-publish]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Update GitHub Release with PyPI info
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          append_body: true
+          body: |
+
+            ## PyPI Package
+
+            Install from PyPI:
+
+            ```bash
+            pip install filtarr
+            ```
+
+            Or with extras:
+
+            ```bash
+            pip install filtarr[cli]           # CLI support
+            pip install filtarr[webhook]       # Webhook server
+            pip install filtarr[scheduler]     # Scheduled jobs
+            pip install filtarr[cli,webhook,scheduler]  # Everything
+            ```

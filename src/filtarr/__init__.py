@@ -2,7 +2,7 @@
 
 A Python library for checking whether movies (via Radarr) and TV shows
 (via Sonarr) have releases matching specific criteria (4K, HDR, Dolby Vision,
-Director's Cut, etc.) available from your indexers.
+Atmos, Director's Cut, etc.) available from your indexers.
 
 Quick Start
 -----------
