@@ -206,7 +206,7 @@ class TestCheckSeriesWithSampling:
 
         checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
         result = await checker.check_series(
-            123, strategy=SamplingStrategy.RECENT, seasons_to_check=3
+            123, strategy=SamplingStrategy.RECENT, seasons_to_check=3, apply_tags=False
         )
 
         assert result.has_match is False
@@ -296,7 +296,7 @@ class TestCheckSeriesWithSampling:
         # (we don't mock it - if called, test would fail)
 
         checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
-        result = await checker.check_series(123, strategy=SamplingStrategy.ALL)
+        result = await checker.check_series(123, strategy=SamplingStrategy.ALL, apply_tags=False)
 
         assert result.has_match is True
         # Should have stopped after finding 4K in season 2
@@ -333,7 +333,7 @@ class TestCheckSeriesWithSampling:
         )
 
         checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
-        result = await checker.check_series(123)
+        result = await checker.check_series(123, apply_tags=False)
 
         assert result.has_match is False
         assert result.episodes_checked == []
@@ -406,7 +406,9 @@ class TestCheckSeriesWithSampling:
             )
 
         checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
-        result = await checker.check_series(123, strategy=SamplingStrategy.DISTRIBUTED)
+        result = await checker.check_series(
+            123, strategy=SamplingStrategy.DISTRIBUTED, apply_tags=False
+        )
 
         assert result.has_match is False
         assert result.strategy_used == SamplingStrategy.DISTRIBUTED
@@ -445,7 +447,7 @@ class TestCheckSeriesWithSampling:
         )
 
         checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
-        result = await checker.check_movie(456)
+        result = await checker.check_movie(456, apply_tags=False)
 
         assert result.has_match is True
         assert result.item_type == "movie"
@@ -531,7 +533,7 @@ class TestNameBasedLookup:
         )
 
         checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
-        result = await checker.check_movie_by_name("The Matrix")
+        result = await checker.check_movie_by_name("The Matrix", apply_tags=False)
 
         assert result.has_match is True
         assert result.item_id == 123
@@ -598,7 +600,7 @@ class TestNameBasedLookup:
         )
 
         checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
-        result = await checker.check_series_by_name("Breaking Bad")
+        result = await checker.check_series_by_name("Breaking Bad", apply_tags=False)
 
         assert result.has_match is True
         assert result.item_id == 456

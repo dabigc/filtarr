@@ -57,7 +57,7 @@ class TestMovieCheckIntegration:
             radarr_api_key="test-key",
         )
 
-        result = await checker.check_movie(123)
+        result = await checker.check_movie(123, apply_tags=False)
 
         assert isinstance(result, SearchResult)
         assert result.has_match is True
@@ -118,7 +118,7 @@ class TestMovieCheckIntegration:
         assert matches[0] == (100, "The Matrix", 1999)
 
         # Check the first match
-        result = await checker.check_movie(matches[0][0])
+        result = await checker.check_movie(matches[0][0], apply_tags=False)
         assert result.has_match is True
         assert result.item_id == 100
 
@@ -243,6 +243,7 @@ class TestSeriesCheckIntegration:
             456,
             strategy=SamplingStrategy.RECENT,
             seasons_to_check=2,
+            apply_tags=False,
         )
 
         assert result.has_match is True
@@ -339,7 +340,9 @@ class TestSeriesCheckIntegration:
             sonarr_api_key="test-key",
         )
 
-        result = await checker.check_series(789, strategy=SamplingStrategy.DISTRIBUTED)
+        result = await checker.check_series(
+            789, strategy=SamplingStrategy.DISTRIBUTED, apply_tags=False
+        )
 
         assert result.has_match is False
         assert result.strategy_used == SamplingStrategy.DISTRIBUTED
@@ -418,7 +421,7 @@ class TestSeriesCheckIntegration:
         assert matches[0] == (500, "Breaking Bad", 2008)
 
         # Check the match
-        result = await checker.check_series(matches[0][0])
+        result = await checker.check_series(matches[0][0], apply_tags=False)
         assert result.has_match is True
 
 
@@ -507,8 +510,8 @@ class TestCombinedCheckerIntegration:
             sonarr_api_key="sonarr-key",
         )
 
-        movie_result = await checker.check_movie(10)
-        series_result = await checker.check_series(20)
+        movie_result = await checker.check_movie(10, apply_tags=False)
+        series_result = await checker.check_series(20, apply_tags=False)
 
         assert movie_result.has_match is True
         assert movie_result.item_type == "movie"
@@ -561,7 +564,7 @@ class TestErrorHandlingIntegration:
             radarr_api_key="key",
         )
 
-        result = await checker.check_movie(999)
+        result = await checker.check_movie(999, apply_tags=False)
 
         assert result.has_match is False
         assert result.releases == []
