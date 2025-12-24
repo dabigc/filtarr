@@ -95,7 +95,7 @@ jobs:
   # Publish to PyPI
   pypi-publish:
     name: Publish to PyPI
-    needs: [release-please, pypi-publish-testpypi]
+    needs: [release-please, pypi-build]
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
