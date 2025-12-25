@@ -7,8 +7,10 @@
 #      cp .env.example .env
 #   3. Run: docker compose up -d
 #
-# Note: The env_file directive is required - Docker Compose does not
-# automatically read .env files for variable substitution.
+# Note: The env_file directive is required to pass environment variables
+# to the CONTAINER. While Docker Compose automatically reads .env files
+# for variable substitution in this compose file (e.g., ${FILTARR_PORT}),
+# the env_file directive is needed to inject those values into the container.
 #
 # For development/building locally, use: docker compose --profile build up -d
 

@@ -151,6 +151,10 @@ def _contains_edition_phrase(title_lower: str, phrase: str) -> bool:
     or a common separator character (space, dot, dash, underscore). This prevents matches
     where the phrase is embedded inside a larger word, e.g. "aspecial.edition" or
     "collectors editions".
+
+    Args:
+        title_lower: The release title, must be pre-lowercased by the caller.
+        phrase: The phrase to search for (should be lowercase).
     """
     separators = " .-_"
     start = 0

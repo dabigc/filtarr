@@ -2,7 +2,6 @@
 
 import json
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from typer.testing import CliRunner
@@ -10,6 +9,7 @@ from typer.testing import CliRunner
 from filtarr.checker import SamplingStrategy, SearchResult
 from filtarr.cli import app, format_result_json, format_result_simple
 from filtarr.config import Config, RadarrConfig, SonarrConfig
+from tests.test_utils import create_asyncio_run_mock
 
 runner = CliRunner()
 
@@ -20,21 +20,6 @@ def _create_mock_state_manager() -> MagicMock:
     mock.record_check = MagicMock()
     mock.get_stale_unavailable_items = MagicMock(return_value=[])
     return mock
-
-
-def _create_asyncio_run_mock(return_value: Any) -> MagicMock:
-    """Create a mock for asyncio.run that properly handles coroutines.
-
-    This mock closes any coroutine passed to it to avoid 'coroutine never awaited'
-    warnings, and returns the provided return value.
-    """
-
-    def side_effect(coro: Any) -> Any:
-        # Close the coroutine to prevent 'never awaited' warnings
-        coro.close()
-        return return_value
-
-    return MagicMock(side_effect=side_effect)
 
 
 class TestOutputFormatters:
@@ -145,7 +130,7 @@ class TestCheckSeriesCommand:
 
         with (
             patch("filtarr.cli.Config.load", return_value=mock_config),
-            patch("filtarr.cli.asyncio.run", _create_asyncio_run_mock(mock_result)),
+            patch("filtarr.cli.asyncio.run", create_asyncio_run_mock(mock_result)),
         ):
             result = runner.invoke(app, ["check", "series", "456", "--format", "simple"])
 
@@ -164,7 +149,7 @@ class TestCheckSeriesCommand:
 
         with (
             patch("filtarr.cli.Config.load", return_value=mock_config),
-            patch("filtarr.cli.asyncio.run", _create_asyncio_run_mock(mock_result)),
+            patch("filtarr.cli.asyncio.run", create_asyncio_run_mock(mock_result)),
         ):
             result = runner.invoke(
                 app,

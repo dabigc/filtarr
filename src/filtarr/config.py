@@ -45,7 +45,9 @@ class TagConfig:
     create_if_missing: bool = True
     recheck_days: int = 30
 
-    # Legacy fields for backward compatibility (deprecated)
+    # Legacy fields for backward compatibility (deprecated).
+    # These fields are scheduled for removal in filtarr 2.0.0.
+    # Use ``pattern_available`` / ``pattern_unavailable`` instead.
     available: str = "4k-available"
     unavailable: str = "4k-unavailable"
 
