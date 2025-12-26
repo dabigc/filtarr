@@ -1,6 +1,7 @@
 """Tests for configuration loading."""
 
 import os
+import warnings
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1139,3 +1140,343 @@ class TestUrlValidationFromEnv:
                 config = Config.load()
                 assert config.sonarr is not None
                 assert config.sonarr.url == "http://sonarr.example.com:8989"
+
+
+class TestTagConfigDeprecationWarnings:
+    """Tests for deprecation warnings on legacy TagConfig fields."""
+
+    def test_accessing_available_property_emits_warning(self) -> None:
+        """Accessing TagConfig.available should emit DeprecationWarning."""
+        tag_config = TagConfig()
+        with pytest.warns(DeprecationWarning, match="TagConfig.available is deprecated"):
+            _ = tag_config.available
+
+    def test_accessing_unavailable_property_emits_warning(self) -> None:
+        """Accessing TagConfig.unavailable should emit DeprecationWarning."""
+        tag_config = TagConfig()
+        with pytest.warns(DeprecationWarning, match="TagConfig.unavailable is deprecated"):
+            _ = tag_config.unavailable
+
+    def test_setting_available_property_emits_warning(self) -> None:
+        """Setting TagConfig.available should emit DeprecationWarning."""
+        tag_config = TagConfig()
+        with pytest.warns(DeprecationWarning, match="TagConfig.available is deprecated"):
+            tag_config.available = "custom-available"
+
+    def test_setting_unavailable_property_emits_warning(self) -> None:
+        """Setting TagConfig.unavailable should emit DeprecationWarning."""
+        tag_config = TagConfig()
+        with pytest.warns(DeprecationWarning, match="TagConfig.unavailable is deprecated"):
+            tag_config.unavailable = "custom-unavailable"
+
+    def test_available_returns_default_value_from_pattern(self) -> None:
+        """TagConfig.available should return value formatted from pattern_available."""
+        tag_config = TagConfig(pattern_available="{criteria}-is-ready")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            assert tag_config.available == "4k-is-ready"
+
+    def test_unavailable_returns_default_value_from_pattern(self) -> None:
+        """TagConfig.unavailable should return value formatted from pattern_unavailable."""
+        tag_config = TagConfig(pattern_unavailable="{criteria}-not-ready")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            assert tag_config.unavailable == "4k-not-ready"
+
+    def test_available_returns_legacy_value_when_set(self) -> None:
+        """TagConfig.available should return legacy value when _available is set."""
+        tag_config = TagConfig(_available="legacy-4k-available")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            assert tag_config.available == "legacy-4k-available"
+
+    def test_unavailable_returns_legacy_value_when_set(self) -> None:
+        """TagConfig.unavailable should return legacy value when _unavailable is set."""
+        tag_config = TagConfig(_unavailable="legacy-4k-unavailable")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            assert tag_config.unavailable == "legacy-4k-unavailable"
+
+    def test_setting_available_stores_in_private_field(self) -> None:
+        """Setting available property should store value in _available."""
+        tag_config = TagConfig()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            tag_config.available = "my-custom-tag"
+            assert tag_config._available == "my-custom-tag"
+            assert tag_config.available == "my-custom-tag"
+
+    def test_setting_unavailable_stores_in_private_field(self) -> None:
+        """Setting unavailable property should store value in _unavailable."""
+        tag_config = TagConfig()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            tag_config.unavailable = "my-custom-unavailable-tag"
+            assert tag_config._unavailable == "my-custom-unavailable-tag"
+            assert tag_config.unavailable == "my-custom-unavailable-tag"
+
+    def test_get_tag_names_does_not_emit_warnings(self) -> None:
+        """get_tag_names() should not emit deprecation warnings."""
+        tag_config = TagConfig()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            # This should not raise any DeprecationWarning
+            available, unavailable = tag_config.get_tag_names("4k")
+            assert available == "4k-available"
+            assert unavailable == "4k-unavailable"
+
+
+class TestTagConfigDeprecationFromToml:
+    """Tests for deprecation warnings when loading legacy config from TOML."""
+
+    def test_legacy_available_in_toml_emits_warning(self, tmp_path: Path) -> None:
+        """Using 'available' key in TOML should emit DeprecationWarning."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[tags]
+available = "custom-4k-available"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+            pytest.warns(DeprecationWarning, match="tags.available.*deprecated"),
+        ):
+            config = Config.load()
+
+        # Verify the legacy value is stored correctly
+        assert config.tags._available == "custom-4k-available"
+
+    def test_legacy_unavailable_in_toml_emits_warning(self, tmp_path: Path) -> None:
+        """Using 'unavailable' key in TOML should emit DeprecationWarning."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[tags]
+unavailable = "custom-4k-unavailable"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+            pytest.warns(DeprecationWarning, match="tags.unavailable.*deprecated"),
+        ):
+            config = Config.load()
+
+        # Verify the legacy value is stored correctly
+        assert config.tags._unavailable == "custom-4k-unavailable"
+
+    def test_legacy_both_fields_in_toml_emit_warnings(self, tmp_path: Path) -> None:
+        """Using both legacy keys in TOML should emit two DeprecationWarnings."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[tags]
+available = "legacy-available"
+unavailable = "legacy-unavailable"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+            warnings.catch_warnings(record=True) as caught_warnings,
+        ):
+            warnings.simplefilter("always", DeprecationWarning)
+            config = Config.load()
+
+        # Should have caught both deprecation warnings
+        deprecation_warnings = [
+            w for w in caught_warnings if issubclass(w.category, DeprecationWarning)
+        ]
+        assert len(deprecation_warnings) == 2
+
+        # Verify values are stored
+        assert config.tags._available == "legacy-available"
+        assert config.tags._unavailable == "legacy-unavailable"
+
+    def test_new_pattern_fields_do_not_emit_warnings(self, tmp_path: Path) -> None:
+        """Using pattern_available/pattern_unavailable should not emit warnings."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[tags]
+pattern_available = "{criteria}-is-available"
+pattern_unavailable = "{criteria}-is-unavailable"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+            warnings.catch_warnings(),
+        ):
+            warnings.simplefilter("error", DeprecationWarning)
+            # Should not raise DeprecationWarning
+            config = Config.load()
+
+        assert config.tags.pattern_available == "{criteria}-is-available"
+        assert config.tags.pattern_unavailable == "{criteria}-is-unavailable"
+
+
+class TestTagConfigDeprecationFromEnv:
+    """Tests for deprecation warnings when loading legacy config from environment."""
+
+    def test_legacy_filtarr_tag_available_env_emits_warning(self, tmp_path: Path) -> None:
+        """Using FILTARR_TAG_AVAILABLE should emit DeprecationWarning."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_TAG_AVAILABLE": "env-custom-available"},
+                clear=True,
+            ),
+            pytest.warns(DeprecationWarning, match="FILTARR_TAG_AVAILABLE.*deprecated"),
+        ):
+            config = Config.load()
+
+        assert config.tags._available == "env-custom-available"
+
+    def test_legacy_filtarr_tag_unavailable_env_emits_warning(self, tmp_path: Path) -> None:
+        """Using FILTARR_TAG_UNAVAILABLE should emit DeprecationWarning."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_TAG_UNAVAILABLE": "env-custom-unavailable"},
+                clear=True,
+            ),
+            pytest.warns(DeprecationWarning, match="FILTARR_TAG_UNAVAILABLE.*deprecated"),
+        ):
+            config = Config.load()
+
+        assert config.tags._unavailable == "env-custom-unavailable"
+
+    def test_legacy_both_env_vars_emit_warnings(self, tmp_path: Path) -> None:
+        """Using both legacy env vars should emit two DeprecationWarnings."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {
+                    "FILTARR_TAG_AVAILABLE": "env-available",
+                    "FILTARR_TAG_UNAVAILABLE": "env-unavailable",
+                },
+                clear=True,
+            ),
+            warnings.catch_warnings(record=True) as caught_warnings,
+        ):
+            warnings.simplefilter("always", DeprecationWarning)
+            config = Config.load()
+
+        deprecation_warnings = [
+            w for w in caught_warnings if issubclass(w.category, DeprecationWarning)
+        ]
+        assert len(deprecation_warnings) == 2
+
+        assert config.tags._available == "env-available"
+        assert config.tags._unavailable == "env-unavailable"
+
+    def test_new_pattern_env_vars_do_not_emit_warnings(self, tmp_path: Path) -> None:
+        """Using FILTARR_TAG_PATTERN_* env vars should not emit warnings."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {
+                    "FILTARR_TAG_PATTERN_AVAILABLE": "{criteria}-env-available",
+                    "FILTARR_TAG_PATTERN_UNAVAILABLE": "{criteria}-env-unavailable",
+                },
+                clear=True,
+            ),
+            warnings.catch_warnings(),
+        ):
+            warnings.simplefilter("error", DeprecationWarning)
+            # Should not raise DeprecationWarning
+            config = Config.load()
+
+        assert config.tags.pattern_available == "{criteria}-env-available"
+        assert config.tags.pattern_unavailable == "{criteria}-env-unavailable"
+
+
+class TestTagConfigBackwardCompatibility:
+    """Tests to ensure backward compatibility with legacy TagConfig usage."""
+
+    def test_legacy_code_still_works_with_warnings(self) -> None:
+        """Legacy code accessing .available/.unavailable should still work."""
+        tag_config = TagConfig()
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            # This simulates legacy code that accesses these properties
+            available_tag = tag_config.available
+            unavailable_tag = tag_config.unavailable
+
+        assert available_tag == "4k-available"
+        assert unavailable_tag == "4k-unavailable"
+
+    def test_legacy_code_with_custom_pattern_still_works(self) -> None:
+        """Legacy code works when pattern_available/unavailable are customized."""
+        tag_config = TagConfig(
+            pattern_available="has-{criteria}",
+            pattern_unavailable="missing-{criteria}",
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            available_tag = tag_config.available
+            unavailable_tag = tag_config.unavailable
+
+        # Should return pattern formatted with "4k"
+        assert available_tag == "has-4k"
+        assert unavailable_tag == "missing-4k"
+
+    def test_legacy_toml_config_loads_values_correctly(self, tmp_path: Path) -> None:
+        """Legacy TOML config with available/unavailable loads correctly."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[tags]
+available = "my-legacy-available"
+unavailable = "my-legacy-unavailable"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+            warnings.catch_warnings(),
+        ):
+            warnings.simplefilter("ignore", DeprecationWarning)
+            config = Config.load()
+            # Accessing legacy properties still works
+            available = config.tags.available
+            unavailable = config.tags.unavailable
+
+        assert available == "my-legacy-available"
+        assert unavailable == "my-legacy-unavailable"
+
+    def test_legacy_env_config_loads_values_correctly(self, tmp_path: Path) -> None:
+        """Legacy env vars FILTARR_TAG_AVAILABLE/UNAVAILABLE load correctly."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {
+                    "FILTARR_TAG_AVAILABLE": "env-legacy-available",
+                    "FILTARR_TAG_UNAVAILABLE": "env-legacy-unavailable",
+                },
+                clear=True,
+            ),
+            warnings.catch_warnings(),
+        ):
+            warnings.simplefilter("ignore", DeprecationWarning)
+            config = Config.load()
+            available = config.tags.available
+            unavailable = config.tags.unavailable
+
+        assert available == "env-legacy-available"
+        assert unavailable == "env-legacy-unavailable"

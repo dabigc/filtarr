@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tomllib
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Self
@@ -118,9 +119,23 @@ class TagConfig:
 
     Tags are generated using patterns with {criteria} placeholder.
     For example, with default patterns:
-        - 4K criteria → "4k-available" / "4k-unavailable"
-        - IMAX criteria → "imax-available" / "imax-unavailable"
-        - Director's Cut → "directors-cut-available" / "directors-cut-unavailable"
+        - 4K criteria -> "4k-available" / "4k-unavailable"
+        - IMAX criteria -> "imax-available" / "imax-unavailable"
+        - Director's Cut -> "directors-cut-available" / "directors-cut-unavailable"
+
+    Migration Guide:
+        The ``available`` and ``unavailable`` fields are deprecated in favor of
+        ``pattern_available`` and ``pattern_unavailable``. These legacy fields
+        will be removed in filtarr 2.0.0.
+
+        Old usage::
+            TagConfig(available="4k-available", unavailable="4k-unavailable")
+
+        New usage::
+            TagConfig(
+                pattern_available="{criteria}-available",
+                pattern_unavailable="{criteria}-unavailable"
+            )
     """
 
     pattern_available: str = "{criteria}-available"
@@ -131,8 +146,66 @@ class TagConfig:
     # Legacy fields for backward compatibility (deprecated).
     # These fields are scheduled for removal in filtarr 2.0.0.
     # Use ``pattern_available`` / ``pattern_unavailable`` instead.
-    available: str = "4k-available"
-    unavailable: str = "4k-unavailable"
+    _available: str | None = field(default=None, repr=False)
+    _unavailable: str | None = field(default=None, repr=False)
+
+    @property
+    def available(self) -> str:
+        """Legacy property for backward compatibility.
+
+        .. deprecated:: 1.0.0
+            Use :meth:`get_tag_names` with ``pattern_available`` instead.
+            This will be removed in filtarr 2.0.0.
+        """
+        warnings.warn(
+            "TagConfig.available is deprecated. Use pattern_available with "
+            "get_tag_names() instead. This will be removed in filtarr 2.0.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if self._available is not None:
+            return self._available
+        return self.pattern_available.format(criteria="4k")
+
+    @available.setter
+    def available(self, value: str) -> None:
+        """Set legacy available field with deprecation warning."""
+        warnings.warn(
+            "TagConfig.available is deprecated. Use pattern_available instead. "
+            "This will be removed in filtarr 2.0.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self._available = value
+
+    @property
+    def unavailable(self) -> str:
+        """Legacy property for backward compatibility.
+
+        .. deprecated:: 1.0.0
+            Use :meth:`get_tag_names` with ``pattern_unavailable`` instead.
+            This will be removed in filtarr 2.0.0.
+        """
+        warnings.warn(
+            "TagConfig.unavailable is deprecated. Use pattern_unavailable with "
+            "get_tag_names() instead. This will be removed in filtarr 2.0.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if self._unavailable is not None:
+            return self._unavailable
+        return self.pattern_unavailable.format(criteria="4k")
+
+    @unavailable.setter
+    def unavailable(self, value: str) -> None:
+        """Set legacy unavailable field with deprecation warning."""
+        warnings.warn(
+            "TagConfig.unavailable is deprecated. Use pattern_unavailable instead. "
+            "This will be removed in filtarr 2.0.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self._unavailable = value
 
     def get_tag_names(self, criteria_value: str) -> tuple[str, str]:
         """Get tag names for a specific criteria.
@@ -143,7 +216,7 @@ class TagConfig:
         Returns:
             Tuple of (available_tag, unavailable_tag)
         """
-        # Convert underscores to hyphens for tag slugs (e.g., "directors_cut" → "directors-cut")
+        # Convert underscores to hyphens for tag slugs (e.g., "directors_cut" -> "directors-cut")
         slug = criteria_value.replace("_", "-")
         return (
             self.pattern_available.format(criteria=slug),
@@ -247,13 +320,36 @@ def _parse_tags_from_dict(data: dict[str, Any], defaults: TagConfig) -> TagConfi
     if "tags" not in data:
         return defaults
     tags_data = data["tags"]
+
+    # Check for deprecated legacy fields and emit warnings
+    legacy_available: str | None = None
+    legacy_unavailable: str | None = None
+
+    if "available" in tags_data:
+        warnings.warn(
+            "Config key 'tags.available' is deprecated. Use 'tags.pattern_available' "
+            "instead. This will be removed in filtarr 2.0.0.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        legacy_available = tags_data["available"]
+
+    if "unavailable" in tags_data:
+        warnings.warn(
+            "Config key 'tags.unavailable' is deprecated. Use 'tags.pattern_unavailable' "
+            "instead. This will be removed in filtarr 2.0.0.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        legacy_unavailable = tags_data["unavailable"]
+
     return TagConfig(
         pattern_available=tags_data.get("pattern_available", defaults.pattern_available),
         pattern_unavailable=tags_data.get("pattern_unavailable", defaults.pattern_unavailable),
         create_if_missing=tags_data.get("create_if_missing", defaults.create_if_missing),
         recheck_days=tags_data.get("recheck_days", defaults.recheck_days),
-        available=tags_data.get("available", defaults.available),
-        unavailable=tags_data.get("unavailable", defaults.unavailable),
+        _available=legacy_available or defaults._available,
+        _unavailable=legacy_unavailable or defaults._unavailable,
     )
 
 
@@ -275,13 +371,37 @@ def _parse_tags_from_env(base: TagConfig) -> TagConfig:
     if not any([pattern_available, pattern_unavailable, tag_available, tag_unavailable]):
         return base
 
+    # Check for deprecated legacy environment variables and emit warnings
+    legacy_available: str | None = base._available
+    legacy_unavailable: str | None = base._unavailable
+
+    if tag_available:
+        warnings.warn(
+            "Environment variable 'FILTARR_TAG_AVAILABLE' is deprecated. "
+            "Use 'FILTARR_TAG_PATTERN_AVAILABLE' instead. "
+            "This will be removed in filtarr 2.0.0.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        legacy_available = tag_available
+
+    if tag_unavailable:
+        warnings.warn(
+            "Environment variable 'FILTARR_TAG_UNAVAILABLE' is deprecated. "
+            "Use 'FILTARR_TAG_PATTERN_UNAVAILABLE' instead. "
+            "This will be removed in filtarr 2.0.0.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        legacy_unavailable = tag_unavailable
+
     return TagConfig(
         pattern_available=pattern_available or base.pattern_available,
         pattern_unavailable=pattern_unavailable or base.pattern_unavailable,
         create_if_missing=base.create_if_missing,
         recheck_days=base.recheck_days,
-        available=tag_available or base.available,
-        unavailable=tag_unavailable or base.unavailable,
+        _available=legacy_available,
+        _unavailable=legacy_unavailable,
     )
 
 

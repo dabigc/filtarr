@@ -11,7 +11,7 @@ import httpx
 from pydantic import ValidationError
 
 from filtarr.checker import ReleaseChecker
-from filtarr.config import Config, ConfigurationError, TagConfig
+from filtarr.config import Config, ConfigurationError
 from filtarr.models.webhook import (
     RadarrWebhookPayload,
     SonarrWebhookPayload,
@@ -57,17 +57,11 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
 
     try:
         radarr_config = config.require_radarr()
-        tag_config = TagConfig(
-            available=config.tags.available,
-            unavailable=config.tags.unavailable,
-            create_if_missing=config.tags.create_if_missing,
-            recheck_days=config.tags.recheck_days,
-        )
         checker = ReleaseChecker(
             radarr_url=radarr_config.url,
             radarr_api_key=radarr_config.api_key,
             timeout=config.timeout,
-            tag_config=tag_config,
+            tag_config=config.tags,
         )
 
         result = await checker.check_movie(movie_id, apply_tags=True)
@@ -97,17 +91,11 @@ async def _process_series_check(series_id: int, series_title: str, config: Confi
 
     try:
         sonarr_config = config.require_sonarr()
-        tag_config = TagConfig(
-            available=config.tags.available,
-            unavailable=config.tags.unavailable,
-            create_if_missing=config.tags.create_if_missing,
-            recheck_days=config.tags.recheck_days,
-        )
         checker = ReleaseChecker(
             sonarr_url=sonarr_config.url,
             sonarr_api_key=sonarr_config.api_key,
             timeout=config.timeout,
-            tag_config=tag_config,
+            tag_config=config.tags,
         )
 
         result = await checker.check_series(series_id, apply_tags=True)
