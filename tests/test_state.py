@@ -625,3 +625,184 @@ class TestEdgeCases:
         assert 1 in stale_ids
         assert 3 in stale_ids
         assert 2 not in stale_ids
+
+
+class TestIsRecentlyChecked:
+    """Tests for StateManager.is_recently_checked method."""
+
+    def test_returns_false_when_item_not_in_state(self, tmp_path: Path) -> None:
+        """Should return False when item has never been checked."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path)
+
+        result = manager.is_recently_checked("movie", 999, ttl_hours=24)
+
+        assert result is False
+
+    def test_returns_false_when_check_is_older_than_ttl(self, tmp_path: Path) -> None:
+        """Should return False when check is older than TTL period."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path)
+
+        # Record a check from 48 hours ago
+        state = manager.load()
+        state.checks["movie:123"] = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(hours=48),
+            result="available",
+            tag_applied="4k-available",
+        )
+        manager.save()
+
+        result = manager.is_recently_checked("movie", 123, ttl_hours=24)
+
+        assert result is False
+
+    def test_returns_true_when_check_is_within_ttl(self, tmp_path: Path) -> None:
+        """Should return True when check is within TTL period."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path)
+
+        # Record a check from 1 hour ago
+        state = manager.load()
+        state.checks["movie:123"] = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(hours=1),
+            result="available",
+            tag_applied="4k-available",
+        )
+        manager.save()
+
+        result = manager.is_recently_checked("movie", 123, ttl_hours=24)
+
+        assert result is True
+
+    def test_returns_false_when_ttl_is_zero(self, tmp_path: Path) -> None:
+        """Should return False when TTL is 0 (disabled)."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path)
+
+        # Record a recent check
+        manager.record_check("movie", 123, True, "4k-available")
+
+        result = manager.is_recently_checked("movie", 123, ttl_hours=0)
+
+        assert result is False
+
+    def test_handles_timezone_naive_datetime(self, tmp_path: Path) -> None:
+        """Should handle timezone-naive datetimes for backwards compatibility."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path)
+
+        # Record a check with timezone-naive datetime (simulating old state files)
+        state = manager.load()
+        state.checks["movie:123"] = CheckRecord(
+            last_checked=datetime.now().replace(tzinfo=None) - timedelta(hours=1),
+            result="available",
+            tag_applied="4k-available",
+        )
+        manager.save()
+
+        result = manager.is_recently_checked("movie", 123, ttl_hours=24)
+
+        assert result is True
+
+
+class TestGetCachedResult:
+    """Tests for StateManager.get_cached_result method."""
+
+    def test_returns_none_when_item_not_in_state(self, tmp_path: Path) -> None:
+        """Should return None when item has never been checked."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path)
+
+        result = manager.get_cached_result("movie", 999, ttl_hours=24)
+
+        assert result is None
+
+    def test_returns_none_when_check_is_older_than_ttl(self, tmp_path: Path) -> None:
+        """Should return None when check is older than TTL period."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path)
+
+        # Record a check from 48 hours ago
+        state = manager.load()
+        state.checks["movie:123"] = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(hours=48),
+            result="available",
+            tag_applied="4k-available",
+        )
+        manager.save()
+
+        result = manager.get_cached_result("movie", 123, ttl_hours=24)
+
+        assert result is None
+
+    def test_returns_check_record_when_within_ttl(self, tmp_path: Path) -> None:
+        """Should return CheckRecord when check is within TTL period."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path)
+
+        # Record a check from 1 hour ago
+        state = manager.load()
+        state.checks["movie:123"] = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(hours=1),
+            result="available",
+            tag_applied="4k-available",
+        )
+        manager.save()
+
+        result = manager.get_cached_result("movie", 123, ttl_hours=24)
+
+        assert result is not None
+        assert result.result == "available"
+        assert result.tag_applied == "4k-available"
+
+    def test_returns_none_when_ttl_is_zero(self, tmp_path: Path) -> None:
+        """Should return None when TTL is 0 (disabled)."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path)
+
+        # Record a recent check
+        manager.record_check("movie", 123, True, "4k-available")
+
+        result = manager.get_cached_result("movie", 123, ttl_hours=0)
+
+        assert result is None
+
+
+class TestEnsureInitialized:
+    """Tests for StateManager.ensure_initialized method."""
+
+    def test_creates_state_file_if_not_exists(self, tmp_path: Path) -> None:
+        """Should create state file if it doesn't exist."""
+        state_path = tmp_path / "subdir" / "state.json"
+        manager = StateManager(state_path)
+
+        assert not state_path.exists()
+
+        manager.ensure_initialized()
+
+        assert state_path.exists()
+        # Verify file contains valid JSON
+        content = json.loads(state_path.read_text())
+        assert "version" in content
+        assert content["version"] == STATE_VERSION
+
+    def test_works_when_state_file_already_exists(self, tmp_path: Path) -> None:
+        """Should work correctly when state file already exists."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path)
+
+        # Create existing state with some data
+        manager.record_check("movie", 123, True, "4k-available")
+        manager.save()
+
+        # Clear cached state
+        manager2 = StateManager(state_path)
+
+        # Should not raise and should preserve existing data
+        manager2.ensure_initialized()
+
+        assert state_path.exists()
+        record = manager2.get_check("movie", 123)
+        assert record is not None
+        assert record.result == "available"

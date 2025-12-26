@@ -7,7 +7,14 @@ from unittest.mock import patch
 
 import pytest
 
-from filtarr.config import Config, ConfigurationError, RadarrConfig, SonarrConfig, TagConfig
+from filtarr.config import (
+    Config,
+    ConfigurationError,
+    LoggingConfig,
+    RadarrConfig,
+    SonarrConfig,
+    TagConfig,
+)
 
 
 class TestConfigFromEnv:
@@ -1485,3 +1492,270 @@ unavailable = "my-legacy-unavailable"
 
         assert available == "env-legacy-available"
         assert unavailable == "env-legacy-unavailable"
+
+
+class TestLoggingConfig:
+    """Tests for LoggingConfig validation."""
+
+    def test_valid_log_level_debug(self) -> None:
+        """LoggingConfig should accept DEBUG level."""
+        config = LoggingConfig(level="DEBUG")
+        assert config.level == "DEBUG"
+
+    def test_valid_log_level_info(self) -> None:
+        """LoggingConfig should accept INFO level."""
+        config = LoggingConfig(level="INFO")
+        assert config.level == "INFO"
+
+    def test_valid_log_level_warning(self) -> None:
+        """LoggingConfig should accept WARNING level."""
+        config = LoggingConfig(level="WARNING")
+        assert config.level == "WARNING"
+
+    def test_valid_log_level_error(self) -> None:
+        """LoggingConfig should accept ERROR level."""
+        config = LoggingConfig(level="ERROR")
+        assert config.level == "ERROR"
+
+    def test_valid_log_level_critical(self) -> None:
+        """LoggingConfig should accept CRITICAL level."""
+        config = LoggingConfig(level="CRITICAL")
+        assert config.level == "CRITICAL"
+
+    def test_log_level_case_insensitive(self) -> None:
+        """LoggingConfig should normalize log level to uppercase."""
+        config = LoggingConfig(level="debug")
+        assert config.level == "DEBUG"
+
+        config = LoggingConfig(level="Info")
+        assert config.level == "INFO"
+
+    def test_invalid_log_level_raises_error(self) -> None:
+        """LoggingConfig should raise ConfigurationError for invalid log level."""
+        with pytest.raises(ConfigurationError, match="Invalid log level"):
+            LoggingConfig(level="INVALID")
+
+    def test_invalid_log_level_includes_valid_options_in_message(self) -> None:
+        """Error message should include valid log level options."""
+        with pytest.raises(ConfigurationError) as exc_info:
+            LoggingConfig(level="TRACE")
+        assert "DEBUG" in str(exc_info.value)
+        assert "INFO" in str(exc_info.value)
+        assert "WARNING" in str(exc_info.value)
+        assert "ERROR" in str(exc_info.value)
+        assert "CRITICAL" in str(exc_info.value)
+
+    def test_default_log_level_is_info(self) -> None:
+        """LoggingConfig default level should be INFO."""
+        config = LoggingConfig()
+        assert config.level == "INFO"
+
+
+class TestLoggingConfigFromToml:
+    """Tests for loading LoggingConfig from TOML file."""
+
+    def test_load_log_level_from_file(self, tmp_path: Path) -> None:
+        """Should load log level from TOML file."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[logging]
+level = "DEBUG"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            config = Config.load()
+
+        assert config.logging.level == "DEBUG"
+
+    def test_load_log_level_warning_from_file(self, tmp_path: Path) -> None:
+        """Should load WARNING log level from TOML file."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[logging]
+level = "WARNING"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            config = Config.load()
+
+        assert config.logging.level == "WARNING"
+
+    def test_empty_logging_section_uses_default(self, tmp_path: Path) -> None:
+        """Empty logging section should use default INFO level."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[logging]
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            config = Config.load()
+
+        assert config.logging.level == "INFO"
+
+    def test_missing_logging_section_uses_default(self, tmp_path: Path) -> None:
+        """Missing logging section should use default INFO level."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[radarr]
+url = "http://localhost:7878"
+api_key = "test-key"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            config = Config.load()
+
+        assert config.logging.level == "INFO"
+
+    def test_invalid_log_level_in_file_raises_error(self, tmp_path: Path) -> None:
+        """Invalid log level in TOML file should raise ConfigurationError."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[logging]
+level = "VERBOSE"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+            pytest.raises(ConfigurationError, match="Invalid log level"),
+        ):
+            Config.load()
+
+
+class TestLoggingConfigFromEnv:
+    """Tests for loading LoggingConfig from environment variables."""
+
+    def test_log_level_from_env(self, tmp_path: Path) -> None:
+        """Should load log level from FILTARR_LOG_LEVEL environment variable."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_LOG_LEVEL": "DEBUG"},
+                clear=True,
+            ),
+        ):
+            config = Config.load()
+
+        assert config.logging.level == "DEBUG"
+
+    def test_log_level_warning_from_env(self, tmp_path: Path) -> None:
+        """Should load WARNING level from FILTARR_LOG_LEVEL."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_LOG_LEVEL": "WARNING"},
+                clear=True,
+            ),
+        ):
+            config = Config.load()
+
+        assert config.logging.level == "WARNING"
+
+    def test_log_level_case_insensitive_from_env(self, tmp_path: Path) -> None:
+        """FILTARR_LOG_LEVEL should be case insensitive."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_LOG_LEVEL": "error"},
+                clear=True,
+            ),
+        ):
+            config = Config.load()
+
+        assert config.logging.level == "ERROR"
+
+    def test_invalid_log_level_from_env_raises_error(self, tmp_path: Path) -> None:
+        """Invalid log level from env should raise ConfigurationError."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_LOG_LEVEL": "TRACE"},
+                clear=True,
+            ),
+            pytest.raises(ConfigurationError, match="Invalid log level"),
+        ):
+            Config.load()
+
+
+class TestLoggingConfigEnvOverridesFile:
+    """Tests for environment variable overriding file config for logging."""
+
+    def test_env_log_level_overrides_file(self, tmp_path: Path) -> None:
+        """FILTARR_LOG_LEVEL should override logging.level from file."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[logging]
+level = "WARNING"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_LOG_LEVEL": "DEBUG"},
+                clear=True,
+            ),
+        ):
+            config = Config.load()
+
+        assert config.logging.level == "DEBUG"
+
+    def test_env_log_level_overrides_default_when_no_file(self, tmp_path: Path) -> None:
+        """FILTARR_LOG_LEVEL should override default when no file exists."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_LOG_LEVEL": "CRITICAL"},
+                clear=True,
+            ),
+        ):
+            config = Config.load()
+
+        assert config.logging.level == "CRITICAL"
+
+    def test_file_used_when_env_not_set(self, tmp_path: Path) -> None:
+        """File config should be used when env var is not set."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[logging]
+level = "ERROR"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            config = Config.load()
+
+        assert config.logging.level == "ERROR"

@@ -19,6 +19,7 @@ from filtarr.config import (
     ConfigurationError,
     RadarrConfig,
     SonarrConfig,
+    StateConfig,
     TagConfig,
     WebhookConfig,
 )
@@ -27,6 +28,7 @@ from filtarr.models.webhook import (
     SonarrWebhookPayload,
     WebhookResponse,
 )
+from filtarr.state import CheckRecord
 from tests.test_utils import CreateTaskMock
 
 
@@ -1025,6 +1027,471 @@ class TestImportErrors:
 
         assert "filtarr[webhook]" in str(exc_info.value)
         assert "uvicorn is required" in str(exc_info.value)
+
+
+class TestTTLCaching:
+    """Tests for TTL caching functionality in webhook processing."""
+
+    @pytest.mark.asyncio
+    async def test_movie_check_skips_when_ttl_cache_hit(
+        self, full_config: Config, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Should skip processing when movie was recently checked (TTL hit)."""
+        import logging
+
+        # Configure TTL to 24 hours
+        config = Config(
+            radarr=full_config.radarr,
+            sonarr=full_config.sonarr,
+            tags=full_config.tags,
+            state=StateConfig(ttl_hours=24),
+        )
+
+        # Create a mock state manager with cached result
+        mock_state_manager = MagicMock()
+        cached_record = CheckRecord(
+            last_checked=datetime.now(UTC),
+            result="available",
+            tag_applied="4k-available",
+        )
+        mock_state_manager.get_cached_result.return_value = cached_record
+
+        # Store original value to restore later
+        original_state_manager = filtarr.webhook._state_manager
+
+        try:
+            filtarr.webhook._state_manager = mock_state_manager
+
+            with caplog.at_level(logging.INFO):
+                await filtarr.webhook._process_movie_check(123, "Test Movie", config)
+
+            # Verify state manager was queried for cached result
+            mock_state_manager.get_cached_result.assert_called_once_with("movie", 123, 24)
+
+            # Verify log message about using cached result
+            assert any(
+                "Using cached result" in record.message and "Test Movie" in record.message
+                for record in caplog.records
+            )
+            assert any("result=available" in record.message for record in caplog.records)
+        finally:
+            filtarr.webhook._state_manager = original_state_manager
+
+    @pytest.mark.asyncio
+    async def test_movie_check_proceeds_when_ttl_cache_miss(self, full_config: Config) -> None:
+        """Should proceed with check when movie TTL cache misses."""
+        # Configure TTL to 24 hours
+        config = Config(
+            radarr=full_config.radarr,
+            sonarr=full_config.sonarr,
+            tags=full_config.tags,
+            state=StateConfig(ttl_hours=24),
+        )
+
+        # Create a mock state manager with no cached result
+        mock_state_manager = MagicMock()
+        mock_state_manager.get_cached_result.return_value = None
+
+        original_state_manager = filtarr.webhook._state_manager
+
+        try:
+            filtarr.webhook._state_manager = mock_state_manager
+
+            # Mock ReleaseChecker to avoid actual API calls
+            with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
+                mock_checker = MagicMock()
+                mock_result = MagicMock()
+                mock_result.has_match = True
+                mock_result.matched_releases = []
+                mock_result.releases = []
+                mock_result.tag_result = MagicMock()
+                mock_result.tag_result.tag_applied = "4k-available"
+                mock_checker.check_movie = AsyncMock(return_value=mock_result)
+                mock_checker_class.return_value = mock_checker
+
+                await filtarr.webhook._process_movie_check(123, "Test Movie", config)
+
+                # Verify ReleaseChecker was created and used
+                mock_checker_class.assert_called_once()
+                mock_checker.check_movie.assert_called_once_with(123, apply_tags=True)
+        finally:
+            filtarr.webhook._state_manager = original_state_manager
+
+    @pytest.mark.asyncio
+    async def test_movie_check_skips_ttl_when_disabled(self, full_config: Config) -> None:
+        """Should skip TTL check when ttl_hours is 0 (disabled)."""
+        # Configure TTL to 0 (disabled)
+        config = Config(
+            radarr=full_config.radarr,
+            sonarr=full_config.sonarr,
+            tags=full_config.tags,
+            state=StateConfig(ttl_hours=0),
+        )
+
+        mock_state_manager = MagicMock()
+
+        original_state_manager = filtarr.webhook._state_manager
+
+        try:
+            filtarr.webhook._state_manager = mock_state_manager
+
+            with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
+                mock_checker = MagicMock()
+                mock_result = MagicMock()
+                mock_result.has_match = False
+                mock_result.matched_releases = []
+                mock_result.releases = []
+                mock_result.tag_result = MagicMock()
+                mock_result.tag_result.tag_applied = None
+                mock_checker.check_movie = AsyncMock(return_value=mock_result)
+                mock_checker_class.return_value = mock_checker
+
+                await filtarr.webhook._process_movie_check(123, "Test Movie", config)
+
+                # TTL check should not be called when disabled
+                mock_state_manager.get_cached_result.assert_not_called()
+        finally:
+            filtarr.webhook._state_manager = original_state_manager
+
+    @pytest.mark.asyncio
+    async def test_series_check_skips_when_ttl_cache_hit(
+        self, full_config: Config, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Should skip processing when series was recently checked (TTL hit)."""
+        import logging
+
+        # Configure TTL to 24 hours
+        config = Config(
+            radarr=full_config.radarr,
+            sonarr=full_config.sonarr,
+            tags=full_config.tags,
+            state=StateConfig(ttl_hours=24),
+        )
+
+        # Create a mock state manager with cached result
+        mock_state_manager = MagicMock()
+        cached_record = CheckRecord(
+            last_checked=datetime.now(UTC),
+            result="unavailable",
+            tag_applied="4k-unavailable",
+        )
+        mock_state_manager.get_cached_result.return_value = cached_record
+
+        original_state_manager = filtarr.webhook._state_manager
+
+        try:
+            filtarr.webhook._state_manager = mock_state_manager
+
+            with caplog.at_level(logging.INFO):
+                await filtarr.webhook._process_series_check(456, "Breaking Bad", config)
+
+            # Verify state manager was queried for cached result
+            mock_state_manager.get_cached_result.assert_called_once_with("series", 456, 24)
+
+            # Verify log message about using cached result
+            assert any(
+                "Using cached result" in record.message and "Breaking Bad" in record.message
+                for record in caplog.records
+            )
+            assert any("result=unavailable" in record.message for record in caplog.records)
+        finally:
+            filtarr.webhook._state_manager = original_state_manager
+
+    @pytest.mark.asyncio
+    async def test_series_check_proceeds_when_ttl_cache_miss(self, full_config: Config) -> None:
+        """Should proceed with check when series TTL cache misses."""
+        # Configure TTL to 24 hours
+        config = Config(
+            radarr=full_config.radarr,
+            sonarr=full_config.sonarr,
+            tags=full_config.tags,
+            state=StateConfig(ttl_hours=24),
+        )
+
+        # Create a mock state manager with no cached result
+        mock_state_manager = MagicMock()
+        mock_state_manager.get_cached_result.return_value = None
+
+        original_state_manager = filtarr.webhook._state_manager
+
+        try:
+            filtarr.webhook._state_manager = mock_state_manager
+
+            # Mock ReleaseChecker to avoid actual API calls
+            with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
+                mock_checker = MagicMock()
+                mock_result = MagicMock()
+                mock_result.has_match = True
+                mock_result.matched_releases = []
+                mock_result.releases = []
+                mock_result.tag_result = MagicMock()
+                mock_result.tag_result.tag_applied = "4k-available"
+                mock_checker.check_series = AsyncMock(return_value=mock_result)
+                mock_checker_class.return_value = mock_checker
+
+                await filtarr.webhook._process_series_check(456, "Breaking Bad", config)
+
+                # Verify ReleaseChecker was created and used
+                mock_checker_class.assert_called_once()
+                mock_checker.check_series.assert_called_once_with(456, apply_tags=True)
+        finally:
+            filtarr.webhook._state_manager = original_state_manager
+
+    @pytest.mark.asyncio
+    async def test_series_check_skips_ttl_when_disabled(self, full_config: Config) -> None:
+        """Should skip TTL check when ttl_hours is 0 (disabled)."""
+        # Configure TTL to 0 (disabled)
+        config = Config(
+            radarr=full_config.radarr,
+            sonarr=full_config.sonarr,
+            tags=full_config.tags,
+            state=StateConfig(ttl_hours=0),
+        )
+
+        mock_state_manager = MagicMock()
+
+        original_state_manager = filtarr.webhook._state_manager
+
+        try:
+            filtarr.webhook._state_manager = mock_state_manager
+
+            with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
+                mock_checker = MagicMock()
+                mock_result = MagicMock()
+                mock_result.has_match = False
+                mock_result.matched_releases = []
+                mock_result.releases = []
+                mock_result.tag_result = MagicMock()
+                mock_result.tag_result.tag_applied = None
+                mock_checker.check_series = AsyncMock(return_value=mock_result)
+                mock_checker_class.return_value = mock_checker
+
+                await filtarr.webhook._process_series_check(456, "Breaking Bad", config)
+
+                # TTL check should not be called when disabled
+                mock_state_manager.get_cached_result.assert_not_called()
+        finally:
+            filtarr.webhook._state_manager = original_state_manager
+
+
+class TestStateRecording:
+    """Tests for state recording after successful checks."""
+
+    @pytest.mark.asyncio
+    async def test_movie_check_records_result_in_state(
+        self, full_config: Config, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Should record check result in state file after successful movie check."""
+        import logging
+
+        config = Config(
+            radarr=full_config.radarr,
+            sonarr=full_config.sonarr,
+            tags=full_config.tags,
+            state=StateConfig(ttl_hours=24),
+        )
+
+        mock_state_manager = MagicMock()
+        mock_state_manager.get_cached_result.return_value = None
+
+        original_state_manager = filtarr.webhook._state_manager
+
+        try:
+            filtarr.webhook._state_manager = mock_state_manager
+
+            with (
+                patch("filtarr.webhook.ReleaseChecker") as mock_checker_class,
+                caplog.at_level(logging.INFO),
+            ):
+                mock_checker = MagicMock()
+                mock_result = MagicMock()
+                mock_result.has_match = True
+                mock_result.matched_releases = [MagicMock()]
+                mock_result.releases = [MagicMock()]
+                mock_result.tag_result = MagicMock()
+                mock_result.tag_result.tag_applied = "4k-available"
+                mock_checker.check_movie = AsyncMock(return_value=mock_result)
+                mock_checker_class.return_value = mock_checker
+
+                await filtarr.webhook._process_movie_check(123, "Test Movie", config)
+
+                # Verify state was recorded
+                mock_state_manager.record_check.assert_called_once_with(
+                    "movie",
+                    123,
+                    True,
+                    "4k-available",
+                )
+
+                # Verify log message includes tag info
+                assert any(
+                    "Check complete" in record.message
+                    and "available" in record.message
+                    and "tag=4k-available" in record.message
+                    for record in caplog.records
+                )
+        finally:
+            filtarr.webhook._state_manager = original_state_manager
+
+    @pytest.mark.asyncio
+    async def test_series_check_records_result_in_state(
+        self, full_config: Config, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Should record check result in state file after successful series check."""
+        import logging
+
+        config = Config(
+            radarr=full_config.radarr,
+            sonarr=full_config.sonarr,
+            tags=full_config.tags,
+            state=StateConfig(ttl_hours=24),
+        )
+
+        mock_state_manager = MagicMock()
+        mock_state_manager.get_cached_result.return_value = None
+
+        original_state_manager = filtarr.webhook._state_manager
+
+        try:
+            filtarr.webhook._state_manager = mock_state_manager
+
+            with (
+                patch("filtarr.webhook.ReleaseChecker") as mock_checker_class,
+                caplog.at_level(logging.INFO),
+            ):
+                mock_checker = MagicMock()
+                mock_result = MagicMock()
+                mock_result.has_match = False
+                mock_result.matched_releases = []
+                mock_result.releases = [MagicMock(), MagicMock()]
+                mock_result.tag_result = MagicMock()
+                mock_result.tag_result.tag_applied = "4k-unavailable"
+                mock_checker.check_series = AsyncMock(return_value=mock_result)
+                mock_checker_class.return_value = mock_checker
+
+                await filtarr.webhook._process_series_check(456, "Breaking Bad", config)
+
+                # Verify state was recorded
+                mock_state_manager.record_check.assert_called_once_with(
+                    "series",
+                    456,
+                    False,
+                    "4k-unavailable",
+                )
+
+                # Verify log message includes tag info
+                assert any(
+                    "Check complete" in record.message
+                    and "unavailable" in record.message
+                    and "tag=4k-unavailable" in record.message
+                    for record in caplog.records
+                )
+        finally:
+            filtarr.webhook._state_manager = original_state_manager
+
+
+class TestStateManagerInitialization:
+    """Tests for state manager initialization in run_server."""
+
+    def test_state_manager_initialized_at_startup(
+        self, full_config: Config, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Should initialize state manager at server startup."""
+        import logging
+
+        import uvicorn
+
+        mock_state_manager = MagicMock()
+
+        original_state_manager = filtarr.webhook._state_manager
+
+        try:
+            with (
+                patch(
+                    "filtarr.state.StateManager", return_value=mock_state_manager
+                ) as mock_state_class,
+                patch.object(uvicorn, "run") as mock_uvicorn_run,
+                caplog.at_level(logging.INFO),
+            ):
+                filtarr.webhook.run_server(config=full_config, scheduler_enabled=False)
+
+                # Verify StateManager was created with correct path
+                mock_state_class.assert_called_once_with(full_config.state.path)
+
+                # Verify ensure_initialized was called
+                mock_state_manager.ensure_initialized.assert_called_once()
+
+                # Server should be started
+                mock_uvicorn_run.assert_called_once()
+
+                # Verify log message about state initialization
+                assert any("State file initialized" in record.message for record in caplog.records)
+        finally:
+            filtarr.webhook._state_manager = original_state_manager
+
+    def test_state_ttl_disabled_logging(
+        self, full_config: Config, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Should log 'TTL: disabled' when ttl_hours is 0."""
+        import logging
+
+        import uvicorn
+
+        # Configure TTL to 0 (disabled)
+        config = Config(
+            radarr=full_config.radarr,
+            sonarr=full_config.sonarr,
+            state=StateConfig(ttl_hours=0),
+        )
+
+        mock_state_manager = MagicMock()
+
+        original_state_manager = filtarr.webhook._state_manager
+
+        try:
+            with (
+                patch("filtarr.state.StateManager", return_value=mock_state_manager),
+                patch.object(uvicorn, "run"),
+                caplog.at_level(logging.INFO),
+            ):
+                filtarr.webhook.run_server(config=config, scheduler_enabled=False)
+
+                # Verify log message about TTL being disabled
+                assert any("State TTL: disabled" in record.message for record in caplog.records)
+        finally:
+            filtarr.webhook._state_manager = original_state_manager
+
+    def test_state_ttl_enabled_logging(
+        self, full_config: Config, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Should log TTL hours when ttl_hours is greater than 0."""
+        import logging
+
+        import uvicorn
+
+        # Configure TTL to 48 hours
+        config = Config(
+            radarr=full_config.radarr,
+            sonarr=full_config.sonarr,
+            state=StateConfig(ttl_hours=48),
+        )
+
+        mock_state_manager = MagicMock()
+
+        original_state_manager = filtarr.webhook._state_manager
+
+        try:
+            with (
+                patch("filtarr.state.StateManager", return_value=mock_state_manager),
+                patch.object(uvicorn, "run"),
+                caplog.at_level(logging.INFO),
+            ):
+                filtarr.webhook.run_server(config=config, scheduler_enabled=False)
+
+                # Verify log message about TTL hours
+                assert any("State TTL: 48 hours" in record.message for record in caplog.records)
+        finally:
+            filtarr.webhook._state_manager = original_state_manager
 
 
 class TestSchedulerLifecycle:
