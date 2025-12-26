@@ -55,5 +55,5 @@ repos:
         entry: scripts/test-docker.sh --pre-commit
         language: script
         pass_filenames: false
-        files: ^(Dockerfile|docker-compose\.yml|src/|pyproject\.toml|uv\.lock)
+        files: ^(Dockerfile|docker-compose\.yml|src/.*|pyproject\.toml|uv\.lock)$
         verbose: true

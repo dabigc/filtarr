@@ -26,7 +26,15 @@ set -euo pipefail
 DEFAULT_IMAGE_NAME="filtarr-test"
 IMAGE_NAME="$DEFAULT_IMAGE_NAME"
 readonly CONTAINER_NAME="filtarr-test-$$"
-readonly PORT=18080
+PORT="$(python3 - <<'PY'
+import socket
+
+with socket.socket() as s:
+    s.bind(("", 0))
+    print(s.getsockname()[1])
+PY
+)"
+readonly PORT
 readonly HEALTH_TIMEOUT=30
 readonly HEALTH_INTERVAL=1
 
@@ -93,6 +101,21 @@ check_docker() {
 }
 
 #######################################
+# Check if curl is available
+#######################################
+check_curl() {
+    if ! command -v curl &>/dev/null; then
+        log_error "curl command not found. Please install curl to run Docker tests."
+        if [[ "$PRE_COMMIT_MODE" == "true" ]]; then
+            exit 0
+        fi
+        exit 2
+    fi
+
+    log_info "curl is available"
+}
+
+#######################################
 # Build the Docker image
 #######################################
 build_image() {
@@ -114,17 +137,24 @@ start_container() {
     # - allow_insecure=true to bypass HTTPS requirement for mock URLs
     # - scheduler disabled to avoid unnecessary background tasks
     # The container will start but return errors for actual API calls
-    docker run -d \
-        --name "$CONTAINER_NAME" \
-        -p "$PORT:8080" \
-        -e FILTARR_RADARR_URL="http://mock-radarr:7878" \
-        -e FILTARR_RADARR_API_KEY="mock-radarr-key-for-testing" \
-        -e FILTARR_RADARR_ALLOW_INSECURE="true" \
-        -e FILTARR_SONARR_URL="http://mock-sonarr:8989" \
-        -e FILTARR_SONARR_API_KEY="mock-sonarr-key-for-testing" \
-        -e FILTARR_SONARR_ALLOW_INSECURE="true" \
-        -e FILTARR_SCHEDULER_ENABLED="false" \
-        "$IMAGE_NAME" >/dev/null
+    local docker_output
+    if ! docker_output="$(
+        docker run -d \
+            --name "$CONTAINER_NAME" \
+            -p "$PORT:8080" \
+            -e FILTARR_RADARR_URL="http://mock-radarr:7878" \
+            -e FILTARR_RADARR_API_KEY="mock-radarr-key-for-testing" \
+            -e FILTARR_RADARR_ALLOW_INSECURE="true" \
+            -e FILTARR_SONARR_URL="http://mock-sonarr:8989" \
+            -e FILTARR_SONARR_API_KEY="mock-sonarr-key-for-testing" \
+            -e FILTARR_SONARR_ALLOW_INSECURE="true" \
+            -e FILTARR_SCHEDULER_ENABLED="false" \
+            "$IMAGE_NAME" 2>&1
+    )"; then
+        log_error "Failed to start container:"
+        echo "$docker_output"
+        exit 1
+    fi
 
     CONTAINER_STARTED=true
     log_info "Container started"
@@ -268,11 +298,16 @@ main() {
     log_info "Starting Docker runtime tests for filtarr"
 
     check_docker
+    check_curl
 
-    if [[ "$skip_build" == "false" ]]; then
-        build_image
+    if [[ "$skip_build" == "true" ]]; then
+        if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
+            log_error "Image '$IMAGE_NAME' not found. Either build it first or specify an existing image with --image."
+            exit 1
+        fi
+        log_info "Using existing image: $IMAGE_NAME"
     else
-        log_info "Skipping build (using existing image)"
+        build_image
     fi
 
     start_container
