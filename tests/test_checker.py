@@ -682,7 +682,7 @@ class TestTagApplication:
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             radarr_url="http://localhost:7878",
             radarr_api_key="test",
@@ -741,7 +741,7 @@ class TestTagApplication:
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             radarr_url="http://localhost:7878",
             radarr_api_key="test",
@@ -797,7 +797,7 @@ class TestTagApplication:
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             radarr_url="http://localhost:7878",
             radarr_api_key="test",
@@ -838,7 +838,7 @@ class TestTagApplication:
         )
         # No tag mocks needed - dry run shouldn't call them
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             radarr_url="http://localhost:7878",
             radarr_api_key="test",
@@ -896,7 +896,7 @@ class TestTagApplication:
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             radarr_url="http://localhost:7878",
             radarr_api_key="test",
@@ -937,7 +937,7 @@ class TestTagApplication:
         )
         # No tag mocks needed - tagging is disabled
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             radarr_url="http://localhost:7878",
             radarr_api_key="test",
@@ -980,7 +980,7 @@ class TestTagApplication:
             return_value=Response(500, json={"error": "Server error"})
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             radarr_url="http://localhost:7878",
             radarr_api_key="test",
@@ -1033,7 +1033,7 @@ class TestTagApplication:
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             radarr_url="http://localhost:7878",
             radarr_api_key="test",
@@ -1134,7 +1134,7 @@ class TestTagApplicationExceptionHandling:
             side_effect=httpx.ConnectError("Connection refused")
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             radarr_url="http://localhost:7878",
             radarr_api_key="test",
@@ -1182,7 +1182,7 @@ class TestTagApplicationExceptionHandling:
             side_effect=httpx.TimeoutException("Request timed out")
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             radarr_url="http://localhost:7878",
             radarr_api_key="test",
@@ -1231,7 +1231,7 @@ class TestTagApplicationExceptionHandling:
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             radarr_url="http://localhost:7878",
             radarr_api_key="test",
@@ -1294,7 +1294,7 @@ class TestTagApplicationExceptionHandling:
             return_value=Response(500, json={"error": "Internal Server Error"})
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
@@ -1359,7 +1359,7 @@ class TestTagApplicationExceptionHandling:
             side_effect=httpx.ConnectError("Connection refused")
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
@@ -1424,7 +1424,7 @@ class TestTagApplicationExceptionHandling:
             side_effect=httpx.TimeoutException("Request timed out")
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
@@ -1490,7 +1490,7 @@ class TestTagApplicationExceptionHandling:
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
@@ -2047,7 +2047,7 @@ class TestCustomCallableMatcher:
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
@@ -2213,7 +2213,7 @@ class TestTagCaching:
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             radarr_url="http://localhost:7878",
             radarr_api_key="test",
@@ -2347,7 +2347,7 @@ class TestTagCaching:
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
@@ -2451,7 +2451,7 @@ class TestTagCaching:
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             radarr_url="http://localhost:7878",
             radarr_api_key="test",
@@ -2561,7 +2561,7 @@ class TestTagCaching:
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             radarr_url="http://localhost:7878",
             radarr_api_key="test",
@@ -2654,7 +2654,7 @@ class TestTagCaching:
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
             radarr_url="http://localhost:7878",
             radarr_api_key="test",
@@ -2678,18 +2678,18 @@ class TestTagCaching:
         """New ReleaseChecker instance should have empty cache."""
         checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
 
-        # Cache should be None on new instance
-        assert checker._tag_cache is None
+        # Cache should be None on new instance (managed by tagger)
+        assert checker._tagger._tag_cache is None
 
     def test_clear_tag_cache_method(self) -> None:
         """clear_tag_cache should reset cache to None."""
         checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
 
-        # Manually set some cache data
-        checker._tag_cache = {"radarr": []}
+        # Manually set some cache data (on the tagger)
+        checker._tagger._tag_cache = {"radarr": []}
 
         # Clear the cache
         checker.clear_tag_cache()
 
         # Cache should be None
-        assert checker._tag_cache is None
+        assert checker._tagger._tag_cache is None

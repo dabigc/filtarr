@@ -86,12 +86,12 @@ class TestReleaseCheckerContextManager:
             radarr_enter.return_value = None
 
             async with checker:
-                # Simulate that tag cache was populated
-                checker._tag_cache = {"radarr": []}
-                assert checker._tag_cache is not None
+                # Simulate that tag cache was populated (on the tagger)
+                checker._tagger._tag_cache = {"radarr": []}
+                assert checker._tagger._tag_cache is not None
 
             # Tag cache should be cleared after exiting
-            assert checker._tag_cache is None
+            assert checker._tagger._tag_cache is None
 
     @pytest.mark.asyncio
     async def test_context_manager_returns_self(self) -> None:
