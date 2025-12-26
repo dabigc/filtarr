@@ -25,6 +25,38 @@ import logging
 import re
 from typing import ClassVar
 
+# Map of string log level names to logging constants
+LOG_LEVEL_MAP: dict[str, int] = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
+}
+
+
+def parse_log_level(level: str | int) -> int:
+    """Convert a log level string or int to a logging level constant.
+
+    Args:
+        level: Log level as string (e.g., "DEBUG", "INFO") or int.
+
+    Returns:
+        The logging level constant (e.g., logging.DEBUG).
+
+    Raises:
+        ValueError: If the string level is not recognized.
+    """
+    if isinstance(level, int):
+        return level
+
+    level_upper = level.upper()
+    if level_upper not in LOG_LEVEL_MAP:
+        valid_levels = ", ".join(sorted(LOG_LEVEL_MAP.keys()))
+        raise ValueError(f"Invalid log level: {level}. Valid options: {valid_levels}")
+
+    return LOG_LEVEL_MAP[level_upper]
+
 
 class SensitiveDataFilter(logging.Filter):
     """Filter that redacts sensitive data from log messages.
@@ -84,7 +116,7 @@ class SensitiveDataFilter(logging.Filter):
 
 
 def configure_logging(
-    level: int = logging.INFO,
+    level: str | int = logging.INFO,
     format_string: str | None = None,
 ) -> None:
     """Configure logging with sensitive data filtering.
@@ -93,7 +125,8 @@ def configure_logging(
     filters out sensitive information like API keys.
 
     Args:
-        level: The logging level to use. Defaults to INFO.
+        level: The logging level to use. Can be a string (e.g., "DEBUG", "INFO")
+            or an int (e.g., logging.DEBUG). Defaults to INFO.
         format_string: Optional custom format string for log messages.
             Defaults to "%(asctime)s - %(name)s - %(levelname)s - %(message)s".
 
@@ -101,20 +134,24 @@ def configure_logging(
     -------
     >>> from filtarr.logging import configure_logging
     >>> configure_logging(level=logging.DEBUG)
+    >>> configure_logging(level="DEBUG")  # Also works with strings
     >>> # Now all log messages will have credentials filtered
     """
+    # Convert string level to int if needed
+    log_level = parse_log_level(level)
+
     if format_string is None:
         format_string = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
     # Create a handler with the filter
     handler = logging.StreamHandler()
-    handler.setLevel(level)
+    handler.setLevel(log_level)
     handler.setFormatter(logging.Formatter(format_string))
     handler.addFilter(SensitiveDataFilter())
 
     # Configure root logger
     root_logger = logging.getLogger()
-    root_logger.setLevel(level)
+    root_logger.setLevel(log_level)
     root_logger.addHandler(handler)
 
 

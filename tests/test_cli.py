@@ -20,6 +20,9 @@ def _create_mock_state_manager() -> MagicMock:
     mock = MagicMock()
     mock.record_check = MagicMock()
     mock.get_stale_unavailable_items = MagicMock(return_value=[])
+    # TTL-related methods (Task 5)
+    mock.is_recently_checked = MagicMock(return_value=False)
+    mock.get_cached_result = MagicMock(return_value=None)
     return mock
 
 

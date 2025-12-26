@@ -1104,7 +1104,8 @@ class TestSchedulerLifecycle:
             fromlist: tuple[str, ...] = (),
             level: int = 0,
         ) -> object:
-            if name == "filtarr.scheduler" or name == "filtarr.state":
+            # Only block scheduler imports - state is a core dependency
+            if name == "filtarr.scheduler":
                 raise ImportError(f"No module named '{name}'")
             return original_import(name, globals_, locals_, fromlist, level)
 

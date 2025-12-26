@@ -231,9 +231,40 @@ def _default_state_path() -> Path:
 
 @dataclass
 class StateConfig:
-    """Configuration for state persistence."""
+    """Configuration for state persistence.
+
+    Attributes:
+        path: Path to the state file
+        ttl_hours: Hours before rechecking an item (0 to disable TTL caching)
+    """
 
     path: Path = field(default_factory=_default_state_path)
+    ttl_hours: int = 24
+
+
+# Valid log level names (case-insensitive)
+VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
+
+
+@dataclass
+class LoggingConfig:
+    """Configuration for logging.
+
+    Attributes:
+        level: Log level name (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+            Default is INFO.
+    """
+
+    level: str = "INFO"
+
+    def __post_init__(self) -> None:
+        """Validate log level after initialization."""
+        self.level = self.level.upper()
+        if self.level not in VALID_LOG_LEVELS:
+            raise ConfigurationError(
+                f"Invalid log level: {self.level}. "
+                f"Valid options: {', '.join(sorted(VALID_LOG_LEVELS))}"
+            )
 
 
 @dataclass
@@ -414,9 +445,13 @@ def _parse_state_from_dict(data: dict[str, Any]) -> StateConfig:
     Returns:
         StateConfig instance
     """
-    if "state" not in data or "path" not in data["state"]:
+    if "state" not in data:
         return StateConfig()
-    return StateConfig(path=Path(data["state"]["path"]).expanduser())
+    state_data = data["state"]
+    defaults = StateConfig()
+    path = Path(state_data["path"]).expanduser() if "path" in state_data else defaults.path
+    ttl_hours = state_data.get("ttl_hours", defaults.ttl_hours)
+    return StateConfig(path=path, ttl_hours=ttl_hours)
 
 
 def _parse_state_from_env(base: StateConfig) -> StateConfig:
@@ -429,9 +464,14 @@ def _parse_state_from_env(base: StateConfig) -> StateConfig:
         StateConfig instance with environment overrides
     """
     state_path = os.environ.get("FILTARR_STATE_PATH")
-    if not state_path:
+    ttl_hours_str = os.environ.get("FILTARR_STATE_TTL_HOURS")
+
+    if not state_path and not ttl_hours_str:
         return base
-    return StateConfig(path=Path(state_path).expanduser())
+
+    path = Path(state_path).expanduser() if state_path else base.path
+    ttl_hours = int(ttl_hours_str) if ttl_hours_str else base.ttl_hours
+    return StateConfig(path=path, ttl_hours=ttl_hours)
 
 
 def _parse_webhook_from_dict(data: dict[str, Any]) -> WebhookConfig:
@@ -514,6 +554,40 @@ def _parse_scheduler_from_env(base: SchedulerConfig) -> SchedulerConfig:
     )
 
 
+def _parse_logging_from_dict(data: dict[str, Any]) -> LoggingConfig:
+    """Parse LoggingConfig from a config dictionary.
+
+    Args:
+        data: The full config dictionary
+
+    Returns:
+        LoggingConfig instance
+    """
+    if "logging" not in data:
+        return LoggingConfig()
+    logging_data = data["logging"]
+    defaults = LoggingConfig()
+    return LoggingConfig(
+        level=logging_data.get("level", defaults.level),
+    )
+
+
+def _parse_logging_from_env(base: LoggingConfig) -> LoggingConfig:
+    """Parse LoggingConfig from environment variables.
+
+    Args:
+        base: Base LoggingConfig to use for defaults
+
+    Returns:
+        LoggingConfig instance with environment overrides
+    """
+    log_level = os.environ.get("FILTARR_LOG_LEVEL")
+    if log_level is None:
+        return base
+
+    return LoggingConfig(level=log_level)
+
+
 @dataclass
 class Config:
     """Application configuration."""
@@ -523,6 +597,7 @@ class Config:
     timeout: float = DEFAULT_TIMEOUT
     tags: TagConfig = field(default_factory=TagConfig)
     state: StateConfig = field(default_factory=StateConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
     webhook: WebhookConfig = field(default_factory=WebhookConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
 
@@ -540,6 +615,7 @@ class Config:
         - FILTARR_SONARR_URL
         - FILTARR_SONARR_API_KEY
         - FILTARR_TIMEOUT (request timeout in seconds)
+        - FILTARR_LOG_LEVEL (logging level)
 
         Returns:
             Config instance with loaded values
@@ -587,6 +663,7 @@ class Config:
             timeout=timeout,
             tags=_parse_tags_from_dict(data, TagConfig()),
             state=_parse_state_from_dict(data),
+            logging=_parse_logging_from_dict(data),
             webhook=_parse_webhook_from_dict(data),
             scheduler=_parse_scheduler_from_dict(data),
         )
@@ -634,6 +711,7 @@ class Config:
             timeout=timeout,
             tags=_parse_tags_from_env(base.tags),
             state=_parse_state_from_env(base.state),
+            logging=_parse_logging_from_env(base.logging),
             webhook=_parse_webhook_from_env(base.webhook),
             scheduler=_parse_scheduler_from_env(base.scheduler),
         )

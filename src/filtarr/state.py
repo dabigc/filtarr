@@ -350,6 +350,63 @@ class StateManager:
         state = self.load()
         return state.get_check(item_type, item_id)
 
+    def is_recently_checked(
+        self, item_type: Literal["movie", "series"], item_id: int, ttl_hours: int
+    ) -> bool:
+        """Check if an item was checked within the TTL period.
+
+        Args:
+            item_type: "movie" or "series"
+            item_id: The item ID
+            ttl_hours: TTL in hours (0 means TTL is disabled, always returns False)
+
+        Returns:
+            True if item was checked within TTL, False otherwise
+        """
+        if ttl_hours <= 0:
+            return False
+
+        record = self.get_check(item_type, item_id)
+        if record is None:
+            return False
+
+        # Calculate elapsed time since last check
+        now = datetime.now(UTC)
+        # Handle timezone-naive datetimes (backwards compatibility)
+        last_checked = record.last_checked
+        if last_checked.tzinfo is None:
+            last_checked = last_checked.replace(tzinfo=UTC)
+
+        elapsed = now - last_checked
+        return elapsed.total_seconds() < (ttl_hours * 3600)
+
+    def get_cached_result(
+        self, item_type: Literal["movie", "series"], item_id: int, ttl_hours: int
+    ) -> CheckRecord | None:
+        """Get cached result if within TTL period.
+
+        Args:
+            item_type: "movie" or "series"
+            item_id: The item ID
+            ttl_hours: TTL in hours (0 means TTL is disabled, always returns None)
+
+        Returns:
+            CheckRecord if within TTL, None otherwise
+        """
+        if not self.is_recently_checked(item_type, item_id, ttl_hours):
+            return None
+        return self.get_check(item_type, item_id)
+
+    def ensure_initialized(self) -> None:
+        """Ensure the state file exists, creating it if necessary.
+
+        This method loads the state (creating an empty one if needed)
+        and saves it to ensure the state file exists on disk.
+        """
+        self.load()
+        self.save()
+        logger.info("State file initialized at: %s", self.path)
+
     def start_batch(
         self,
         batch_id: str,
