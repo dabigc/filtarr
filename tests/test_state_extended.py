@@ -273,7 +273,7 @@ class TestStateManagerEdgeCases:
             manager.add_schedule_run(
                 {
                     "schedule_name": f"schedule_{i}",
-                    "started_at": f"2024-01-0{i+1}T12:00:00Z",
+                    "started_at": f"2024-01-0{i + 1}T12:00:00Z",
                 }
             )
 
@@ -293,7 +293,7 @@ class TestStateManagerEdgeCases:
             manager.add_schedule_run(
                 {
                     "schedule_name": f"schedule_{i}",
-                    "started_at": f"2024-01-0{i+1}T12:00:00Z",
+                    "started_at": f"2024-01-0{i + 1}T12:00:00Z",
                 }
             )
 
@@ -312,7 +312,7 @@ class TestStateManagerEdgeCases:
             manager.add_schedule_run(
                 {
                     "schedule_name": f"schedule_{i}",
-                    "started_at": f"2024-01-0{i+1}T12:00:00Z",
+                    "started_at": f"2024-01-0{i + 1}T12:00:00Z",
                 }
             )
 
