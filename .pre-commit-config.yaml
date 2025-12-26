@@ -44,3 +44,16 @@ repos:
         args: ['--maxkb=500']
       - id: check-merge-conflict
       - id: debug-statements
+
+  # Docker runtime tests
+  # Tests that the container builds and starts correctly
+  # Skips gracefully if Docker is not available
+  - repo: local
+    hooks:
+      - id: docker-test
+        name: Docker Runtime Tests
+        entry: scripts/test-docker.sh --pre-commit
+        language: script
+        pass_filenames: false
+        files: ^(Dockerfile|docker-compose\.yml|src/|pyproject\.toml|uv\.lock)
+        verbose: true
