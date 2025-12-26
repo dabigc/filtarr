@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
@@ -25,6 +26,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 runner = CliRunner()
+
+
+def _strip_ansi(text: str) -> str:
+    """Strip ANSI escape codes from text."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
 def _create_mock_config() -> Config:
@@ -880,41 +886,46 @@ class TestScheduleHelpOutput:
     def test_schedule_list_help(self) -> None:
         """Should show schedule list help."""
         result = runner.invoke(app, ["schedule", "list", "--help"])
+        output = _strip_ansi(result.output)
         assert result.exit_code == 0
-        assert "--enabled-only" in result.output
-        assert "--format" in result.output
+        assert "--enabled-only" in output
+        assert "--format" in output
 
     def test_schedule_add_help(self) -> None:
         """Should show schedule add help."""
         result = runner.invoke(app, ["schedule", "add", "--help"])
+        output = _strip_ansi(result.output)
         assert result.exit_code == 0
-        assert "--target" in result.output
-        assert "--cron" in result.output
-        assert "--interval" in result.output
-        assert "--batch-size" in result.output
+        assert "--target" in output
+        assert "--cron" in output
+        assert "--interval" in output
+        assert "--batch-size" in output
 
     def test_schedule_run_help(self) -> None:
         """Should show schedule run help."""
         result = runner.invoke(app, ["schedule", "run", "--help"])
+        output = _strip_ansi(result.output)
         assert result.exit_code == 0
-        assert "NAME" in result.output
+        assert "NAME" in output
 
     def test_schedule_history_help(self) -> None:
         """Should show schedule history help."""
         result = runner.invoke(app, ["schedule", "history", "--help"])
+        output = _strip_ansi(result.output)
         assert result.exit_code == 0
-        assert "--name" in result.output
-        assert "--limit" in result.output
-        assert "--format" in result.output
+        assert "--name" in output
+        assert "--limit" in output
+        assert "--format" in output
 
     def test_schedule_export_help(self) -> None:
         """Should show schedule export help."""
         result = runner.invoke(app, ["schedule", "export", "--help"])
+        output = _strip_ansi(result.output)
         assert result.exit_code == 0
-        assert "--format" in result.output
-        assert "--output" in result.output
-        assert "cron" in result.output
-        assert "systemd" in result.output
+        assert "--format" in output
+        assert "--output" in output
+        assert "cron" in output
+        assert "systemd" in output
 
 
 class TestGetSchedulerManager:
