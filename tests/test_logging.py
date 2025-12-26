@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import pytest
+import pytest
 
 from filtarr.logging import (
     SensitiveDataFilter,
     add_filter_to_existing_handlers,
     configure_logging,
+    parse_log_level,
 )
 
 
@@ -260,6 +259,77 @@ class TestSensitiveDataFilter:
         assert "key2" not in record.msg
         # Both should be replaced
         assert record.msg.count("api_key=***") == 2
+
+
+class TestParseLogLevel:
+    """Tests for parse_log_level function."""
+
+    @pytest.mark.parametrize(
+        ("level_string", "expected"),
+        [
+            ("DEBUG", logging.DEBUG),
+            ("INFO", logging.INFO),
+            ("WARNING", logging.WARNING),
+            ("ERROR", logging.ERROR),
+            ("CRITICAL", logging.CRITICAL),
+        ],
+    )
+    def test_parse_valid_uppercase_levels(self, level_string: str, expected: int) -> None:
+        """Should parse valid uppercase level strings."""
+        assert parse_log_level(level_string) == expected
+
+    @pytest.mark.parametrize(
+        ("level_string", "expected"),
+        [
+            ("debug", logging.DEBUG),
+            ("info", logging.INFO),
+            ("warning", logging.WARNING),
+            ("error", logging.ERROR),
+            ("critical", logging.CRITICAL),
+        ],
+    )
+    def test_parse_valid_lowercase_levels(self, level_string: str, expected: int) -> None:
+        """Should parse valid lowercase level strings."""
+        assert parse_log_level(level_string) == expected
+
+    @pytest.mark.parametrize(
+        ("level_string", "expected"),
+        [
+            ("Debug", logging.DEBUG),
+            ("Info", logging.INFO),
+            ("Warning", logging.WARNING),
+            ("ErRoR", logging.ERROR),
+            ("CrItIcAl", logging.CRITICAL),
+        ],
+    )
+    def test_parse_valid_mixedcase_levels(self, level_string: str, expected: int) -> None:
+        """Should parse valid mixed case level strings."""
+        assert parse_log_level(level_string) == expected
+
+    def test_parse_invalid_level_raises_value_error(self) -> None:
+        """Should raise ValueError for invalid level string."""
+        with pytest.raises(ValueError, match="Invalid log level: INVALID"):
+            parse_log_level("INVALID")
+
+    def test_parse_invalid_level_includes_valid_options_in_message(self) -> None:
+        """Error message should list valid options."""
+        with pytest.raises(ValueError, match=r"Valid options:.*DEBUG.*INFO.*WARNING"):
+            parse_log_level("NOTVALID")
+
+    @pytest.mark.parametrize(
+        "level_int",
+        [
+            logging.DEBUG,
+            logging.INFO,
+            logging.WARNING,
+            logging.ERROR,
+            logging.CRITICAL,
+            42,  # Arbitrary integer should pass through unchanged
+        ],
+    )
+    def test_parse_integer_levels_pass_through(self, level_int: int) -> None:
+        """Should pass through integer levels unchanged."""
+        assert parse_log_level(level_int) == level_int
 
 
 class TestConfigureLogging:

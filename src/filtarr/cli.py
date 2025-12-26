@@ -6,6 +6,7 @@ import asyncio
 import json
 import uuid
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path  # noqa: TC003 - needed at runtime for typer
 from typing import TYPE_CHECKING, Annotated, Literal
@@ -15,12 +16,13 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, TimeRemainingColumn
 from rich.table import Table
 
+from filtarr import __version__
 from filtarr.checker import ReleaseChecker, SamplingStrategy, SearchResult
 from filtarr.clients.radarr import RadarrClient
 from filtarr.clients.sonarr import SonarrClient
-from filtarr.config import Config, ConfigurationError
+from filtarr.config import VALID_LOG_LEVELS, Config, ConfigurationError
 from filtarr.criteria import MOVIE_ONLY_CRITERIA, SearchCriteria
-from filtarr.state import BatchProgress, StateManager
+from filtarr.state import BatchProgress, CheckRecord, StateManager
 
 # Map CLI criteria names to SearchCriteria enum values
 CRITERIA_MAP: dict[str, SearchCriteria] = {
@@ -223,6 +225,51 @@ def display_series_choices(matches: list[tuple[int, str, int]]) -> None:
     error_console.print("\n[yellow]Please use the numeric ID to select a specific series.[/yellow]")
 
 
+def _format_cached_time(cached: CheckRecord) -> str:
+    """Format the cached check time for display."""
+    # Handle timezone-naive datetimes
+    last_checked = cached.last_checked
+    if last_checked.tzinfo is None:
+        last_checked = last_checked.replace(tzinfo=UTC)
+
+    now = datetime.now(UTC)
+    elapsed = now - last_checked
+    total_seconds = elapsed.total_seconds()
+
+    if total_seconds < 3600:
+        minutes = int(total_seconds / 60)
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    elif total_seconds < 86400:
+        hours = int(total_seconds / 3600)
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    else:
+        days = int(total_seconds / 86400)
+        return f"{days} day{'s' if days != 1 else ''} ago"
+
+
+def _print_cached_result(
+    item_type: str, item_id: int, cached: CheckRecord, output_format: OutputFormat
+) -> None:
+    """Print cached result message."""
+    result_status = "available" if cached.result == "available" else "unavailable"
+    time_ago = _format_cached_time(cached)
+
+    if output_format == OutputFormat.JSON:
+        data = {
+            "item_id": item_id,
+            "item_type": item_type,
+            "has_match": cached.result == "available",
+            "cached": True,
+            "cached_at": cached.last_checked.isoformat(),
+            "tag_applied": cached.tag_applied,
+        }
+        console.print(json.dumps(data, indent=2))
+    else:
+        console.print(f"[dim]Using cached result from {time_ago}: {result_status}[/dim]")
+        if cached.tag_applied:
+            console.print(f"[dim]Tag: {cached.tag_applied}[/dim]")
+
+
 @check_app.command("movie")
 def check_movie(
     movie: Annotated[str, typer.Argument(help="Movie ID or name to check")],
@@ -242,11 +289,18 @@ def check_movie(
         bool,
         typer.Option("--dry-run", help="Show what tags would be applied without applying them"),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Bypass TTL cache and force a fresh check"),
+    ] = False,
 ) -> None:
     """Check if a movie has releases matching criteria.
 
     You can specify either a numeric Radarr movie ID or a movie name.
     If a name matches multiple movies, you'll be shown the options.
+
+    By default, recently checked items (within TTL period) will use cached
+    results. Use --force to bypass the cache and perform a fresh check.
 
     Criteria options:
       4k             - 4K/2160p resolution
@@ -263,6 +317,7 @@ def check_movie(
         filtarr check movie "The Matrix" --criteria directors-cut
         filtarr check movie 123 --criteria imax --no-tag
         filtarr check movie 123 --dry-run
+        filtarr check movie 123 --force
     """
     try:
         # Validate criteria
@@ -276,20 +331,15 @@ def check_movie(
         search_criteria = CRITERIA_MAP[criteria_lower]
 
         config = Config.load()
-        checker = get_checker(config, need_radarr=True)
         state_manager = get_state_manager(config)
 
-        apply_tags = not no_tag
-
-        # Check if argument is numeric (ID) or name
+        # Resolve movie ID if a name was provided
+        movie_id: int
         if movie.isdigit():
-            result = asyncio.run(
-                checker.check_movie(
-                    int(movie), criteria=search_criteria, apply_tags=apply_tags, dry_run=dry_run
-                )
-            )
+            movie_id = int(movie)
         else:
-            # Search by name
+            # Search by name first to get the ID
+            checker = get_checker(config, need_radarr=True)
             matches = asyncio.run(checker.search_movies(movie))
             if not matches:
                 error_console.print(f"[red]Movie not found:[/red] {movie}")
@@ -297,15 +347,26 @@ def check_movie(
             if len(matches) > 1:
                 display_movie_choices(matches)
                 raise typer.Exit(2)
-            # Single match - use it
             movie_id = matches[0][0]
             movie_title = matches[0][1]
             console.print(f"[dim]Found: {movie_title}[/dim]")
-            result = asyncio.run(
-                checker.check_movie(
-                    movie_id, criteria=search_criteria, apply_tags=apply_tags, dry_run=dry_run
-                )
+
+        # Check TTL cache unless force is specified
+        if not force and not dry_run:
+            cached = state_manager.get_cached_result("movie", movie_id, config.state.ttl_hours)
+            if cached is not None:
+                _print_cached_result("movie", movie_id, cached, output_format)
+                raise typer.Exit(0 if cached.result == "available" else 1)
+
+        # Perform the actual check
+        checker = get_checker(config, need_radarr=True)
+        apply_tags = not no_tag
+
+        result = asyncio.run(
+            checker.check_movie(
+                movie_id, criteria=search_criteria, apply_tags=apply_tags, dry_run=dry_run
             )
+        )
 
         # Record check in state file (unless dry run)
         if not dry_run and apply_tags and result.tag_result:
@@ -354,11 +415,18 @@ def check_series_cmd(
         bool,
         typer.Option("--dry-run", help="Show what tags would be applied without applying them"),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Bypass TTL cache and force a fresh check"),
+    ] = False,
 ) -> None:
     """Check if a TV series has releases matching criteria.
 
     You can specify either a numeric Sonarr series ID or a series name.
     If a name matches multiple series, you'll be shown the options.
+
+    By default, recently checked items (within TTL period) will use cached
+    results. Use --force to bypass the cache and perform a fresh check.
 
     Note: Movie-only criteria (directors-cut, extended, remaster, imax,
     special-edition) cannot be used for TV series.
@@ -368,6 +436,7 @@ def check_series_cmd(
         filtarr check series "Breaking Bad" --criteria hdr
         filtarr check series 456 --no-tag
         filtarr check series 456 --dry-run
+        filtarr check series 456 --force
     """
     try:
         # Validate criteria
@@ -403,25 +472,15 @@ def check_series_cmd(
         sampling_strategy = strategy_map[strategy.lower()]
 
         config = Config.load()
-        checker = get_checker(config, need_sonarr=True)
         state_manager = get_state_manager(config)
 
-        apply_tags = not no_tag
-
-        # Check if argument is numeric (ID) or name
+        # Resolve series ID if a name was provided
+        series_id: int
         if series.isdigit():
-            result = asyncio.run(
-                checker.check_series(
-                    int(series),
-                    criteria=search_criteria,
-                    strategy=sampling_strategy,
-                    seasons_to_check=seasons,
-                    apply_tags=apply_tags,
-                    dry_run=dry_run,
-                )
-            )
+            series_id = int(series)
         else:
-            # Search by name
+            # Search by name first to get the ID
+            checker = get_checker(config, need_sonarr=True)
             matches = asyncio.run(checker.search_series(series))
             if not matches:
                 error_console.print(f"[red]Series not found:[/red] {series}")
@@ -429,20 +488,31 @@ def check_series_cmd(
             if len(matches) > 1:
                 display_series_choices(matches)
                 raise typer.Exit(2)
-            # Single match - use it
             series_id = matches[0][0]
             series_title = matches[0][1]
             console.print(f"[dim]Found: {series_title}[/dim]")
-            result = asyncio.run(
-                checker.check_series(
-                    series_id,
-                    criteria=search_criteria,
-                    strategy=sampling_strategy,
-                    seasons_to_check=seasons,
-                    apply_tags=apply_tags,
-                    dry_run=dry_run,
-                )
+
+        # Check TTL cache unless force is specified
+        if not force and not dry_run:
+            cached = state_manager.get_cached_result("series", series_id, config.state.ttl_hours)
+            if cached is not None:
+                _print_cached_result("series", series_id, cached, output_format)
+                raise typer.Exit(0 if cached.result == "available" else 1)
+
+        # Perform the actual check
+        checker = get_checker(config, need_sonarr=True)
+        apply_tags = not no_tag
+
+        result = asyncio.run(
+            checker.check_series(
+                series_id,
+                criteria=search_criteria,
+                strategy=sampling_strategy,
+                seasons_to_check=seasons,
+                apply_tags=apply_tags,
+                dry_run=dry_run,
             )
+        )
 
         # Record check in state file (unless dry run)
         if not dry_run and apply_tags and result.tag_result:
@@ -455,11 +525,11 @@ def check_series_cmd(
 
         print_result(result, output_format)
         raise typer.Exit(0 if result.has_match else 1)
+    except typer.Exit:
+        raise
     except ConfigurationError as e:
         error_console.print(f"[red]Configuration error:[/red] {e}")
         raise typer.Exit(2) from e
-    except typer.Exit:
-        raise
     except Exception as e:
         error_console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(2) from e
@@ -1597,13 +1667,13 @@ def serve(
         ),
     ] = None,
     log_level: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--log-level",
             "-l",
-            help="Logging level (debug, info, warning, error).",
+            help="Logging level (debug, info, warning, error). Overrides config/env.",
         ),
-    ] = "info",
+    ] = None,
     scheduler: Annotated[
         bool,
         typer.Option(
@@ -1649,9 +1719,23 @@ def serve(
     server_port = port or config.webhook.port
     scheduler_enabled = scheduler and config.scheduler.enabled
 
-    console.print("[bold green]Starting filtarr server[/bold green]")
+    # Validate CLI log level if provided
+    if log_level and log_level.upper() not in VALID_LOG_LEVELS:
+        error_console.print(
+            f"[red]Invalid log level: {log_level}[/red]\n"
+            f"Valid options: {', '.join(sorted(VALID_LOG_LEVELS))}"
+        )
+        raise typer.Exit(1)
+
+    # Priority: CLI flag > config (which includes env var > config file > default)
+    effective_log_level = log_level or config.logging.level
+
+    console.print(
+        f"[bold green]filtarr v{__version__} - Starting webhook server on {server_host}:{server_port}[/bold green]"
+    )
     console.print(f"  Host: {server_host}")
     console.print(f"  Port: {server_port}")
+    console.print(f"  Log level: {effective_log_level.upper()}")
     console.print(f"  Radarr configured: {'Yes' if config.radarr else 'No'}")
     console.print(f"  Sonarr configured: {'Yes' if config.sonarr else 'No'}")
     console.print(f"  Scheduler: {'Enabled' if scheduler_enabled else 'Disabled'}")
@@ -1678,7 +1762,7 @@ def serve(
         host=server_host,
         port=server_port,
         config=config,
-        log_level=log_level,
+        log_level=effective_log_level,
         scheduler_enabled=scheduler_enabled,
     )
 

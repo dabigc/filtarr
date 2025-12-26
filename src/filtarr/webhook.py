@@ -20,11 +20,14 @@ from filtarr.models.webhook import (
 
 if TYPE_CHECKING:
     from filtarr.scheduler import SchedulerManager
+    from filtarr.state import StateManager
 
 logger = logging.getLogger(__name__)
 
 # Global reference to scheduler manager for status endpoint
 _scheduler_manager: SchedulerManager | None = None
+# Global reference to state manager for TTL checks
+_state_manager: StateManager | None = None
 
 
 def _validate_api_key(api_key: str | None, config: Config) -> str | None:
@@ -53,10 +56,21 @@ def _validate_api_key(api_key: str | None, config: Config) -> str | None:
 
 async def _process_movie_check(movie_id: int, movie_title: str, config: Config) -> None:
     """Background task to check 4K availability for a movie."""
-    logger.info(f"Processing 4K check for movie: {movie_title} (id={movie_id})")
+    logger.debug(f"[{movie_title}] Starting availability check (id={movie_id})...")
 
     try:
+        # Check TTL cache first
+        if _state_manager is not None and config.state.ttl_hours > 0:
+            cached = _state_manager.get_cached_result("movie", movie_id, config.state.ttl_hours)
+            if cached is not None:
+                logger.info(
+                    f"[{movie_title}] Using cached result: "
+                    f"result={cached.result}, checked={cached.last_checked.isoformat()}"
+                )
+                return
+
         radarr_config = config.require_radarr()
+        logger.debug(f"[{movie_title}] Checking releases against criteria: 4K")
         checker = ReleaseChecker(
             radarr_url=radarr_config.url,
             radarr_api_key=radarr_config.api_key,
@@ -65,10 +79,27 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
         )
 
         result = await checker.check_movie(movie_id, apply_tags=True)
-        logger.info(
-            f"4K check complete for '{movie_title}': "
-            f"has_match={result.has_match}, releases={len(result.releases)}"
+        matching_count = len(result.matched_releases)
+        logger.debug(
+            f"[{movie_title}] Found {matching_count} matching releases out of {len(result.releases)} total"
         )
+
+        # Build completion message with tag info if available
+        tag_info = ""
+        if result.tag_result and result.tag_result.tag_applied:
+            tag_info = f", tag={result.tag_result.tag_applied}"
+        logger.info(
+            f"[{movie_title}] Check complete - result={'available' if result.has_match else 'unavailable'}{tag_info}"
+        )
+
+        # Record result in state file (even if no tag was applied)
+        if _state_manager is not None:
+            _state_manager.record_check(
+                "movie",
+                movie_id,
+                result.has_match,
+                result.tag_result.tag_applied if result.tag_result else None,
+            )
     except ConfigurationError as e:
         logger.error(f"Configuration error checking movie {movie_id} ({movie_title}): {e}")
     except httpx.HTTPStatusError as e:
@@ -87,10 +118,21 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
 
 async def _process_series_check(series_id: int, series_title: str, config: Config) -> None:
     """Background task to check 4K availability for a series."""
-    logger.info(f"Processing 4K check for series: {series_title} (id={series_id})")
+    logger.debug(f"[{series_title}] Starting availability check (id={series_id})...")
 
     try:
+        # Check TTL cache first
+        if _state_manager is not None and config.state.ttl_hours > 0:
+            cached = _state_manager.get_cached_result("series", series_id, config.state.ttl_hours)
+            if cached is not None:
+                logger.info(
+                    f"[{series_title}] Using cached result: "
+                    f"result={cached.result}, checked={cached.last_checked.isoformat()}"
+                )
+                return
+
         sonarr_config = config.require_sonarr()
+        logger.debug(f"[{series_title}] Checking releases against criteria: 4K")
         checker = ReleaseChecker(
             sonarr_url=sonarr_config.url,
             sonarr_api_key=sonarr_config.api_key,
@@ -99,10 +141,27 @@ async def _process_series_check(series_id: int, series_title: str, config: Confi
         )
 
         result = await checker.check_series(series_id, apply_tags=True)
-        logger.info(
-            f"4K check complete for '{series_title}': "
-            f"has_match={result.has_match}, releases={len(result.releases)}"
+        matching_count = len(result.matched_releases)
+        logger.debug(
+            f"[{series_title}] Found {matching_count} matching releases out of {len(result.releases)} total"
         )
+
+        # Build completion message with tag info if available
+        tag_info = ""
+        if result.tag_result and result.tag_result.tag_applied:
+            tag_info = f", tag={result.tag_result.tag_applied}"
+        logger.info(
+            f"[{series_title}] Check complete - result={'available' if result.has_match else 'unavailable'}{tag_info}"
+        )
+
+        # Record result in state file (even if no tag was applied)
+        if _state_manager is not None:
+            _state_manager.record_check(
+                "series",
+                series_id,
+                result.has_match,
+                result.tag_result.tag_applied if result.tag_result else None,
+            )
     except ConfigurationError as e:
         logger.error(f"Configuration error checking series {series_id} ({series_title}): {e}")
     except httpx.HTTPStatusError as e:
@@ -332,7 +391,7 @@ def run_server(
         log_level: Logging level for uvicorn.
         scheduler_enabled: Whether to start the scheduler.
     """
-    global _scheduler_manager
+    global _scheduler_manager, _state_manager
 
     try:
         import uvicorn
@@ -346,14 +405,24 @@ def run_server(
 
     app = create_app(config)
 
+    # Initialize state manager for TTL checks and ensure state file exists
+    from filtarr.state import StateManager
+
+    state_manager = StateManager(config.state.path)
+    state_manager.ensure_initialized()
+    _state_manager = state_manager
+    logger.info("State file initialized at: %s", config.state.path)
+    if config.state.ttl_hours > 0:
+        logger.info("State TTL: %d hours", config.state.ttl_hours)
+    else:
+        logger.info("State TTL: disabled")
+
     # Set up scheduler if enabled
     scheduler_manager: SchedulerManager | None = None
     if scheduler_enabled and config.scheduler.enabled:
         try:
             from filtarr.scheduler import SchedulerManager
-            from filtarr.state import StateManager
 
-            state_manager = StateManager(config.state.path)
             scheduler_manager = SchedulerManager(config, state_manager)
             _scheduler_manager = scheduler_manager
             logger.info("Scheduler configured and will start with server")

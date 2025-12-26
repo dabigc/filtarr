@@ -1,6 +1,8 @@
 """Tests for CLI commands."""
 
 import json
+from datetime import UTC, datetime, timedelta
+from io import StringIO
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -8,8 +10,17 @@ from rich.console import Console
 from typer.testing import CliRunner
 
 from filtarr.checker import SamplingStrategy, SearchResult
-from filtarr.cli import _parse_batch_file, app, format_result_json, format_result_simple
+from filtarr.cli import (
+    OutputFormat,
+    _format_cached_time,
+    _parse_batch_file,
+    _print_cached_result,
+    app,
+    format_result_json,
+    format_result_simple,
+)
 from filtarr.config import Config, RadarrConfig, SonarrConfig
+from filtarr.state import CheckRecord
 from tests.test_utils import create_asyncio_run_mock
 
 runner = CliRunner()
@@ -20,6 +31,9 @@ def _create_mock_state_manager() -> MagicMock:
     mock = MagicMock()
     mock.record_check = MagicMock()
     mock.get_stale_unavailable_items = MagicMock(return_value=[])
+    # TTL-related methods (Task 5)
+    mock.is_recently_checked = MagicMock(return_value=False)
+    mock.get_cached_result = MagicMock(return_value=None)
     return mock
 
 
@@ -1037,3 +1051,537 @@ class TestValidateBatchInputs:
         # Should not error on criteria validation
         assert "Invalid criteria" not in result.output
         assert "only applicable to movies" not in result.output
+
+
+class TestFormatCachedTime:
+    """Tests for _format_cached_time function."""
+
+    def test_format_cached_time_seconds(self) -> None:
+        """Should format time in seconds as minutes."""
+        # 30 seconds ago should show "0 minutes ago"
+        cached = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(seconds=30),
+            result="available",
+        )
+        result = _format_cached_time(cached)
+        assert "minute" in result
+        assert "0 minute" in result
+
+    def test_format_cached_time_one_minute(self) -> None:
+        """Should show singular 'minute' for 1 minute."""
+        cached = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(minutes=1, seconds=30),
+            result="available",
+        )
+        result = _format_cached_time(cached)
+        assert result == "1 minute ago"
+
+    def test_format_cached_time_minutes(self) -> None:
+        """Should format time in minutes for elapsed time < 1 hour."""
+        cached = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(minutes=45),
+            result="available",
+        )
+        result = _format_cached_time(cached)
+        assert result == "45 minutes ago"
+
+    def test_format_cached_time_one_hour(self) -> None:
+        """Should show singular 'hour' for 1 hour."""
+        cached = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(hours=1, minutes=30),
+            result="unavailable",
+        )
+        result = _format_cached_time(cached)
+        assert result == "1 hour ago"
+
+    def test_format_cached_time_hours(self) -> None:
+        """Should format time in hours for elapsed time < 1 day."""
+        cached = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(hours=5),
+            result="unavailable",
+        )
+        result = _format_cached_time(cached)
+        assert result == "5 hours ago"
+
+    def test_format_cached_time_one_day(self) -> None:
+        """Should show singular 'day' for 1 day."""
+        cached = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(days=1, hours=12),
+            result="available",
+        )
+        result = _format_cached_time(cached)
+        assert result == "1 day ago"
+
+    def test_format_cached_time_days(self) -> None:
+        """Should format time in days for elapsed time >= 1 day."""
+        cached = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(days=3),
+            result="available",
+        )
+        result = _format_cached_time(cached)
+        assert result == "3 days ago"
+
+    def test_format_cached_time_timezone_naive(self) -> None:
+        """Should handle timezone-naive datetimes."""
+        # Create a timezone-naive datetime
+        cached = CheckRecord(
+            last_checked=datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=2),
+            result="available",
+        )
+        result = _format_cached_time(cached)
+        assert "hour" in result
+
+
+class TestPrintCachedResult:
+    """Tests for _print_cached_result function."""
+
+    def test_print_cached_result_json_available(self) -> None:
+        """Should print JSON format for available cached result."""
+        cached = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(hours=1),
+            result="available",
+            tag_applied="4k-available",
+        )
+
+        # Capture console output
+        output = StringIO()
+        test_console = Console(file=output, force_terminal=False)
+
+        with patch("filtarr.cli.console", test_console):
+            _print_cached_result("movie", 123, cached, OutputFormat.JSON)
+
+        output_str = output.getvalue()
+        data = json.loads(output_str)
+
+        assert data["item_id"] == 123
+        assert data["item_type"] == "movie"
+        assert data["has_match"] is True
+        assert data["cached"] is True
+        assert data["tag_applied"] == "4k-available"
+        assert "cached_at" in data
+
+    def test_print_cached_result_json_unavailable(self) -> None:
+        """Should print JSON format for unavailable cached result."""
+        cached = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(hours=2),
+            result="unavailable",
+            tag_applied="4k-unavailable",
+        )
+
+        output = StringIO()
+        test_console = Console(file=output, force_terminal=False)
+
+        with patch("filtarr.cli.console", test_console):
+            _print_cached_result("series", 456, cached, OutputFormat.JSON)
+
+        output_str = output.getvalue()
+        data = json.loads(output_str)
+
+        assert data["item_id"] == 456
+        assert data["item_type"] == "series"
+        assert data["has_match"] is False
+        assert data["cached"] is True
+
+    def test_print_cached_result_table_format(self) -> None:
+        """Should print human-readable format for TABLE output."""
+        cached = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(minutes=30),
+            result="available",
+            tag_applied="4k-available",
+        )
+
+        output = StringIO()
+        test_console = Console(file=output, force_terminal=False)
+
+        with patch("filtarr.cli.console", test_console):
+            _print_cached_result("movie", 123, cached, OutputFormat.TABLE)
+
+        output_str = output.getvalue()
+        assert "cached result" in output_str.lower()
+        assert "available" in output_str.lower()
+        assert "4k-available" in output_str
+
+    def test_print_cached_result_simple_format(self) -> None:
+        """Should print human-readable format for SIMPLE output."""
+        cached = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(hours=3),
+            result="unavailable",
+        )
+
+        output = StringIO()
+        test_console = Console(file=output, force_terminal=False)
+
+        with patch("filtarr.cli.console", test_console):
+            _print_cached_result("movie", 789, cached, OutputFormat.SIMPLE)
+
+        output_str = output.getvalue()
+        assert "cached result" in output_str.lower()
+        assert "unavailable" in output_str.lower()
+
+    def test_print_cached_result_no_tag(self) -> None:
+        """Should not print tag line when no tag was applied."""
+        cached = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(hours=1),
+            result="available",
+            tag_applied=None,
+        )
+
+        output = StringIO()
+        test_console = Console(file=output, force_terminal=False)
+
+        with patch("filtarr.cli.console", test_console):
+            _print_cached_result("movie", 123, cached, OutputFormat.TABLE)
+
+        output_str = output.getvalue()
+        # Should have the main cached result line
+        assert "cached result" in output_str.lower()
+        # Should NOT have a Tag: line
+        assert "Tag:" not in output_str
+
+
+class TestTTLCacheHit:
+    """Tests for TTL cache hit scenarios."""
+
+    def test_check_movie_uses_cached_result_when_within_ttl(self) -> None:
+        """Should use cached result when within TTL period."""
+        cached_record = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(hours=1),
+            result="available",
+            tag_applied="4k-available",
+        )
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
+        mock_state_manager = _create_mock_state_manager()
+        mock_state_manager.get_cached_result.return_value = cached_record
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+        ):
+            result = runner.invoke(app, ["check", "movie", "123", "--format", "simple"])
+
+        # Should exit 0 (available)
+        assert result.exit_code == 0
+        # Should show cached result message
+        assert "cached result" in result.output.lower()
+        # get_cached_result should have been called
+        mock_state_manager.get_cached_result.assert_called()
+
+    def test_check_movie_cache_hit_unavailable_exits_1(self) -> None:
+        """Should exit 1 when cached result is unavailable."""
+        cached_record = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(hours=1),
+            result="unavailable",
+            tag_applied="4k-unavailable",
+        )
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
+        mock_state_manager = _create_mock_state_manager()
+        mock_state_manager.get_cached_result.return_value = cached_record
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+        ):
+            result = runner.invoke(app, ["check", "movie", "123", "--format", "simple"])
+
+        # Should exit 1 (unavailable)
+        assert result.exit_code == 1
+        # Should show cached result message
+        assert "cached result" in result.output.lower()
+
+    def test_check_series_uses_cached_result_when_within_ttl(self) -> None:
+        """Should use cached result for series when within TTL period."""
+        cached_record = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(hours=2),
+            result="available",
+            tag_applied="4k-available",
+        )
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
+        mock_state_manager = _create_mock_state_manager()
+        mock_state_manager.get_cached_result.return_value = cached_record
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+        ):
+            result = runner.invoke(app, ["check", "series", "456", "--format", "simple"])
+
+        # Should exit 0 (available)
+        assert result.exit_code == 0
+        # Should show cached result message
+        assert "cached result" in result.output.lower()
+
+
+class TestTTLCacheMiss:
+    """Tests for TTL cache miss scenarios."""
+
+    def test_check_movie_performs_fresh_check_when_cache_expired(self) -> None:
+        """Should perform fresh check when cache is expired."""
+        mock_result = SearchResult(item_id=123, item_type="movie", has_match=True)
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
+        mock_state_manager = _create_mock_state_manager()
+        # Cache miss - return None
+        mock_state_manager.get_cached_result.return_value = None
+
+        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> SearchResult:
+            return mock_result
+
+        mock_checker = MagicMock()
+        mock_checker.check_movie = mock_check_movie
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+        ):
+            result = runner.invoke(app, ["check", "movie", "123", "--format", "simple"])
+
+        # Should exit 0 (fresh check found 4K)
+        assert result.exit_code == 0
+        # Should NOT show cached result message
+        assert "cached result" not in result.output.lower()
+        # Should show actual result
+        assert "4K available" in result.output
+
+    def test_check_movie_performs_fresh_check_when_no_cache(self) -> None:
+        """Should perform fresh check when no cached record exists."""
+        mock_result = SearchResult(item_id=123, item_type="movie", has_match=False)
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
+        mock_state_manager = _create_mock_state_manager()
+        # No cached record
+        mock_state_manager.get_cached_result.return_value = None
+
+        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> SearchResult:
+            return mock_result
+
+        mock_checker = MagicMock()
+        mock_checker.check_movie = mock_check_movie
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+        ):
+            result = runner.invoke(app, ["check", "movie", "123", "--format", "simple"])
+
+        # Should exit 1 (fresh check found no 4K)
+        assert result.exit_code == 1
+        assert "No 4K" in result.output
+
+    def test_check_series_performs_fresh_check_when_cache_miss(self) -> None:
+        """Should perform fresh check for series when cache miss."""
+        mock_result = SearchResult(
+            item_id=456,
+            item_type="series",
+            has_match=True,
+            strategy_used=SamplingStrategy.RECENT,
+        )
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
+        mock_state_manager = _create_mock_state_manager()
+        mock_state_manager.get_cached_result.return_value = None
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+            patch("filtarr.cli.asyncio.run", create_asyncio_run_mock(mock_result)),
+        ):
+            result = runner.invoke(app, ["check", "series", "456", "--format", "simple"])
+
+        # Should exit 0 (fresh check found 4K)
+        assert result.exit_code == 0
+        assert "4K available" in result.stdout
+
+
+class TestTTLStateRecording:
+    """Tests for state recording after fresh checks."""
+
+    def test_check_movie_records_check_when_tagging_enabled(self) -> None:
+        """Should record check in state when tagging is enabled and tag_result exists."""
+        from filtarr.checker import TagResult
+
+        mock_result = SearchResult(
+            item_id=123,
+            item_type="movie",
+            has_match=True,
+            tag_result=TagResult(tag_applied="4k-available"),
+        )
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
+        mock_state_manager = _create_mock_state_manager()
+        mock_state_manager.get_cached_result.return_value = None
+
+        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> SearchResult:
+            return mock_result
+
+        mock_checker = MagicMock()
+        mock_checker.check_movie = mock_check_movie
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+        ):
+            result = runner.invoke(app, ["check", "movie", "123", "--format", "simple"])
+
+        assert result.exit_code == 0
+        # Should have recorded the check
+        mock_state_manager.record_check.assert_called_once_with("movie", 123, True, "4k-available")
+
+    def test_check_movie_error_handling(self) -> None:
+        """Should exit 2 and show error when unexpected exception occurs."""
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
+        mock_state_manager = _create_mock_state_manager()
+        mock_state_manager.get_cached_result.return_value = None
+
+        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> SearchResult:
+            raise RuntimeError("Connection failed")
+
+        mock_checker = MagicMock()
+        mock_checker.check_movie = mock_check_movie
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+        ):
+            result = runner.invoke(app, ["check", "movie", "123", "--format", "simple"])
+
+        assert result.exit_code == 2
+        assert "Error" in result.output
+        assert "Connection failed" in result.output
+
+
+class TestTTLForceFlag:
+    """Tests for --force flag bypassing TTL cache."""
+
+    def test_check_movie_force_bypasses_cache(self) -> None:
+        """Should bypass cache and perform fresh check with --force."""
+        cached_record = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(minutes=30),
+            result="unavailable",
+            tag_applied="4k-unavailable",
+        )
+        # Fresh check returns available
+        mock_result = SearchResult(item_id=123, item_type="movie", has_match=True)
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
+
+        mock_state_manager = _create_mock_state_manager()
+        mock_state_manager.get_cached_result.return_value = cached_record
+
+        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> SearchResult:
+            return mock_result
+
+        mock_checker = MagicMock()
+        mock_checker.check_movie = mock_check_movie
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+        ):
+            result = runner.invoke(app, ["check", "movie", "123", "--force", "--format", "simple"])
+
+        # Should exit 0 (fresh check found 4K)
+        assert result.exit_code == 0
+        # Should NOT show cached result (even though cache would hit)
+        assert "cached result" not in result.output.lower()
+        # Should show fresh result
+        assert "4K available" in result.output
+        # get_cached_result should NOT have been called because of --force
+        mock_state_manager.get_cached_result.assert_not_called()
+
+    def test_check_series_force_bypasses_cache(self) -> None:
+        """Should bypass cache for series with --force."""
+        cached_record = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(minutes=30),
+            result="unavailable",
+        )
+        # Fresh check returns available
+        mock_result = SearchResult(
+            item_id=456,
+            item_type="series",
+            has_match=True,
+            strategy_used=SamplingStrategy.RECENT,
+        )
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
+
+        mock_state_manager = _create_mock_state_manager()
+        mock_state_manager.get_cached_result.return_value = cached_record
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+            patch("filtarr.cli.asyncio.run", create_asyncio_run_mock(mock_result)),
+        ):
+            result = runner.invoke(app, ["check", "series", "456", "--force", "--format", "simple"])
+
+        # Should exit 0 (fresh check found 4K)
+        assert result.exit_code == 0
+        assert "4K available" in result.stdout
+        # get_cached_result should NOT have been called
+        mock_state_manager.get_cached_result.assert_not_called()
+
+    def test_check_movie_dry_run_bypasses_cache(self) -> None:
+        """Should bypass cache when --dry-run is specified."""
+        cached_record = CheckRecord(
+            last_checked=datetime.now(UTC) - timedelta(minutes=30),
+            result="unavailable",
+        )
+        mock_result = SearchResult(item_id=123, item_type="movie", has_match=True)
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
+
+        mock_state_manager = _create_mock_state_manager()
+        mock_state_manager.get_cached_result.return_value = cached_record
+
+        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> SearchResult:
+            return mock_result
+
+        mock_checker = MagicMock()
+        mock_checker.check_movie = mock_check_movie
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+        ):
+            result = runner.invoke(
+                app, ["check", "movie", "123", "--dry-run", "--format", "simple"]
+            )
+
+        # Should exit 0 (fresh check found 4K)
+        assert result.exit_code == 0
+        # get_cached_result should NOT have been called because of --dry-run
+        mock_state_manager.get_cached_result.assert_not_called()
+
+
+class TestServeLogLevelValidation:
+    """Tests for serve command log level validation."""
+
+    def test_serve_invalid_log_level_exits_with_error(self) -> None:
+        """Should exit with error when an invalid log level is provided."""
+        mock_config = Config(
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
+        )
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(app, ["serve", "--log-level", "INVALID"])
+
+        assert result.exit_code == 1
+        assert "Invalid log level: INVALID" in result.output
+        assert "Valid options:" in result.output
+
+    def test_serve_valid_log_level_accepted(self) -> None:
+        """Should accept valid log levels (case-insensitive)."""
+        mock_config = Config(
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
+        )
+
+        # Mock run_server to avoid actually starting the server
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.webhook.run_server"),
+        ):
+            result = runner.invoke(app, ["serve", "--log-level", "debug"])
+
+        # Should not exit with error (log level is valid)
+        # The command will either succeed or fail for other reasons (like missing deps)
+        # but not due to log level validation
+        assert "Invalid log level" not in result.output
