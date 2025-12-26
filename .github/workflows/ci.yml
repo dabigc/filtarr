@@ -50,6 +50,8 @@ jobs:
               - 'pyproject.toml'
               - 'uv.lock'
               - 'Dockerfile'
+              - 'scripts/test-docker.sh'
+              - '.github/workflows/ci.yml'
 
   # Combined lint and type check job (saves ~1 billed minute vs separate jobs)
   quality:
