@@ -92,13 +92,13 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
             f"[{movie_title}] Check complete - result={'available' if result.has_match else 'unavailable'}{tag_info}"
         )
 
-        # Record result in state file
-        if _state_manager is not None and result.tag_result:
+        # Record result in state file (even if no tag was applied)
+        if _state_manager is not None:
             _state_manager.record_check(
                 "movie",
                 movie_id,
                 result.has_match,
-                result.tag_result.tag_applied,
+                result.tag_result.tag_applied if result.tag_result else None,
             )
     except ConfigurationError as e:
         logger.error(f"Configuration error checking movie {movie_id} ({movie_title}): {e}")
@@ -154,13 +154,13 @@ async def _process_series_check(series_id: int, series_title: str, config: Confi
             f"[{series_title}] Check complete - result={'available' if result.has_match else 'unavailable'}{tag_info}"
         )
 
-        # Record result in state file
-        if _state_manager is not None and result.tag_result:
+        # Record result in state file (even if no tag was applied)
+        if _state_manager is not None:
             _state_manager.record_check(
                 "series",
                 series_id,
                 result.has_match,
-                result.tag_result.tag_applied,
+                result.tag_result.tag_applied if result.tag_result else None,
             )
     except ConfigurationError as e:
         logger.error(f"Configuration error checking series {series_id} ({series_title}): {e}")

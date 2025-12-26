@@ -6,6 +6,7 @@ import asyncio
 import json
 import uuid
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path  # noqa: TC003 - needed at runtime for typer
 from typing import TYPE_CHECKING, Annotated, Literal
@@ -226,8 +227,6 @@ def display_series_choices(matches: list[tuple[int, str, int]]) -> None:
 
 def _format_cached_time(cached: CheckRecord) -> str:
     """Format the cached check time for display."""
-    from datetime import UTC, datetime
-
     # Handle timezone-naive datetimes
     last_checked = cached.last_checked
     if last_checked.tzinfo is None:
@@ -255,8 +254,6 @@ def _print_cached_result(
     time_ago = _format_cached_time(cached)
 
     if output_format == OutputFormat.JSON:
-        import json as json_module
-
         data = {
             "item_id": item_id,
             "item_type": item_type,
@@ -265,7 +262,7 @@ def _print_cached_result(
             "cached_at": cached.last_checked.isoformat(),
             "tag_applied": cached.tag_applied,
         }
-        console.print(json_module.dumps(data, indent=2))
+        console.print(json.dumps(data, indent=2))
     else:
         console.print(f"[dim]Using cached result from {time_ago}: {result_status}[/dim]")
         if cached.tag_applied:

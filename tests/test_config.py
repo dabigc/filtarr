@@ -1759,3 +1759,151 @@ level = "ERROR"
             config = Config.load()
 
         assert config.logging.level == "ERROR"
+
+
+class TestStateConfigValidation:
+    """Tests for StateConfig validation."""
+
+    def test_valid_ttl_hours_zero(self) -> None:
+        """StateConfig should accept ttl_hours=0 (disables TTL caching)."""
+        from filtarr.config import StateConfig
+
+        config = StateConfig(ttl_hours=0)
+        assert config.ttl_hours == 0
+
+    def test_valid_ttl_hours_positive(self) -> None:
+        """StateConfig should accept positive ttl_hours values."""
+        from filtarr.config import StateConfig
+
+        config = StateConfig(ttl_hours=24)
+        assert config.ttl_hours == 24
+
+        config = StateConfig(ttl_hours=168)  # 1 week
+        assert config.ttl_hours == 168
+
+    def test_negative_ttl_hours_raises_error(self) -> None:
+        """StateConfig should raise ConfigurationError for negative ttl_hours."""
+        from filtarr.config import StateConfig
+
+        with pytest.raises(ConfigurationError, match="Invalid ttl_hours: -1"):
+            StateConfig(ttl_hours=-1)
+
+    def test_negative_ttl_hours_error_message(self) -> None:
+        """Error message should indicate value must be 0 or greater."""
+        from filtarr.config import StateConfig
+
+        with pytest.raises(ConfigurationError, match="must be 0 or greater"):
+            StateConfig(ttl_hours=-24)
+
+    def test_default_ttl_hours_is_valid(self) -> None:
+        """Default StateConfig should have valid ttl_hours."""
+        from filtarr.config import StateConfig
+
+        config = StateConfig()
+        assert config.ttl_hours == 24
+
+
+class TestStateConfigTtlHoursFromEnv:
+    """Tests for FILTARR_STATE_TTL_HOURS environment variable parsing."""
+
+    def test_valid_ttl_hours_from_env(self, tmp_path: Path) -> None:
+        """Should parse valid integer from FILTARR_STATE_TTL_HOURS."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_STATE_TTL_HOURS": "48"},
+                clear=True,
+            ),
+        ):
+            config = Config.load()
+
+        assert config.state.ttl_hours == 48
+
+    def test_zero_ttl_hours_from_env(self, tmp_path: Path) -> None:
+        """Should parse zero from FILTARR_STATE_TTL_HOURS."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_STATE_TTL_HOURS": "0"},
+                clear=True,
+            ),
+        ):
+            config = Config.load()
+
+        assert config.state.ttl_hours == 0
+
+    def test_invalid_ttl_hours_from_env_raises_error(self, tmp_path: Path) -> None:
+        """Should raise ConfigurationError for non-integer FILTARR_STATE_TTL_HOURS."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_STATE_TTL_HOURS": "not-a-number"},
+                clear=True,
+            ),
+            pytest.raises(ConfigurationError, match="Invalid FILTARR_STATE_TTL_HOURS"),
+        ):
+            Config.load()
+
+    def test_invalid_ttl_hours_error_includes_value(self, tmp_path: Path) -> None:
+        """Error message should include the invalid value."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_STATE_TTL_HOURS": "abc123"},
+                clear=True,
+            ),
+            pytest.raises(ConfigurationError, match="'abc123'"),
+        ):
+            Config.load()
+
+    def test_invalid_ttl_hours_error_mentions_integer(self, tmp_path: Path) -> None:
+        """Error message should mention value must be a valid integer."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_STATE_TTL_HOURS": "12.5"},
+                clear=True,
+            ),
+            pytest.raises(ConfigurationError, match="must be a valid integer"),
+        ):
+            Config.load()
+
+    def test_negative_ttl_hours_from_env_raises_error(self, tmp_path: Path) -> None:
+        """Should raise ConfigurationError for negative FILTARR_STATE_TTL_HOURS."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_STATE_TTL_HOURS": "-5"},
+                clear=True,
+            ),
+            pytest.raises(ConfigurationError, match="Invalid ttl_hours: -5"),
+        ):
+            Config.load()
+
+    def test_ttl_hours_env_overrides_file(self, tmp_path: Path) -> None:
+        """FILTARR_STATE_TTL_HOURS should override file config."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[state]
+ttl_hours = 24
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_STATE_TTL_HOURS": "72"},
+                clear=True,
+            ),
+        ):
+            config = Config.load()
+
+        assert config.state.ttl_hours == 72

@@ -241,6 +241,13 @@ class StateConfig:
     path: Path = field(default_factory=_default_state_path)
     ttl_hours: int = 24
 
+    def __post_init__(self) -> None:
+        """Validate ttl_hours after initialization."""
+        if self.ttl_hours < 0:
+            raise ConfigurationError(
+                f"Invalid ttl_hours: {self.ttl_hours}. Value must be 0 or greater."
+            )
+
 
 # Valid log level names (case-insensitive)
 VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
@@ -462,6 +469,9 @@ def _parse_state_from_env(base: StateConfig) -> StateConfig:
 
     Returns:
         StateConfig instance with environment overrides
+
+    Raises:
+        ConfigurationError: If FILTARR_STATE_TTL_HOURS is not a valid integer
     """
     state_path = os.environ.get("FILTARR_STATE_PATH")
     ttl_hours_str = os.environ.get("FILTARR_STATE_TTL_HOURS")
@@ -470,7 +480,17 @@ def _parse_state_from_env(base: StateConfig) -> StateConfig:
         return base
 
     path = Path(state_path).expanduser() if state_path else base.path
-    ttl_hours = int(ttl_hours_str) if ttl_hours_str else base.ttl_hours
+
+    ttl_hours = base.ttl_hours
+    if ttl_hours_str:
+        try:
+            ttl_hours = int(ttl_hours_str)
+        except ValueError as e:
+            raise ConfigurationError(
+                f"Invalid FILTARR_STATE_TTL_HOURS: '{ttl_hours_str}'. "
+                "Value must be a valid integer."
+            ) from e
+
     return StateConfig(path=path, ttl_hours=ttl_hours)
 
 

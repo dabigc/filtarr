@@ -405,7 +405,6 @@ class StateManager:
         """
         self.load()
         self.save()
-        logger.info("State file initialized at: %s", self.path)
 
     def start_batch(
         self,
