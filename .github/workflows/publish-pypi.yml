@@ -1,6 +1,11 @@
 name: Publish to PyPI (Manual)
 
-# Manual trigger only - automatic publishing is handled by release-please.yml
+# Manually triggered publish workflow.
+# Automated publishing of new releases is handled by release-please.yml.
+# Use this workflow only when you need to:
+#   - Re-publish an existing, already-tagged release to TestPyPI/PyPI
+#   - Perform a one-off publish outside the normal release-please flow
+# Both workflows use the same pypa/gh-action-pypi-publish action.
 on:
   workflow_dispatch:
     inputs:

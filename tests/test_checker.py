@@ -206,7 +206,7 @@ class TestCheckSeriesWithSampling:
 
         checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
         result = await checker.check_series(
-            123, strategy=SamplingStrategy.RECENT, seasons_to_check=3
+            123, strategy=SamplingStrategy.RECENT, seasons_to_check=3, apply_tags=False
         )
 
         assert result.has_match is False
@@ -296,7 +296,7 @@ class TestCheckSeriesWithSampling:
         # (we don't mock it - if called, test would fail)
 
         checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
-        result = await checker.check_series(123, strategy=SamplingStrategy.ALL)
+        result = await checker.check_series(123, strategy=SamplingStrategy.ALL, apply_tags=False)
 
         assert result.has_match is True
         # Should have stopped after finding 4K in season 2
@@ -333,7 +333,7 @@ class TestCheckSeriesWithSampling:
         )
 
         checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
-        result = await checker.check_series(123)
+        result = await checker.check_series(123, apply_tags=False)
 
         assert result.has_match is False
         assert result.episodes_checked == []
@@ -406,7 +406,9 @@ class TestCheckSeriesWithSampling:
             )
 
         checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
-        result = await checker.check_series(123, strategy=SamplingStrategy.DISTRIBUTED)
+        result = await checker.check_series(
+            123, strategy=SamplingStrategy.DISTRIBUTED, apply_tags=False
+        )
 
         assert result.has_match is False
         assert result.strategy_used == SamplingStrategy.DISTRIBUTED
@@ -445,7 +447,7 @@ class TestCheckSeriesWithSampling:
         )
 
         checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
-        result = await checker.check_movie(456)
+        result = await checker.check_movie(456, apply_tags=False)
 
         assert result.has_match is True
         assert result.item_type == "movie"
@@ -531,7 +533,7 @@ class TestNameBasedLookup:
         )
 
         checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
-        result = await checker.check_movie_by_name("The Matrix")
+        result = await checker.check_movie_by_name("The Matrix", apply_tags=False)
 
         assert result.has_match is True
         assert result.item_id == 123
@@ -598,7 +600,7 @@ class TestNameBasedLookup:
         )
 
         checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
-        result = await checker.check_series_by_name("Breaking Bad")
+        result = await checker.check_series_by_name("Breaking Bad", apply_tags=False)
 
         assert result.has_match is True
         assert result.item_id == 456
@@ -1040,3 +1042,1085 @@ class TestTagApplication:
         assert result.tag_result is not None
         assert result.tag_result.tag_applied == "4k-available"
         assert result.tag_result.tag_created is False  # Used existing tag
+
+
+class TestMovieOnlyCriteriaEnforcement:
+    """Tests for movie-only criteria enforcement in check_series."""
+
+    @pytest.mark.asyncio
+    async def test_check_series_rejects_directors_cut(self) -> None:
+        """check_series should raise ValueError for DIRECTORS_CUT criteria."""
+        from filtarr.criteria import SearchCriteria
+
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        with pytest.raises(ValueError, match="DIRECTORS_CUT criteria is only applicable to movies"):
+            await checker.check_series(123, criteria=SearchCriteria.DIRECTORS_CUT)
+
+    @pytest.mark.asyncio
+    async def test_check_series_rejects_extended(self) -> None:
+        """check_series should raise ValueError for EXTENDED criteria."""
+        from filtarr.criteria import SearchCriteria
+
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        with pytest.raises(ValueError, match="EXTENDED criteria is only applicable to movies"):
+            await checker.check_series(123, criteria=SearchCriteria.EXTENDED)
+
+    @pytest.mark.asyncio
+    async def test_check_series_rejects_remaster(self) -> None:
+        """check_series should raise ValueError for REMASTER criteria."""
+        from filtarr.criteria import SearchCriteria
+
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        with pytest.raises(ValueError, match="REMASTER criteria is only applicable to movies"):
+            await checker.check_series(123, criteria=SearchCriteria.REMASTER)
+
+    @pytest.mark.asyncio
+    async def test_check_series_rejects_imax(self) -> None:
+        """check_series should raise ValueError for IMAX criteria."""
+        from filtarr.criteria import SearchCriteria
+
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        with pytest.raises(ValueError, match="IMAX criteria is only applicable to movies"):
+            await checker.check_series(123, criteria=SearchCriteria.IMAX)
+
+    @pytest.mark.asyncio
+    async def test_check_series_rejects_special_edition(self) -> None:
+        """check_series should raise ValueError for SPECIAL_EDITION criteria."""
+        from filtarr.criteria import SearchCriteria
+
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        with pytest.raises(
+            ValueError, match="SPECIAL_EDITION criteria is only applicable to movies"
+        ):
+            await checker.check_series(123, criteria=SearchCriteria.SPECIAL_EDITION)
+
+
+class TestTagApplicationExceptionHandling:
+    """Tests for exception handling in tag application methods."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_movie_tag_api_connect_error(self) -> None:
+        """Should catch ConnectError when tag API fails to connect."""
+        import httpx
+
+        from filtarr.config import TagConfig
+
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        # Mock get_tags to raise ConnectError
+        respx.get("http://radarr:7878/api/v3/tag").mock(
+            side_effect=httpx.ConnectError("Connection refused")
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = ReleaseChecker(
+            radarr_url="http://radarr:7878",
+            radarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        result = await checker.check_movie(123, apply_tags=True, dry_run=False)
+
+        # Should still return result with has_match = True
+        assert result.has_match is True
+        assert result.tag_result is not None
+        assert result.tag_result.tag_error is not None
+        assert "Network error" in result.tag_result.tag_error
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_movie_tag_api_timeout_error(self) -> None:
+        """Should catch TimeoutException when tag API times out."""
+        import httpx
+
+        from filtarr.config import TagConfig
+
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        # Mock get_tags to raise TimeoutException
+        respx.get("http://radarr:7878/api/v3/tag").mock(
+            side_effect=httpx.TimeoutException("Request timed out")
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = ReleaseChecker(
+            radarr_url="http://radarr:7878",
+            radarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        result = await checker.check_movie(123, apply_tags=True, dry_run=False)
+
+        # Should still return result with has_match = True
+        assert result.has_match is True
+        assert result.tag_result is not None
+        assert result.tag_result.tag_error is not None
+        assert "Network error" in result.tag_result.tag_error
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_movie_tag_api_validation_error(self) -> None:
+        """Should catch ValidationError when tag API returns invalid JSON."""
+        from filtarr.config import TagConfig
+
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        # Mock get_tags to return invalid data (missing required fields)
+        respx.get("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(
+                200,
+                json=[{"invalid_field": "no id or label"}],
+            )
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = ReleaseChecker(
+            radarr_url="http://radarr:7878",
+            radarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        result = await checker.check_movie(123, apply_tags=True, dry_run=False)
+
+        # Should still return result with has_match = True
+        assert result.has_match is True
+        assert result.tag_result is not None
+        assert result.tag_result.tag_error is not None
+        assert "Validation error" in result.tag_result.tag_error
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_series_tag_api_http_500_error(self) -> None:
+        """Should catch HTTPStatusError when tag API returns HTTP 500."""
+        from filtarr.config import TagConfig
+
+        # Mock series info endpoint
+        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
+            )
+        )
+        # Mock episodes endpoint
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 101,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-01",
+                        "monitored": True,
+                    },
+                ],
+            )
+        )
+        # Mock release endpoint with 4K content
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-101",
+                        "title": "Show.S01.2160p.WEB-DL",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        # Mock get_tags to return HTTP 500
+        respx.get("http://sonarr:8989/api/v3/tag").mock(
+            return_value=Response(500, json={"error": "Internal Server Error"})
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = ReleaseChecker(
+            sonarr_url="http://sonarr:8989",
+            sonarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        result = await checker.check_series(123, apply_tags=True, dry_run=False)
+
+        # Should still return result with has_match = True
+        assert result.has_match is True
+        assert result.tag_result is not None
+        assert result.tag_result.tag_error is not None
+        assert "HTTP 500" in result.tag_result.tag_error
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_series_tag_api_connect_error(self) -> None:
+        """Should catch ConnectError when tag API fails to connect."""
+        import httpx
+
+        from filtarr.config import TagConfig
+
+        # Mock series info endpoint
+        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
+            )
+        )
+        # Mock episodes endpoint
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 101,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-01",
+                        "monitored": True,
+                    },
+                ],
+            )
+        )
+        # Mock release endpoint with 4K content
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-101",
+                        "title": "Show.S01.2160p.WEB-DL",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        # Mock get_tags to raise ConnectError
+        respx.get("http://sonarr:8989/api/v3/tag").mock(
+            side_effect=httpx.ConnectError("Connection refused")
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = ReleaseChecker(
+            sonarr_url="http://sonarr:8989",
+            sonarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        result = await checker.check_series(123, apply_tags=True, dry_run=False)
+
+        # Should still return result with has_match = True
+        assert result.has_match is True
+        assert result.tag_result is not None
+        assert result.tag_result.tag_error is not None
+        assert "Network error" in result.tag_result.tag_error
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_series_tag_api_timeout_error(self) -> None:
+        """Should catch TimeoutException when tag API times out."""
+        import httpx
+
+        from filtarr.config import TagConfig
+
+        # Mock series info endpoint
+        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
+            )
+        )
+        # Mock episodes endpoint
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 101,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-01",
+                        "monitored": True,
+                    },
+                ],
+            )
+        )
+        # Mock release endpoint with 4K content
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-101",
+                        "title": "Show.S01.2160p.WEB-DL",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        # Mock get_tags to raise TimeoutException
+        respx.get("http://sonarr:8989/api/v3/tag").mock(
+            side_effect=httpx.TimeoutException("Request timed out")
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = ReleaseChecker(
+            sonarr_url="http://sonarr:8989",
+            sonarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        result = await checker.check_series(123, apply_tags=True, dry_run=False)
+
+        # Should still return result with has_match = True
+        assert result.has_match is True
+        assert result.tag_result is not None
+        assert result.tag_result.tag_error is not None
+        assert "Network error" in result.tag_result.tag_error
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_series_tag_api_validation_error(self) -> None:
+        """Should catch ValidationError when tag API returns invalid JSON."""
+        from filtarr.config import TagConfig
+
+        # Mock series info endpoint
+        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
+            )
+        )
+        # Mock episodes endpoint
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 101,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-01",
+                        "monitored": True,
+                    },
+                ],
+            )
+        )
+        # Mock release endpoint with 4K content
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-101",
+                        "title": "Show.S01.2160p.WEB-DL",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        # Mock get_tags to return invalid data (missing required fields)
+        respx.get("http://sonarr:8989/api/v3/tag").mock(
+            return_value=Response(
+                200,
+                json=[{"invalid_field": "no id or label"}],
+            )
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = ReleaseChecker(
+            sonarr_url="http://sonarr:8989",
+            sonarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        result = await checker.check_series(123, apply_tags=True, dry_run=False)
+
+        # Should still return result with has_match = True
+        assert result.has_match is True
+        assert result.tag_result is not None
+        assert result.tag_result.tag_error is not None
+        assert "Validation error" in result.tag_result.tag_error
+
+
+class TestSearchResultBackwardCompat:
+    """Tests for SearchResult backward compatibility properties."""
+
+    def test_has_4k_property_returns_has_match(self) -> None:
+        """Verify has_4k property returns same value as has_match for 4K criteria."""
+        from filtarr.criteria import SearchCriteria
+        from filtarr.models.common import Quality, Release
+
+        releases = [
+            Release(
+                guid="1",
+                title="Movie.2160p",
+                indexer="Test",
+                size=1000,
+                quality=Quality(id=19, name="WEBDL-2160p"),
+            ),
+        ]
+
+        # Test with has_match=True
+        result_true = SearchResult(
+            item_id=123,
+            item_type="movie",
+            has_match=True,
+            releases=releases,
+            _criteria=SearchCriteria.FOUR_K,
+        )
+        assert result_true.has_4k is True
+        assert result_true.has_4k == result_true.has_match
+
+        # Test with has_match=False
+        result_false = SearchResult(
+            item_id=456,
+            item_type="movie",
+            has_match=False,
+            releases=[],
+            _criteria=SearchCriteria.FOUR_K,
+        )
+        assert result_false.has_4k is False
+        assert result_false.has_4k == result_false.has_match
+
+    def test_four_k_releases_property_returns_matched(self) -> None:
+        """Verify four_k_releases returns 4K releases."""
+        from filtarr.criteria import SearchCriteria
+        from filtarr.models.common import Quality, Release
+
+        releases = [
+            Release(
+                guid="1",
+                title="Movie.2160p.UHD",
+                indexer="Test",
+                size=5000,
+                quality=Quality(id=19, name="WEBDL-2160p"),
+            ),
+            Release(
+                guid="2",
+                title="Movie.1080p.BluRay",
+                indexer="Test",
+                size=2000,
+                quality=Quality(id=7, name="Bluray-1080p"),
+            ),
+            Release(
+                guid="3",
+                title="Movie.4K.HDR",
+                indexer="Test",
+                size=6000,
+                quality=Quality(id=31, name="Bluray-2160p"),
+            ),
+        ]
+
+        result = SearchResult(
+            item_id=123,
+            item_type="movie",
+            has_match=True,
+            releases=releases,
+            _criteria=SearchCriteria.FOUR_K,
+        )
+
+        four_k = result.four_k_releases
+        assert len(four_k) == 2
+        assert all(r.is_4k() for r in four_k)
+        # Verify the specific 4K releases
+        guids = [r.guid for r in four_k]
+        assert "1" in guids
+        assert "3" in guids
+        assert "2" not in guids
+
+    def test_matched_releases_with_none_criteria_uses_4k(self) -> None:
+        """Create SearchResult with _criteria=None, verify matched_releases filters for 4K."""
+        from filtarr.models.common import Quality, Release
+
+        releases = [
+            Release(
+                guid="1",
+                title="Movie.2160p.UHD",
+                indexer="Test",
+                size=5000,
+                quality=Quality(id=19, name="WEBDL-2160p"),
+            ),
+            Release(
+                guid="2",
+                title="Movie.1080p.BluRay",
+                indexer="Test",
+                size=2000,
+                quality=Quality(id=7, name="Bluray-1080p"),
+            ),
+            Release(
+                guid="3",
+                title="Movie.720p.WEB",
+                indexer="Test",
+                size=1000,
+                quality=Quality(id=5, name="WEBDL-720p"),
+            ),
+        ]
+
+        # Create SearchResult with _criteria=None (default backward compat)
+        result = SearchResult(
+            item_id=123,
+            item_type="movie",
+            has_match=True,
+            releases=releases,
+            _criteria=None,  # Explicitly set to None
+        )
+
+        # matched_releases should default to 4K filtering when _criteria is None
+        matched = result.matched_releases
+        assert len(matched) == 1
+        assert matched[0].guid == "1"
+        assert matched[0].is_4k()
+
+
+class TestSelectSeasonsDistributedEdgeCases:
+    """Tests for select_seasons_to_check DISTRIBUTED edge cases with deduplication."""
+
+    def test_distributed_single_season(self) -> None:
+        """Test with only 1 season, verify deduplication works (first=middle=last)."""
+        # With a single season, first, middle, and last are all the same
+        available = [5]  # Just season 5
+        result = select_seasons_to_check(available, SamplingStrategy.DISTRIBUTED)
+
+        # Should return just that one season, deduplicated
+        assert result == [5]
+        assert len(result) == 1
+
+    def test_distributed_two_seasons(self) -> None:
+        """Test with 2 seasons where middle overlaps with first or last."""
+        # With 2 seasons, middle index would be 1 (len//2), which equals the last
+        available = [1, 2]
+        result = select_seasons_to_check(available, SamplingStrategy.DISTRIBUTED)
+
+        # Should return both seasons (handled by early return in implementation)
+        assert result == [1, 2]
+        assert len(result) == 2
+
+    def test_distributed_three_seasons_all_same(self) -> None:
+        """Edge case verification with 3 seasons - first, middle, last are all distinct."""
+        available = [1, 2, 3]
+        result = select_seasons_to_check(available, SamplingStrategy.DISTRIBUTED)
+
+        # First=1, middle=2 (index 1), last=3 - all distinct
+        assert result == [1, 2, 3]
+        assert len(result) == 3
+
+    def test_distributed_four_seasons_middle_calculation(self) -> None:
+        """Test with 4 seasons to verify middle index calculation."""
+        available = [1, 2, 3, 4]
+        result = select_seasons_to_check(available, SamplingStrategy.DISTRIBUTED)
+
+        # First=1, middle=3 (index 2 = 4//2), last=4
+        # Result should be sorted and deduplicated
+        assert result == [1, 3, 4]
+        assert len(result) == 3
+
+    def test_distributed_non_contiguous_seasons(self) -> None:
+        """Test with non-contiguous season numbers."""
+        # Real-world case: specials (season 0) plus regular seasons
+        available = [0, 1, 5, 10]
+        result = select_seasons_to_check(available, SamplingStrategy.DISTRIBUTED)
+
+        # sorted: [0, 1, 5, 10]
+        # first=0, middle=5 (index 2), last=10
+        assert result == [0, 5, 10]
+        assert len(result) == 3
+
+
+class TestCustomCallableMatcher:
+    """Tests for custom callable matcher functionality."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_movie_with_custom_callable_matches(self) -> None:
+        """Custom callable that returns True for specific title pattern."""
+        from filtarr.criteria import ResultType
+        from filtarr.models.common import Release
+
+        def remux_matcher(release: Release) -> bool:
+            return "REMUX" in release.title.upper()
+
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie.2024.2160p.REMUX.BluRay",
+                        "indexer": "Test",
+                        "size": 50000,
+                        "quality": {"quality": {"id": 31, "name": "Bluray-2160p"}},
+                    }
+                ],
+            )
+        )
+
+        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        result = await checker.check_movie(123, criteria=remux_matcher, apply_tags=False)
+
+        assert result.result_type == ResultType.CUSTOM
+        assert result.has_match is True
+        assert result.item_type == "movie"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_movie_with_custom_callable_no_match(self) -> None:
+        """Custom callable that always returns False."""
+        from filtarr.criteria import ResultType
+        from filtarr.models.common import Release
+
+        def never_match(_release: Release) -> bool:
+            return False
+
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie.2024.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 31, "name": "Bluray-2160p"}},
+                    }
+                ],
+            )
+        )
+
+        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        result = await checker.check_movie(123, criteria=never_match, apply_tags=False)
+
+        assert result.result_type == ResultType.CUSTOM
+        assert result.has_match is False
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_movie_by_name_with_custom_callable(self) -> None:
+        """Test name lookup with custom callable."""
+        from filtarr.criteria import ResultType
+        from filtarr.models.common import Release
+
+        def atmos_matcher(release: Release) -> bool:
+            return "ATMOS" in release.title.upper()
+
+        # Mock movie search
+        respx.get("http://radarr:7878/api/v3/movie").mock(
+            return_value=Response(
+                200,
+                json=[{"id": 456, "title": "Inception", "year": 2010}],
+            )
+        )
+        # Mock releases
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "456"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Inception.2010.2160p.BluRay.Atmos",
+                        "indexer": "Test",
+                        "size": 50000,
+                        "quality": {"quality": {"id": 31, "name": "Bluray-2160p"}},
+                    }
+                ],
+            )
+        )
+
+        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        result = await checker.check_movie_by_name(
+            "Inception", criteria=atmos_matcher, apply_tags=False
+        )
+
+        assert result.result_type == ResultType.CUSTOM
+        assert result.has_match is True
+        assert result.item_name == "Inception"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_series_with_custom_callable_matches(self) -> None:
+        """Custom callable that matches series releases."""
+        from filtarr.criteria import ResultType
+        from filtarr.models.common import Release
+
+        def web_dl_matcher(release: Release) -> bool:
+            return "WEB-DL" in release.title.upper() or "WEBDL" in release.title.upper()
+
+        # Mock series info
+        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
+            )
+        )
+        # Mock episodes
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 101,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-01",
+                        "monitored": True,
+                    },
+                ],
+            )
+        )
+        # Mock releases with WEB-DL
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-101",
+                        "title": "Show.S01E01.1080p.WEB-DL",
+                        "indexer": "Test",
+                        "size": 3000,
+                        "quality": {"quality": {"id": 7, "name": "WEBDL-1080p"}},
+                    }
+                ],
+            )
+        )
+
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        result = await checker.check_series(123, criteria=web_dl_matcher, apply_tags=False)
+
+        assert result.result_type == ResultType.CUSTOM
+        assert result.has_match is True
+        assert result.item_type == "series"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_series_with_custom_callable_no_match(self) -> None:
+        """Custom callable that never matches."""
+        from filtarr.criteria import ResultType
+        from filtarr.models.common import Release
+
+        def never_match(_release: Release) -> bool:
+            return False
+
+        # Mock series info
+        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
+            )
+        )
+        # Mock episodes - multiple seasons to verify sampling
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 101,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-01",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 201,
+                        "seriesId": 123,
+                        "seasonNumber": 2,
+                        "episodeNumber": 1,
+                        "airDate": "2021-01-01",
+                        "monitored": True,
+                    },
+                ],
+            )
+        )
+        # Mock releases for both seasons
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-101",
+                        "title": "Show.S01E01.1080p",
+                        "indexer": "Test",
+                        "size": 1000,
+                        "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}},
+                    }
+                ],
+            )
+        )
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "201"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-201",
+                        "title": "Show.S02E01.1080p",
+                        "indexer": "Test",
+                        "size": 1000,
+                        "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}},
+                    }
+                ],
+            )
+        )
+
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        result = await checker.check_series(123, criteria=never_match, apply_tags=False)
+
+        assert result.result_type == ResultType.CUSTOM
+        assert result.has_match is False
+        # Verify sampled episodes were checked
+        assert len(result.episodes_checked) >= 1
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_series_with_custom_callable_no_aired_episodes(self) -> None:
+        """Series with no aired episodes + custom matcher."""
+        from datetime import timedelta
+
+        from filtarr.criteria import ResultType
+        from filtarr.models.common import Release
+
+        tomorrow = date.today() + timedelta(days=1)
+
+        def any_matcher(_release: Release) -> bool:
+            return True  # Would match anything, but there are no aired episodes
+
+        # Mock series info
+        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200, json={"id": 123, "title": "Upcoming Series", "year": 2025, "seasons": []}
+            )
+        )
+        # Mock episodes - all in future
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 101,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": tomorrow.isoformat(),
+                        "monitored": True,
+                    },
+                ],
+            )
+        )
+
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        result = await checker.check_series(123, criteria=any_matcher, apply_tags=False)
+
+        assert result.has_match is False
+        assert result.result_type == ResultType.CUSTOM
+        assert result.episodes_checked == []
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_series_with_custom_callable_and_tags(self) -> None:
+        """Custom matcher with apply_tags=True on match."""
+        from filtarr.config import TagConfig
+        from filtarr.criteria import ResultType
+        from filtarr.models.common import Release
+
+        def hdr_matcher(release: Release) -> bool:
+            return "HDR" in release.title.upper()
+
+        # Mock series info
+        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "HDR Series", "year": 2020, "seasons": [], "tags": []},
+            )
+        )
+        # Mock episodes
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 101,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-01",
+                        "monitored": True,
+                    },
+                ],
+            )
+        )
+        # Mock releases with HDR
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-101",
+                        "title": "Show.S01E01.2160p.HDR.WEB-DL",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        # Mock tag operations (custom callable falls back to 4K tag names)
+        respx.get("http://sonarr:8989/api/v3/tag").mock(
+            return_value=Response(200, json=[{"id": 1, "label": "4k-available"}])
+        )
+        respx.put("http://sonarr:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "HDR Series", "year": 2020, "seasons": [], "tags": [1]},
+            )
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = ReleaseChecker(
+            sonarr_url="http://sonarr:8989",
+            sonarr_api_key="test",
+            tag_config=tag_config,
+        )
+        result = await checker.check_series(
+            123, criteria=hdr_matcher, apply_tags=True, dry_run=False
+        )
+
+        assert result.result_type == ResultType.CUSTOM
+        assert result.has_match is True
+        assert result.tag_result is not None
+        # Custom callable falls back to 4K tag names
+        assert result.tag_result.tag_applied == "4k-available"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_series_by_name_with_custom_callable(self) -> None:
+        """Test name lookup with custom callable."""
+        from filtarr.criteria import ResultType
+        from filtarr.models.common import Release
+
+        def blu_ray_matcher(release: Release) -> bool:
+            title = release.title.upper()
+            return "BLURAY" in title or "BLU-RAY" in title
+
+        # Mock series search
+        respx.get("http://sonarr:8989/api/v3/series").mock(
+            return_value=Response(
+                200,
+                json=[{"id": 789, "title": "Game of Thrones", "year": 2011, "seasons": []}],
+            )
+        )
+        # Mock series info
+        respx.get("http://sonarr:8989/api/v3/series/789").mock(
+            return_value=Response(
+                200, json={"id": 789, "title": "Game of Thrones", "year": 2011, "seasons": []}
+            )
+        )
+        # Mock episodes
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "789"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 1001,
+                        "seriesId": 789,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2011-04-17",
+                        "monitored": True,
+                    },
+                ],
+            )
+        )
+        # Mock releases with BluRay
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "1001"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-1001",
+                        "title": "Game.of.Thrones.S01E01.2160p.BluRay.REMUX",
+                        "indexer": "Test",
+                        "size": 50000,
+                        "quality": {"quality": {"id": 31, "name": "Bluray-2160p"}},
+                    }
+                ],
+            )
+        )
+
+        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        result = await checker.check_series_by_name(
+            "Game of Thrones", criteria=blu_ray_matcher, apply_tags=False
+        )
+
+        assert result.result_type == ResultType.CUSTOM
+        assert result.has_match is True
+        assert result.item_name == "Game of Thrones"

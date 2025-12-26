@@ -16,16 +16,24 @@ class ResultType(Enum):
 
     Attributes:
         FOUR_K: 4K/2160p resolution search
-        DIRECTORS_CUT: Director's cut edition search
         HDR: HDR content search
         DOLBY_VISION: Dolby Vision content search
+        DIRECTORS_CUT: Director's cut edition search
+        EXTENDED: Extended edition search
+        REMASTER: Remastered edition search
+        IMAX: IMAX edition search
+        SPECIAL_EDITION: Special/Collector's/Anniversary edition search
         CUSTOM: Custom criteria search
     """
 
     FOUR_K = "4k"
-    DIRECTORS_CUT = "directors_cut"
     HDR = "hdr"
     DOLBY_VISION = "dolby_vision"
+    DIRECTORS_CUT = "directors_cut"
+    EXTENDED = "extended"
+    REMASTER = "remaster"
+    IMAX = "imax"
+    SPECIAL_EDITION = "special_edition"
     CUSTOM = "custom"
 
 
@@ -36,10 +44,11 @@ class SearchCriteria(Enum):
         FOUR_K: Match 4K/2160p releases
         HDR: Match HDR releases
         DOLBY_VISION: Match Dolby Vision releases
-        DIRECTORS_CUT: Match Director's Cut releases
-        EXTENDED: Match Extended Edition releases
-        REMASTER: Match Remastered releases
-        IMAX: Match IMAX releases
+        DIRECTORS_CUT: Match Director's Cut releases (movie-only)
+        EXTENDED: Match Extended Edition releases (movie-only)
+        REMASTER: Match Remastered releases (movie-only)
+        IMAX: Match IMAX releases (movie-only)
+        SPECIAL_EDITION: Match Special/Collector's/Anniversary editions (movie-only)
     """
 
     FOUR_K = "4k"
@@ -49,6 +58,19 @@ class SearchCriteria(Enum):
     EXTENDED = "extended"
     REMASTER = "remaster"
     IMAX = "imax"
+    SPECIAL_EDITION = "special_edition"
+
+
+# Criteria that only apply to movies (not TV series)
+MOVIE_ONLY_CRITERIA: frozenset[SearchCriteria] = frozenset(
+    {
+        SearchCriteria.DIRECTORS_CUT,
+        SearchCriteria.EXTENDED,
+        SearchCriteria.REMASTER,
+        SearchCriteria.IMAX,
+        SearchCriteria.SPECIAL_EDITION,
+    }
+)
 
 
 class ReleaseMatcher(Protocol):
@@ -76,6 +98,7 @@ def get_matcher_for_criteria(criteria: SearchCriteria) -> Callable[[Release], bo
         SearchCriteria.EXTENDED: _match_extended,
         SearchCriteria.REMASTER: _match_remaster,
         SearchCriteria.IMAX: _match_imax,
+        SearchCriteria.SPECIAL_EDITION: _match_special_edition,
     }
     return matchers[criteria]
 
@@ -119,3 +142,51 @@ def _match_imax(release: Release) -> bool:
     """Check if release is IMAX."""
     title_lower = release.title.lower()
     return "imax" in title_lower
+
+
+def _contains_edition_phrase(title_lower: str, phrase: str) -> bool:
+    """Return True if `phrase` appears in `title_lower` with word/separator boundaries.
+
+    A valid match must be surrounded (on both sides) by either the start/end of the string
+    or a common separator character (space, dot, dash, underscore). This prevents matches
+    where the phrase is embedded inside a larger word, e.g. "aspecial.edition" or
+    "collectors editions".
+
+    Args:
+        title_lower: The release title, must be pre-lowercased by the caller.
+        phrase: The phrase to search for (should be lowercase).
+    """
+    separators = " .-_"
+    start = 0
+
+    while True:
+        index = title_lower.find(phrase, start)
+        if index == -1:
+            return False
+
+        before_ok = index == 0 or title_lower[index - 1] in separators
+        end_index = index + len(phrase)
+        after_ok = end_index == len(title_lower) or title_lower[end_index] in separators
+
+        if before_ok and after_ok:
+            return True
+
+        start = index + 1
+
+
+def _match_special_edition(release: Release) -> bool:
+    """Check if release is a Special/Collector's/Anniversary/Ultimate/Definitive Edition."""
+    title_lower = release.title.lower()
+    return any(
+        _contains_edition_phrase(title_lower, phrase)
+        for phrase in (
+            "special edition",
+            "special.edition",
+            "collector's edition",
+            "collectors edition",
+            "collector edition",
+            "anniversary edition",
+            "ultimate edition",
+            "definitive edition",
+        )
+    )

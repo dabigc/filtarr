@@ -1,8 +1,18 @@
 """filtarr - Check release availability via Radarr/Sonarr search results.
 
 A Python library for checking whether movies (via Radarr) and TV shows
-(via Sonarr) have releases matching specific criteria (4K, HDR, Dolby Vision,
-Atmos, Director's Cut, etc.) available from your indexers.
+(via Sonarr) have releases matching specific criteria available from your indexers.
+
+Supported Criteria
+------------------
+- **4K/2160p** - High resolution releases
+- **HDR** - High Dynamic Range content
+- **Dolby Vision** - Dolby Vision encoded releases
+- **Director's Cut** - Director's cut editions (movies only)
+- **Extended** - Extended edition releases (movies only)
+- **Remaster** - Remastered editions (movies only)
+- **IMAX** - IMAX format releases (movies only)
+- **Special Edition** - Special/Collector's/Anniversary editions (movies only)
 
 Quick Start
 -----------
@@ -17,13 +27,20 @@ Check a movie for 4K by ID::
     result = await checker.check_movie(123)
     print(f"4K available: {result.has_match}")
 
-Check a movie with custom criteria::
+Check a movie with different criteria::
 
     from filtarr import ReleaseChecker, SearchCriteria
 
     checker = ReleaseChecker(...)
+
     # Check for Director's Cut
     result = await checker.check_movie(123, criteria=SearchCriteria.DIRECTORS_CUT)
+
+    # Check for IMAX
+    result = await checker.check_movie(123, criteria=SearchCriteria.IMAX)
+
+    # Check for Special Edition
+    result = await checker.check_movie(123, criteria=SearchCriteria.SPECIAL_EDITION)
 
     # Custom criteria with callable
     result = await checker.check_movie(
@@ -55,8 +72,10 @@ CLI Usage
 The library includes a CLI for quick checks::
 
     filtarr check movie 123
-    filtarr check movie "The Matrix"
+    filtarr check movie "The Matrix" --criteria directors-cut
+    filtarr check movie 123 --criteria imax
     filtarr check series "Breaking Bad" --strategy recent
+    filtarr check batch --all-movies --criteria special-edition
 
 Classes
 -------
@@ -65,7 +84,8 @@ ReleaseChecker
 SearchResult
     Result container for release searches.
 SearchCriteria
-    Predefined search criteria (FOUR_K, HDR, DOLBY_VISION, DIRECTORS_CUT, etc.).
+    Predefined search criteria (FOUR_K, HDR, DOLBY_VISION, DIRECTORS_CUT,
+    EXTENDED, REMASTER, IMAX, SPECIAL_EDITION).
 ResultType
     Type of search result.
 RadarrClient

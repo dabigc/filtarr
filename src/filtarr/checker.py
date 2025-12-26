@@ -8,10 +8,18 @@ from datetime import date
 from enum import Enum
 from typing import TYPE_CHECKING
 
+import httpx
+from pydantic import ValidationError
+
 from filtarr.clients.radarr import RadarrClient
 from filtarr.clients.sonarr import SonarrClient
 from filtarr.config import TagConfig
-from filtarr.criteria import ResultType, SearchCriteria, get_matcher_for_criteria
+from filtarr.criteria import (
+    MOVIE_ONLY_CRITERIA,
+    ResultType,
+    SearchCriteria,
+    get_matcher_for_criteria,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -210,7 +218,13 @@ class ReleaseChecker:
 
             tag_result: TagResult | None = None
             if apply_tags:
-                tag_result = await self._apply_movie_tags(client, movie_id, has_match, dry_run)
+                # Only pass criteria to tagging if it's a SearchCriteria enum
+                tag_criteria = (
+                    criteria if isinstance(criteria, SearchCriteria) else SearchCriteria.FOUR_K
+                )
+                tag_result = await self._apply_movie_tags(
+                    client, movie_id, has_match, dry_run, tag_criteria
+                )
 
             return SearchResult(
                 item_id=movie_id,
@@ -227,22 +241,25 @@ class ReleaseChecker:
         self,
         client: RadarrClient,
         movie_id: int,
-        has_4k: bool,
+        has_match: bool,
         dry_run: bool,
+        criteria: SearchCriteria = SearchCriteria.FOUR_K,
     ) -> TagResult:
-        """Apply appropriate tags to a movie based on 4K availability.
+        """Apply appropriate tags to a movie based on release availability.
 
         Args:
             client: The RadarrClient instance
             movie_id: The movie ID to tag
-            has_4k: Whether the movie has 4K available
+            has_match: Whether the movie has matching releases available
             dry_run: If True, don't actually apply tags
+            criteria: The search criteria used (determines tag names)
 
         Returns:
             TagResult with the operation details
         """
-        tag_to_apply = self._tag_config.available if has_4k else self._tag_config.unavailable
-        tag_to_remove = self._tag_config.unavailable if has_4k else self._tag_config.available
+        available_tag, unavailable_tag = self._tag_config.get_tag_names(criteria.value)
+        tag_to_apply = available_tag if has_match else unavailable_tag
+        tag_to_remove = unavailable_tag if has_match else available_tag
 
         result = TagResult(dry_run=dry_run)
 
@@ -278,9 +295,20 @@ class ReleaseChecker:
                 await client.remove_tag_from_movie(movie_id, opposite_tag.id)
                 result.tag_removed = tag_to_remove
 
-        except Exception as e:
-            logger.warning("Failed to apply tags to movie %d: %s", movie_id, e)
-            result.tag_error = str(e)
+        except httpx.HTTPStatusError as e:
+            logger.warning(
+                "HTTP error applying tags to movie %d: %s %s",
+                movie_id,
+                e.response.status_code,
+                e.response.reason_phrase,
+            )
+            result.tag_error = f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            logger.warning("Network error applying tags to movie %d: %s", movie_id, e)
+            result.tag_error = f"Network error: {e}"
+        except ValidationError as e:
+            logger.warning("Validation error applying tags to movie %d: %s", movie_id, e)
+            result.tag_error = f"Validation error: {e}"
 
         return result
 
@@ -288,22 +316,25 @@ class ReleaseChecker:
         self,
         client: SonarrClient,
         series_id: int,
-        has_4k: bool,
+        has_match: bool,
         dry_run: bool,
+        criteria: SearchCriteria = SearchCriteria.FOUR_K,
     ) -> TagResult:
-        """Apply appropriate tags to a series based on 4K availability.
+        """Apply appropriate tags to a series based on release availability.
 
         Args:
             client: The SonarrClient instance
             series_id: The series ID to tag
-            has_4k: Whether the series has 4K available
+            has_match: Whether the series has matching releases available
             dry_run: If True, don't actually apply tags
+            criteria: The search criteria used (determines tag names)
 
         Returns:
             TagResult with the operation details
         """
-        tag_to_apply = self._tag_config.available if has_4k else self._tag_config.unavailable
-        tag_to_remove = self._tag_config.unavailable if has_4k else self._tag_config.available
+        available_tag, unavailable_tag = self._tag_config.get_tag_names(criteria.value)
+        tag_to_apply = available_tag if has_match else unavailable_tag
+        tag_to_remove = unavailable_tag if has_match else available_tag
 
         result = TagResult(dry_run=dry_run)
 
@@ -339,9 +370,20 @@ class ReleaseChecker:
                 await client.remove_tag_from_series(series_id, opposite_tag.id)
                 result.tag_removed = tag_to_remove
 
-        except Exception as e:
-            logger.warning("Failed to apply tags to series %d: %s", series_id, e)
-            result.tag_error = str(e)
+        except httpx.HTTPStatusError as e:
+            logger.warning(
+                "HTTP error applying tags to series %d: %s %s",
+                series_id,
+                e.response.status_code,
+                e.response.reason_phrase,
+            )
+            result.tag_error = f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            logger.warning("Network error applying tags to series %d: %s", series_id, e)
+            result.tag_error = f"Network error: {e}"
+        except ValidationError as e:
+            logger.warning("Validation error applying tags to series %d: %s", series_id, e)
+            result.tag_error = f"Validation error: {e}"
 
         return result
 
@@ -389,7 +431,13 @@ class ReleaseChecker:
 
             tag_result: TagResult | None = None
             if apply_tags:
-                tag_result = await self._apply_movie_tags(client, movie.id, has_match, dry_run)
+                # Only pass criteria to tagging if it's a SearchCriteria enum
+                tag_criteria = (
+                    criteria if isinstance(criteria, SearchCriteria) else SearchCriteria.FOUR_K
+                )
+                tag_result = await self._apply_movie_tags(
+                    client, movie.id, has_match, dry_run, tag_criteria
+                )
 
             return SearchResult(
                 item_id=movie.id,
@@ -450,10 +498,16 @@ class ReleaseChecker:
             SearchResult with availability and checked episode information
 
         Raises:
-            ValueError: If Sonarr is not configured
+            ValueError: If Sonarr is not configured or if movie-only criteria is used
         """
         if not self._sonarr_config:
             raise ValueError("Sonarr is not configured")
+
+        # Enforce movie-only criteria restriction
+        if isinstance(criteria, SearchCriteria) and criteria in MOVIE_ONLY_CRITERIA:
+            raise ValueError(
+                f"{criteria.name} criteria is only applicable to movies, not TV series"
+            )
 
         # Determine matcher based on criteria
         if isinstance(criteria, SearchCriteria):
@@ -480,7 +534,12 @@ class ReleaseChecker:
                 # No aired episodes - return empty result
                 tag_result: TagResult | None = None
                 if apply_tags:
-                    tag_result = await self._apply_series_tags(client, series_id, False, dry_run)
+                    tag_criteria = (
+                        criteria if isinstance(criteria, SearchCriteria) else SearchCriteria.FOUR_K
+                    )
+                    tag_result = await self._apply_series_tags(
+                        client, series_id, False, dry_run, tag_criteria
+                    )
                 return SearchResult(
                     item_id=series_id,
                     item_type="series",
@@ -531,7 +590,14 @@ class ReleaseChecker:
                 if match_found:
                     tag_result = None
                     if apply_tags:
-                        tag_result = await self._apply_series_tags(client, series_id, True, dry_run)
+                        tag_criteria = (
+                            criteria
+                            if isinstance(criteria, SearchCriteria)
+                            else SearchCriteria.FOUR_K
+                        )
+                        tag_result = await self._apply_series_tags(
+                            client, series_id, True, dry_run, tag_criteria
+                        )
                     return SearchResult(
                         item_id=series_id,
                         item_type="series",
@@ -549,7 +615,12 @@ class ReleaseChecker:
             # No match found after checking all sampled episodes
             tag_result = None
             if apply_tags:
-                tag_result = await self._apply_series_tags(client, series_id, False, dry_run)
+                tag_criteria = (
+                    criteria if isinstance(criteria, SearchCriteria) else SearchCriteria.FOUR_K
+                )
+                tag_result = await self._apply_series_tags(
+                    client, series_id, False, dry_run, tag_criteria
+                )
             return SearchResult(
                 item_id=series_id,
                 item_type="series",
@@ -588,10 +659,16 @@ class ReleaseChecker:
             SearchResult with availability and checked episode information
 
         Raises:
-            ValueError: If Sonarr is not configured or series not found
+            ValueError: If Sonarr is not configured, series not found, or movie-only criteria
         """
         if not self._sonarr_config:
             raise ValueError("Sonarr is not configured")
+
+        # Enforce movie-only criteria restriction
+        if isinstance(criteria, SearchCriteria) and criteria in MOVIE_ONLY_CRITERIA:
+            raise ValueError(
+                f"{criteria.name} criteria is only applicable to movies, not TV series"
+            )
 
         url, api_key = self._sonarr_config
         async with SonarrClient(url, api_key, timeout=self._timeout) as client:

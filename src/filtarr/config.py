@@ -6,7 +6,7 @@ import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
 
 class ConfigurationError(Exception):
@@ -31,12 +31,41 @@ class SonarrConfig:
 
 @dataclass
 class TagConfig:
-    """Configuration for 4K availability tagging."""
+    """Configuration for release criteria tagging.
 
-    available: str = "4k-available"
-    unavailable: str = "4k-unavailable"
+    Tags are generated using patterns with {criteria} placeholder.
+    For example, with default patterns:
+        - 4K criteria → "4k-available" / "4k-unavailable"
+        - IMAX criteria → "imax-available" / "imax-unavailable"
+        - Director's Cut → "directors-cut-available" / "directors-cut-unavailable"
+    """
+
+    pattern_available: str = "{criteria}-available"
+    pattern_unavailable: str = "{criteria}-unavailable"
     create_if_missing: bool = True
     recheck_days: int = 30
+
+    # Legacy fields for backward compatibility (deprecated).
+    # These fields are scheduled for removal in filtarr 2.0.0.
+    # Use ``pattern_available`` / ``pattern_unavailable`` instead.
+    available: str = "4k-available"
+    unavailable: str = "4k-unavailable"
+
+    def get_tag_names(self, criteria_value: str) -> tuple[str, str]:
+        """Get tag names for a specific criteria.
+
+        Args:
+            criteria_value: The criteria value (e.g., "4k", "imax", "directors_cut")
+
+        Returns:
+            Tuple of (available_tag, unavailable_tag)
+        """
+        # Convert underscores to hyphens for tag slugs (e.g., "directors_cut" → "directors-cut")
+        slug = criteria_value.replace("_", "-")
+        return (
+            self.pattern_available.format(criteria=slug),
+            self.pattern_unavailable.format(criteria=slug),
+        )
 
 
 def _default_state_path() -> Path:
@@ -69,6 +98,212 @@ class SchedulerConfig:
 
 
 DEFAULT_TIMEOUT = 120.0
+
+
+# --- Helper functions for parsing config sections ---
+
+
+def _parse_arr_config_from_dict(
+    data: dict[str, Any],
+    section: str,
+) -> tuple[str, str] | None:
+    """Parse URL and API key from a config dict section.
+
+    Args:
+        data: The full config dictionary
+        section: The section name (e.g., "radarr", "sonarr")
+
+    Returns:
+        Tuple of (url, api_key) if both present, None otherwise
+    """
+    if section not in data:
+        return None
+    section_data = data[section]
+    url = section_data.get("url")
+    api_key = section_data.get("api_key")
+    if url and api_key:
+        return (url, api_key)
+    return None
+
+
+def _parse_arr_config_from_env(
+    url_var: str,
+    key_var: str,
+) -> tuple[str, str] | None:
+    """Parse URL and API key from environment variables.
+
+    Args:
+        url_var: Environment variable name for URL
+        key_var: Environment variable name for API key
+
+    Returns:
+        Tuple of (url, api_key) if both present, None otherwise
+    """
+    url = os.environ.get(url_var)
+    api_key = os.environ.get(key_var)
+    if url and api_key:
+        return (url, api_key)
+    return None
+
+
+def _parse_tags_from_dict(data: dict[str, Any], defaults: TagConfig) -> TagConfig:
+    """Parse TagConfig from a config dictionary.
+
+    Args:
+        data: The full config dictionary
+        defaults: Default TagConfig to use for missing values
+
+    Returns:
+        TagConfig instance
+    """
+    if "tags" not in data:
+        return defaults
+    tags_data = data["tags"]
+    return TagConfig(
+        pattern_available=tags_data.get("pattern_available", defaults.pattern_available),
+        pattern_unavailable=tags_data.get("pattern_unavailable", defaults.pattern_unavailable),
+        create_if_missing=tags_data.get("create_if_missing", defaults.create_if_missing),
+        recheck_days=tags_data.get("recheck_days", defaults.recheck_days),
+        available=tags_data.get("available", defaults.available),
+        unavailable=tags_data.get("unavailable", defaults.unavailable),
+    )
+
+
+def _parse_tags_from_env(base: TagConfig) -> TagConfig:
+    """Parse TagConfig from environment variables.
+
+    Args:
+        base: Base TagConfig to use for defaults
+
+    Returns:
+        TagConfig instance with environment overrides
+    """
+    pattern_available = os.environ.get("FILTARR_TAG_PATTERN_AVAILABLE")
+    pattern_unavailable = os.environ.get("FILTARR_TAG_PATTERN_UNAVAILABLE")
+    tag_available = os.environ.get("FILTARR_TAG_AVAILABLE")
+    tag_unavailable = os.environ.get("FILTARR_TAG_UNAVAILABLE")
+
+    # Return base if no env vars set
+    if not any([pattern_available, pattern_unavailable, tag_available, tag_unavailable]):
+        return base
+
+    return TagConfig(
+        pattern_available=pattern_available or base.pattern_available,
+        pattern_unavailable=pattern_unavailable or base.pattern_unavailable,
+        create_if_missing=base.create_if_missing,
+        recheck_days=base.recheck_days,
+        available=tag_available or base.available,
+        unavailable=tag_unavailable or base.unavailable,
+    )
+
+
+def _parse_state_from_dict(data: dict[str, Any]) -> StateConfig:
+    """Parse StateConfig from a config dictionary.
+
+    Args:
+        data: The full config dictionary
+
+    Returns:
+        StateConfig instance
+    """
+    if "state" not in data or "path" not in data["state"]:
+        return StateConfig()
+    return StateConfig(path=Path(data["state"]["path"]).expanduser())
+
+
+def _parse_state_from_env(base: StateConfig) -> StateConfig:
+    """Parse StateConfig from environment variables.
+
+    Args:
+        base: Base StateConfig to use for defaults
+
+    Returns:
+        StateConfig instance with environment overrides
+    """
+    state_path = os.environ.get("FILTARR_STATE_PATH")
+    if not state_path:
+        return base
+    return StateConfig(path=Path(state_path).expanduser())
+
+
+def _parse_webhook_from_dict(data: dict[str, Any]) -> WebhookConfig:
+    """Parse WebhookConfig from a config dictionary.
+
+    Args:
+        data: The full config dictionary
+
+    Returns:
+        WebhookConfig instance
+    """
+    if "webhook" not in data:
+        return WebhookConfig()
+    webhook_data = data["webhook"]
+    defaults = WebhookConfig()
+    return WebhookConfig(
+        host=webhook_data.get("host", defaults.host),
+        port=webhook_data.get("port", defaults.port),
+    )
+
+
+def _parse_webhook_from_env(base: WebhookConfig) -> WebhookConfig:
+    """Parse WebhookConfig from environment variables.
+
+    Args:
+        base: Base WebhookConfig to use for defaults
+
+    Returns:
+        WebhookConfig instance with environment overrides
+    """
+    host = os.environ.get("FILTARR_WEBHOOK_HOST")
+    port_str = os.environ.get("FILTARR_WEBHOOK_PORT")
+
+    if not host and not port_str:
+        return base
+
+    return WebhookConfig(
+        host=host or base.host,
+        port=int(port_str) if port_str else base.port,
+    )
+
+
+def _parse_scheduler_from_dict(data: dict[str, Any]) -> SchedulerConfig:
+    """Parse SchedulerConfig from a config dictionary.
+
+    Args:
+        data: The full config dictionary
+
+    Returns:
+        SchedulerConfig instance
+    """
+    if "scheduler" not in data:
+        return SchedulerConfig()
+    scheduler_data = data["scheduler"]
+    defaults = SchedulerConfig()
+    return SchedulerConfig(
+        enabled=scheduler_data.get("enabled", defaults.enabled),
+        history_limit=scheduler_data.get("history_limit", defaults.history_limit),
+        schedules=scheduler_data.get("schedules", defaults.schedules),
+    )
+
+
+def _parse_scheduler_from_env(base: SchedulerConfig) -> SchedulerConfig:
+    """Parse SchedulerConfig from environment variables.
+
+    Args:
+        base: Base SchedulerConfig to use for defaults
+
+    Returns:
+        SchedulerConfig instance with environment overrides
+    """
+    scheduler_enabled = os.environ.get("FILTARR_SCHEDULER_ENABLED")
+    if scheduler_enabled is None:
+        return base
+
+    return SchedulerConfig(
+        enabled=scheduler_enabled.lower() in ("true", "1", "yes"),
+        history_limit=base.history_limit,
+        schedules=base.schedules,
+    )
 
 
 @dataclass
@@ -129,80 +364,23 @@ class Config:
         Raises:
             ConfigurationError: If file cannot be parsed
         """
-        try:
-            with path.open("rb") as f:
-                data = tomllib.load(f)
-        except tomllib.TOMLDecodeError as e:
-            raise ConfigurationError(f"Invalid config file: {e}") from e
+        data = _load_toml_file(path)
 
-        radarr = None
-        sonarr = None
+        # Parse *arr configs
+        radarr = _build_radarr_config(_parse_arr_config_from_dict(data, "radarr"))
+        sonarr = _build_sonarr_config(_parse_arr_config_from_dict(data, "sonarr"))
 
-        if "radarr" in data:
-            radarr_data = data["radarr"]
-            if "url" in radarr_data and "api_key" in radarr_data:
-                radarr = RadarrConfig(
-                    url=radarr_data["url"],
-                    api_key=radarr_data["api_key"],
-                )
-
-        if "sonarr" in data:
-            sonarr_data = data["sonarr"]
-            if "url" in sonarr_data and "api_key" in sonarr_data:
-                sonarr = SonarrConfig(
-                    url=sonarr_data["url"],
-                    api_key=sonarr_data["api_key"],
-                )
-
-        timeout = DEFAULT_TIMEOUT
-        if "timeout" in data:
-            timeout = float(data["timeout"])
-
-        # Parse tags configuration
-        tags = TagConfig()
-        if "tags" in data:
-            tags_data = data["tags"]
-            tags = TagConfig(
-                available=tags_data.get("available", tags.available),
-                unavailable=tags_data.get("unavailable", tags.unavailable),
-                create_if_missing=tags_data.get("create_if_missing", tags.create_if_missing),
-                recheck_days=tags_data.get("recheck_days", tags.recheck_days),
-            )
-
-        # Parse state configuration
-        state = StateConfig()
-        if "state" in data:
-            state_data = data["state"]
-            if "path" in state_data:
-                state = StateConfig(path=Path(state_data["path"]).expanduser())
-
-        # Parse webhook configuration
-        webhook = WebhookConfig()
-        if "webhook" in data:
-            webhook_data = data["webhook"]
-            webhook = WebhookConfig(
-                host=webhook_data.get("host", webhook.host),
-                port=webhook_data.get("port", webhook.port),
-            )
-
-        # Parse scheduler configuration
-        scheduler = SchedulerConfig()
-        if "scheduler" in data:
-            scheduler_data = data["scheduler"]
-            scheduler = SchedulerConfig(
-                enabled=scheduler_data.get("enabled", scheduler.enabled),
-                history_limit=scheduler_data.get("history_limit", scheduler.history_limit),
-                schedules=scheduler_data.get("schedules", scheduler.schedules),
-            )
+        # Parse timeout
+        timeout = float(data.get("timeout", DEFAULT_TIMEOUT))
 
         return cls(
             radarr=radarr,
             sonarr=sonarr,
             timeout=timeout,
-            tags=tags,
-            state=state,
-            webhook=webhook,
-            scheduler=scheduler,
+            tags=_parse_tags_from_dict(data, TagConfig()),
+            state=_parse_state_from_dict(data),
+            webhook=_parse_webhook_from_dict(data),
+            scheduler=_parse_scheduler_from_dict(data),
         )
 
     @classmethod
@@ -215,73 +393,33 @@ class Config:
         Returns:
             Config instance with environment overrides
         """
-        radarr = base.radarr
-        sonarr = base.sonarr
-        timeout = base.timeout
-        tags = base.tags
-        state = base.state
-        webhook = base.webhook
-        scheduler = base.scheduler
+        # Parse *arr configs from env
+        radarr = (
+            _build_radarr_config(
+                _parse_arr_config_from_env("FILTARR_RADARR_URL", "FILTARR_RADARR_API_KEY")
+            )
+            or base.radarr
+        )
 
-        # Check for Radarr env vars
-        radarr_url = os.environ.get("FILTARR_RADARR_URL")
-        radarr_key = os.environ.get("FILTARR_RADARR_API_KEY")
-        if radarr_url and radarr_key:
-            radarr = RadarrConfig(url=radarr_url, api_key=radarr_key)
+        sonarr = (
+            _build_sonarr_config(
+                _parse_arr_config_from_env("FILTARR_SONARR_URL", "FILTARR_SONARR_API_KEY")
+            )
+            or base.sonarr
+        )
 
-        # Check for Sonarr env vars
-        sonarr_url = os.environ.get("FILTARR_SONARR_URL")
-        sonarr_key = os.environ.get("FILTARR_SONARR_API_KEY")
-        if sonarr_url and sonarr_key:
-            sonarr = SonarrConfig(url=sonarr_url, api_key=sonarr_key)
-
-        # Check for timeout env var
+        # Parse timeout from env
         timeout_str = os.environ.get("FILTARR_TIMEOUT")
-        if timeout_str:
-            timeout = float(timeout_str)
-
-        # Check for tag env vars
-        tag_available = os.environ.get("FILTARR_TAG_AVAILABLE")
-        tag_unavailable = os.environ.get("FILTARR_TAG_UNAVAILABLE")
-        if tag_available or tag_unavailable:
-            tags = TagConfig(
-                available=tag_available or tags.available,
-                unavailable=tag_unavailable or tags.unavailable,
-                create_if_missing=tags.create_if_missing,
-                recheck_days=tags.recheck_days,
-            )
-
-        # Check for state path env var
-        state_path = os.environ.get("FILTARR_STATE_PATH")
-        if state_path:
-            state = StateConfig(path=Path(state_path).expanduser())
-
-        # Check for webhook env vars
-        webhook_host = os.environ.get("FILTARR_WEBHOOK_HOST")
-        webhook_port = os.environ.get("FILTARR_WEBHOOK_PORT")
-        if webhook_host or webhook_port:
-            webhook = WebhookConfig(
-                host=webhook_host or webhook.host,
-                port=int(webhook_port) if webhook_port else webhook.port,
-            )
-
-        # Check for scheduler env var
-        scheduler_enabled = os.environ.get("FILTARR_SCHEDULER_ENABLED")
-        if scheduler_enabled is not None:
-            scheduler = SchedulerConfig(
-                enabled=scheduler_enabled.lower() in ("true", "1", "yes"),
-                history_limit=scheduler.history_limit,
-                schedules=scheduler.schedules,
-            )
+        timeout = float(timeout_str) if timeout_str else base.timeout
 
         return cls(
             radarr=radarr,
             sonarr=sonarr,
             timeout=timeout,
-            tags=tags,
-            state=state,
-            webhook=webhook,
-            scheduler=scheduler,
+            tags=_parse_tags_from_env(base.tags),
+            state=_parse_state_from_env(base.state),
+            webhook=_parse_webhook_from_env(base.webhook),
+            scheduler=_parse_scheduler_from_env(base.scheduler),
         )
 
     def require_radarr(self) -> RadarrConfig:
@@ -317,3 +455,54 @@ class Config:
                 "~/.config/filtarr/config.toml"
             )
         return self.sonarr
+
+
+def _load_toml_file(path: Path) -> dict[str, Any]:
+    """Load and parse a TOML file.
+
+    Args:
+        path: Path to the TOML file
+
+    Returns:
+        Parsed TOML data as dictionary
+
+    Raises:
+        ConfigurationError: If file cannot be parsed
+    """
+    try:
+        with path.open("rb") as f:
+            return tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigurationError(f"Invalid config file: {e}") from e
+
+
+def _build_radarr_config(
+    parsed: tuple[str, str] | None,
+) -> RadarrConfig | None:
+    """Build RadarrConfig from parsed URL and API key.
+
+    Args:
+        parsed: Tuple of (url, api_key) or None
+
+    Returns:
+        RadarrConfig instance or None
+    """
+    if parsed is None:
+        return None
+    return RadarrConfig(url=parsed[0], api_key=parsed[1])
+
+
+def _build_sonarr_config(
+    parsed: tuple[str, str] | None,
+) -> SonarrConfig | None:
+    """Build SonarrConfig from parsed URL and API key.
+
+    Args:
+        parsed: Tuple of (url, api_key) or None
+
+    Returns:
+        SonarrConfig instance or None
+    """
+    if parsed is None:
+        return None
+    return SonarrConfig(url=parsed[0], api_key=parsed[1])

@@ -4,11 +4,13 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from rich.console import Console
 from typer.testing import CliRunner
 
 from filtarr.checker import SamplingStrategy, SearchResult
-from filtarr.cli import app, format_result_json, format_result_simple
+from filtarr.cli import _parse_batch_file, app, format_result_json, format_result_simple
 from filtarr.config import Config, RadarrConfig, SonarrConfig
+from tests.test_utils import create_asyncio_run_mock
 
 runner = CliRunner()
 
@@ -129,7 +131,7 @@ class TestCheckSeriesCommand:
 
         with (
             patch("filtarr.cli.Config.load", return_value=mock_config),
-            patch("filtarr.cli.asyncio.run", return_value=mock_result),
+            patch("filtarr.cli.asyncio.run", create_asyncio_run_mock(mock_result)),
         ):
             result = runner.invoke(app, ["check", "series", "456", "--format", "simple"])
 
@@ -148,7 +150,7 @@ class TestCheckSeriesCommand:
 
         with (
             patch("filtarr.cli.Config.load", return_value=mock_config),
-            patch("filtarr.cli.asyncio.run", return_value=mock_result),
+            patch("filtarr.cli.asyncio.run", create_asyncio_run_mock(mock_result)),
         ):
             result = runner.invoke(
                 app,
@@ -479,7 +481,7 @@ class TestHelpOutput:
         """Should show main help."""
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        assert "Check 4K availability" in result.stdout
+        assert "Check release availability" in result.stdout
 
     def test_check_help(self) -> None:
         """Should show check subcommand help."""
@@ -488,3 +490,550 @@ class TestHelpOutput:
         assert "movie" in result.stdout
         assert "series" in result.stdout
         assert "batch" in result.stdout
+
+
+class TestParseBatchFile:
+    """Tests for _parse_batch_file function."""
+
+    def test_parse_movie_with_numeric_id(self, tmp_path: Path) -> None:
+        """Should parse movie with numeric ID."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("movie:123\n")
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        assert items == [("movie", "123")]
+        assert keys == {"movie:123"}
+
+    def test_parse_series_with_numeric_id(self, tmp_path: Path) -> None:
+        """Should parse series with numeric ID."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("series:456\n")
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        assert items == [("series", "456")]
+        assert keys == {"series:456"}
+
+    def test_parse_movie_with_name(self, tmp_path: Path) -> None:
+        """Should parse movie with name."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("movie:The Matrix\n")
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        assert items == [("movie", "The Matrix")]
+        # Names are not added to keys (only numeric IDs are)
+        assert keys == set()
+
+    def test_parse_series_with_name(self, tmp_path: Path) -> None:
+        """Should parse series with name."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("series:Breaking Bad\n")
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        assert items == [("series", "Breaking Bad")]
+        # Names are not added to keys (only numeric IDs are)
+        assert keys == set()
+
+    def test_invalid_format_missing_colon(self, tmp_path: Path) -> None:
+        """Should skip lines with missing colon and warn."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("movie_123\n")
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        assert items == []
+        assert keys == set()
+
+    def test_invalid_type_tv(self, tmp_path: Path) -> None:
+        """Should skip lines with invalid type 'tv'."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("tv:123\n")
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        assert items == []
+        assert keys == set()
+
+    def test_invalid_type_tvshow(self, tmp_path: Path) -> None:
+        """Should skip lines with invalid type 'tvshow'."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("tvshow:456\n")
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        assert items == []
+        assert keys == set()
+
+    def test_comments_are_skipped(self, tmp_path: Path) -> None:
+        """Should skip lines starting with #."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("# This is a comment\nmovie:123\n")
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        assert items == [("movie", "123")]
+        assert keys == {"movie:123"}
+
+    def test_empty_lines_are_skipped(self, tmp_path: Path) -> None:
+        """Should skip empty lines."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("\n\nmovie:123\n\n")
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        assert items == [("movie", "123")]
+        assert keys == {"movie:123"}
+
+    def test_whitespace_only_lines_are_skipped(self, tmp_path: Path) -> None:
+        """Should skip whitespace-only lines."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("   \n\t\nmovie:123\n")
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        assert items == [("movie", "123")]
+        assert keys == {"movie:123"}
+
+    def test_leading_trailing_whitespace_handling(self, tmp_path: Path) -> None:
+        """Should handle leading/trailing whitespace on lines."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("  movie:123  \n")
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        assert items == [("movie", "123")]
+        assert keys == {"movie:123"}
+
+    def test_whitespace_in_value_is_stripped(self, tmp_path: Path) -> None:
+        """Should strip whitespace from values."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("movie:  The Matrix  \n")
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        assert items == [("movie", "The Matrix")]
+        assert keys == set()
+
+    def test_multiple_colons_in_name(self, tmp_path: Path) -> None:
+        """Should handle names with multiple colons."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("movie:Name:With:Colons\n")
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        assert items == [("movie", "Name:With:Colons")]
+        assert keys == set()
+
+    def test_duplicate_numeric_ids_tracked(self, tmp_path: Path) -> None:
+        """Should track duplicate numeric IDs in keys set."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("movie:123\nmovie:456\nseries:789\n")
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        assert items == [("movie", "123"), ("movie", "456"), ("series", "789")]
+        assert keys == {"movie:123", "movie:456", "series:789"}
+
+    def test_same_id_different_types(self, tmp_path: Path) -> None:
+        """Should track same ID with different types as separate keys."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("movie:123\nseries:123\n")
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        assert items == [("movie", "123"), ("series", "123")]
+        assert keys == {"movie:123", "series:123"}
+
+    def test_type_case_insensitive(self, tmp_path: Path) -> None:
+        """Should handle type case-insensitively."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("MOVIE:123\nSeries:456\nMoViE:789\n")
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        assert items == [("movie", "123"), ("series", "456"), ("movie", "789")]
+        assert keys == {"movie:123", "series:456", "movie:789"}
+
+    def test_mixed_valid_and_invalid_lines(self, tmp_path: Path) -> None:
+        """Should parse valid lines and skip invalid ones."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text(
+            "# Comment\nmovie:123\ninvalid_line\ntv:456\nseries:Breaking Bad\n\nmovie:The Matrix\n"
+        )
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        assert items == [
+            ("movie", "123"),
+            ("series", "Breaking Bad"),
+            ("movie", "The Matrix"),
+        ]
+        assert keys == {"movie:123"}
+
+    def test_numeric_id_with_leading_zeros(self, tmp_path: Path) -> None:
+        """Should handle numeric IDs with leading zeros."""
+        batch_file = tmp_path / "items.txt"
+        batch_file.write_text("movie:00123\n")
+
+        error_console = Console(stderr=True, force_terminal=False)
+        items, keys = _parse_batch_file(batch_file, error_console)
+
+        # "00123" with leading zeros is still considered numeric (isdigit returns True)
+        assert items == [("movie", "00123")]
+        assert keys == {"movie:00123"}
+
+
+class TestCheckMovieCriteriaValidation:
+    """Tests for criteria validation in check_movie command."""
+
+    def test_check_movie_invalid_criteria(self) -> None:
+        """Should exit 2 when invalid criteria is provided."""
+        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(app, ["check", "movie", "123", "--criteria", "xyz"])
+
+        assert result.exit_code == 2
+        assert "Invalid criteria" in result.output
+        assert "xyz" in result.output
+        assert "Valid options:" in result.output
+
+    def test_check_movie_invalid_criteria_mixed_case(self) -> None:
+        """Should exit 2 when invalid criteria with mixed case is provided."""
+        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(app, ["check", "movie", "123", "--criteria", "FooBar"])
+
+        assert result.exit_code == 2
+        assert "Invalid criteria" in result.output
+
+    def test_check_movie_valid_criteria_case_insensitive(self) -> None:
+        """Should accept valid criteria regardless of case."""
+        from filtarr.criteria import ResultType
+
+        mock_result = SearchResult(
+            item_id=123, item_type="movie", has_match=True, result_type=ResultType.HDR
+        )
+        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+
+        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> SearchResult:
+            return mock_result
+
+        mock_checker = MagicMock()
+        mock_checker.check_movie = mock_check_movie
+        mock_state_manager = _create_mock_state_manager()
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+        ):
+            # Test uppercase
+            result = runner.invoke(
+                app, ["check", "movie", "123", "--criteria", "HDR", "--format", "simple"]
+            )
+
+        assert result.exit_code == 0
+        assert "HDR available" in result.output
+
+
+class TestCheckSeriesCriteriaValidation:
+    """Tests for criteria validation in check_series command."""
+
+    def test_check_series_invalid_criteria(self) -> None:
+        """Should exit 2 when invalid criteria is provided."""
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(app, ["check", "series", "456", "--criteria", "xyz"])
+
+        assert result.exit_code == 2
+        assert "Invalid criteria" in result.output
+        assert "xyz" in result.output
+
+    def test_check_series_directors_cut_error(self) -> None:
+        """Should exit 2 when directors-cut criteria is used for series."""
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(app, ["check", "series", "456", "--criteria", "directors-cut"])
+
+        assert result.exit_code == 2
+        assert "directors-cut" in result.output.lower()
+        assert "only applicable to movies" in result.output
+
+    def test_check_series_extended_error(self) -> None:
+        """Should exit 2 when extended criteria is used for series."""
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(app, ["check", "series", "456", "--criteria", "extended"])
+
+        assert result.exit_code == 2
+        assert "extended" in result.output.lower()
+        assert "only applicable to movies" in result.output
+
+    def test_check_series_remaster_error(self) -> None:
+        """Should exit 2 when remaster criteria is used for series."""
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(app, ["check", "series", "456", "--criteria", "remaster"])
+
+        assert result.exit_code == 2
+        assert "remaster" in result.output.lower()
+        assert "only applicable to movies" in result.output
+
+    def test_check_series_imax_error(self) -> None:
+        """Should exit 2 when imax criteria is used for series."""
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(app, ["check", "series", "456", "--criteria", "imax"])
+
+        assert result.exit_code == 2
+        assert "imax" in result.output.lower()
+        assert "only applicable to movies" in result.output
+
+    def test_check_series_special_edition_error(self) -> None:
+        """Should exit 2 when special-edition criteria is used for series."""
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(app, ["check", "series", "456", "--criteria", "special-edition"])
+
+        assert result.exit_code == 2
+        assert "special-edition" in result.output.lower()
+        assert "only applicable to movies" in result.output
+
+    def test_check_series_valid_4k_criteria(self) -> None:
+        """Should accept 4k criteria for series."""
+        mock_result = SearchResult(
+            item_id=456,
+            item_type="series",
+            has_match=True,
+            strategy_used=SamplingStrategy.RECENT,
+        )
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.asyncio.run", create_asyncio_run_mock(mock_result)),
+        ):
+            result = runner.invoke(
+                app, ["check", "series", "456", "--criteria", "4k", "--format", "simple"]
+            )
+
+        assert result.exit_code == 0
+        assert "4K available" in result.stdout
+
+    def test_check_series_valid_hdr_criteria(self) -> None:
+        """Should accept hdr criteria for series."""
+        from filtarr.criteria import ResultType
+
+        mock_result = SearchResult(
+            item_id=456,
+            item_type="series",
+            has_match=True,
+            result_type=ResultType.HDR,
+            strategy_used=SamplingStrategy.RECENT,
+        )
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.asyncio.run", create_asyncio_run_mock(mock_result)),
+        ):
+            result = runner.invoke(
+                app, ["check", "series", "456", "--criteria", "hdr", "--format", "simple"]
+            )
+
+        assert result.exit_code == 0
+        assert "HDR available" in result.stdout
+
+    def test_check_series_valid_dolby_vision_criteria(self) -> None:
+        """Should accept dolby-vision criteria for series."""
+        from filtarr.criteria import ResultType
+
+        mock_result = SearchResult(
+            item_id=456,
+            item_type="series",
+            has_match=True,
+            result_type=ResultType.DOLBY_VISION,
+            strategy_used=SamplingStrategy.RECENT,
+        )
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.asyncio.run", create_asyncio_run_mock(mock_result)),
+        ):
+            result = runner.invoke(
+                app,
+                ["check", "series", "456", "--criteria", "dolby-vision", "--format", "simple"],
+            )
+
+        assert result.exit_code == 0
+        assert "Dolby Vision available" in result.stdout
+
+
+class TestValidateBatchInputs:
+    """Tests for _validate_batch_inputs() function."""
+
+    def test_batch_no_file_no_all_flags_error(self) -> None:
+        """Should exit 2 when no file and no --all-* flags are provided."""
+        result = runner.invoke(app, ["check", "batch"])
+
+        assert result.exit_code == 2
+        assert "Must specify --file, --all-movies, or --all-series" in result.output
+
+    def test_batch_file_not_exists_error(self) -> None:
+        """Should exit 2 when file path doesn't exist."""
+        result = runner.invoke(app, ["check", "batch", "--file", "/nonexistent/path/items.txt"])
+
+        assert result.exit_code == 2
+        assert "File not found" in result.output
+
+    def test_batch_invalid_criteria_error(self) -> None:
+        """Should exit 2 when invalid criteria is provided."""
+        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(
+                app, ["check", "batch", "--all-movies", "--criteria", "invalid_criteria"]
+            )
+
+        assert result.exit_code == 2
+        assert "Invalid criteria" in result.output
+        assert "invalid_criteria" in result.output
+
+    def test_batch_movie_only_criteria_with_all_series_error(self) -> None:
+        """Should exit 2 when movie-only criteria is used with --all-series."""
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(
+                app, ["check", "batch", "--all-series", "--criteria", "directors-cut"]
+            )
+
+        assert result.exit_code == 2
+        assert "only applicable to movies" in result.output
+        # Check for key parts of the error message (handles potential line wrapping)
+        assert "--all-series" in result.output
+
+    def test_batch_extended_with_all_series_error(self) -> None:
+        """Should exit 2 when extended criteria is used with --all-series."""
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(
+                app, ["check", "batch", "--all-series", "--criteria", "extended"]
+            )
+
+        assert result.exit_code == 2
+        assert "only applicable to movies" in result.output
+
+    def test_batch_remaster_with_all_series_error(self) -> None:
+        """Should exit 2 when remaster criteria is used with --all-series."""
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(
+                app, ["check", "batch", "--all-series", "--criteria", "remaster"]
+            )
+
+        assert result.exit_code == 2
+        assert "only applicable to movies" in result.output
+
+    def test_batch_imax_with_all_series_error(self) -> None:
+        """Should exit 2 when imax criteria is used with --all-series."""
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(app, ["check", "batch", "--all-series", "--criteria", "imax"])
+
+        assert result.exit_code == 2
+        assert "only applicable to movies" in result.output
+
+    def test_batch_special_edition_with_all_series_error(self) -> None:
+        """Should exit 2 when special-edition criteria is used with --all-series."""
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(
+                app, ["check", "batch", "--all-series", "--criteria", "special-edition"]
+            )
+
+        assert result.exit_code == 2
+        assert "only applicable to movies" in result.output
+
+    def test_batch_invalid_strategy_error(self) -> None:
+        """Should exit 2 when invalid strategy is provided."""
+        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(
+                app, ["check", "batch", "--all-movies", "--strategy", "invalid_strategy"]
+            )
+
+        assert result.exit_code == 2
+        assert "Invalid strategy" in result.output
+
+    def test_batch_valid_criteria_with_all_movies(self) -> None:
+        """Should accept movie-only criteria with --all-movies."""
+        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker") as mock_get_checker,
+            patch("filtarr.cli._fetch_movies_to_check") as mock_fetch,
+        ):
+            mock_fetch.return_value = ([], set())
+            mock_get_checker.return_value = AsyncMock()
+
+            result = runner.invoke(
+                app, ["check", "batch", "--all-movies", "--criteria", "directors-cut"]
+            )
+
+        # Should not error on criteria validation (may have other issues but not criteria)
+        assert "Invalid criteria" not in result.output
+        assert "only applicable to movies" not in result.output
+
+    def test_batch_valid_criteria_with_all_series(self) -> None:
+        """Should accept valid series criteria with --all-series."""
+        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker") as mock_get_checker,
+            patch("filtarr.cli._fetch_series_to_check") as mock_fetch,
+        ):
+            mock_fetch.return_value = ([], set())
+            mock_get_checker.return_value = AsyncMock()
+
+            result = runner.invoke(app, ["check", "batch", "--all-series", "--criteria", "hdr"])
+
+        # Should not error on criteria validation
+        assert "Invalid criteria" not in result.output
+        assert "only applicable to movies" not in result.output
