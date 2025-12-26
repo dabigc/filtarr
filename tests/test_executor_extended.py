@@ -1090,6 +1090,377 @@ class TestExecutorConcurrentBatchProcessing:
         assert result.status == RunStatus.COMPLETED
 
 
+class TestExecutorAllItemsFailed:
+    """Tests for when all items fail to process."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_execute_all_movies_fail_returns_failed_status(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """When all items fail to process, status should be FAILED (line 150)."""
+        # Mock 2 movies
+        respx.get("http://radarr:7878/api/v3/movie").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": 1, "title": "Movie 1", "year": 2024, "tags": []},
+                    {"id": 2, "title": "Movie 2", "year": 2024, "tags": []},
+                ],
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+
+        # All movies fail with server error
+        for movie_id in [1, 2]:
+            respx.get(f"http://radarr:7878/api/v3/movie/{movie_id}").mock(
+                return_value=Response(500, json={"error": "Server error"})
+            )
+
+        schedule = ScheduleDefinition(
+            name="test-all-fail",
+            target=ScheduleTarget.MOVIES,
+            trigger=IntervalTrigger(hours=6),
+            delay=0,
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+        result = await executor.execute(schedule)
+
+        # All items failed - status should be FAILED
+        assert result.items_processed == 0
+        assert len(result.errors) == 2
+        assert result.status == RunStatus.FAILED
+
+
+class TestProcessSeriesBatchEmpty:
+    """Tests for empty series batch processing (line 269)."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_process_series_batch_empty_returns_empty_result(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Empty series batch should return empty BatchResult (line 269)."""
+        # Mock no series
+        respx.get("http://sonarr:8989/api/v3/series").mock(return_value=Response(200, json=[]))
+        respx.get("http://sonarr:8989/api/v3/tag").mock(return_value=Response(200, json=[]))
+
+        schedule = ScheduleDefinition(
+            name="test-empty-series",
+            target=ScheduleTarget.SERIES,
+            trigger=IntervalTrigger(hours=6),
+            delay=0,
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+        result = await executor.execute(schedule)
+
+        # No items to process
+        assert result.items_processed == 0
+        assert result.items_with_4k == 0
+        assert len(result.errors) == 0
+        assert result.status == RunStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_process_series_batch_direct_empty_list(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Direct call to _process_series_batch with empty list returns empty BatchResult."""
+        schedule = ScheduleDefinition(
+            name="test-direct-empty",
+            target=ScheduleTarget.SERIES,
+            trigger=IntervalTrigger(hours=6),
+            delay=0,
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+        # Call _process_series_batch directly with empty list
+        result = await executor._process_series_batch([], schedule)
+
+        assert result.items_processed == 0
+        assert result.items_with_4k == 0
+        assert len(result.errors) == 0
+
+
+class TestSeriesDelayProcessing:
+    """Tests for delay handling in series processing (line 293)."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_execute_series_with_delay_calls_asyncio_sleep(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Series processing with delay should call asyncio.sleep (line 293)."""
+        respx.get("http://sonarr:8989/api/v3/series").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": 1, "title": "Series 1", "year": 2024, "seasons": [], "tags": []},
+                    {"id": 2, "title": "Series 2", "year": 2024, "seasons": [], "tags": []},
+                ],
+            )
+        )
+        respx.get("http://sonarr:8989/api/v3/tag").mock(return_value=Response(200, json=[]))
+
+        for series_id in [1, 2]:
+            respx.get(f"http://sonarr:8989/api/v3/series/{series_id}").mock(
+                return_value=Response(
+                    200,
+                    json={
+                        "id": series_id,
+                        "title": f"Series {series_id}",
+                        "year": 2024,
+                        "seasons": [],
+                        "tags": [],
+                    },
+                )
+            )
+            respx.get(
+                "http://sonarr:8989/api/v3/episode", params={"seriesId": str(series_id)}
+            ).mock(
+                return_value=Response(
+                    200,
+                    json=[
+                        {
+                            "id": 100 + series_id,
+                            "seriesId": series_id,
+                            "seasonNumber": 1,
+                            "episodeNumber": 1,
+                            "airDate": "2024-01-01",
+                            "monitored": True,
+                        }
+                    ],
+                )
+            )
+            respx.get(
+                "http://sonarr:8989/api/v3/release", params={"episodeId": str(100 + series_id)}
+            ).mock(return_value=Response(200, json=[]))
+            respx.put(f"http://sonarr:8989/api/v3/series/{series_id}").mock(
+                return_value=Response(
+                    200,
+                    json={
+                        "id": series_id,
+                        "title": f"Series {series_id}",
+                        "year": 2024,
+                        "seasons": [],
+                        "tags": [1],
+                    },
+                )
+            )
+
+        respx.post("http://sonarr:8989/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-unavailable"})
+        )
+
+        schedule = ScheduleDefinition(
+            name="test-series-delay",
+            target=ScheduleTarget.SERIES,
+            trigger=IntervalTrigger(hours=6),
+            delay=0.3,  # 300ms delay
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            result = await executor.execute(schedule)
+
+            # Should have called sleep after each series (2 times for 2 series)
+            assert mock_sleep.call_count == 2
+            mock_sleep.assert_called_with(0.3)
+
+        assert result.items_processed == 2
+        assert result.status == RunStatus.COMPLETED
+
+
+class TestExecuteScheduleFunction:
+    """Tests for the execute_schedule convenience function (lines 486-487)."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_execute_schedule_function(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """execute_schedule function should create executor and call execute."""
+        from filtarr.scheduler.executor import execute_schedule
+
+        # Mock a simple movie scenario
+        respx.get("http://radarr:7878/api/v3/movie").mock(
+            return_value=Response(
+                200,
+                json=[{"id": 1, "title": "Movie 1", "year": 2024, "tags": []}],
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.get("http://radarr:7878/api/v3/movie/1").mock(
+            return_value=Response(
+                200,
+                json={"id": 1, "title": "Movie 1", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "1"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        respx.post("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-available"})
+        )
+        respx.put("http://radarr:7878/api/v3/movie/1").mock(
+            return_value=Response(
+                200,
+                json={"id": 1, "title": "Movie 1", "year": 2024, "tags": [1]},
+            )
+        )
+
+        schedule = ScheduleDefinition(
+            name="test-convenience-function",
+            target=ScheduleTarget.MOVIES,
+            trigger=IntervalTrigger(hours=6),
+            delay=0,
+        )
+
+        # Use the convenience function
+        result = await execute_schedule(mock_config, mock_state_manager, schedule)
+
+        assert result.items_processed == 1
+        assert result.items_with_4k == 1
+        assert result.status == RunStatus.COMPLETED
+        assert result.schedule_name == "test-convenience-function"
+
+
+class TestBackwardCompatibilityCheckerCreation:
+    """Tests for backward compatibility when checker is None (lines 393, 427)."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_movie_without_checker_creates_one(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """_check_movie should create a checker if none is provided (line 393)."""
+        # Mock the movie and release endpoints
+        respx.get("http://radarr:7878/api/v3/movie/1").mock(
+            return_value=Response(
+                200,
+                json={"id": 1, "title": "Movie 1", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "1"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.post("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-available"})
+        )
+        respx.put("http://radarr:7878/api/v3/movie/1").mock(
+            return_value=Response(
+                200,
+                json={"id": 1, "title": "Movie 1", "year": 2024, "tags": [1]},
+            )
+        )
+
+        schedule = ScheduleDefinition(
+            name="test-backward-compat-movie",
+            target=ScheduleTarget.MOVIES,
+            trigger=IntervalTrigger(hours=6),
+            delay=0,
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+        # Call _check_movie directly without a checker (backward compatibility)
+        result = await executor._check_movie(1, schedule, checker=None)
+
+        assert result is not None
+        assert result.has_match is True
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_series_without_checker_creates_one(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """_check_series should create a checker if none is provided (line 427)."""
+        # Mock the series and episode endpoints
+        respx.get("http://sonarr:8989/api/v3/series/1").mock(
+            return_value=Response(
+                200,
+                json={"id": 1, "title": "Series 1", "year": 2024, "seasons": [], "tags": []},
+            )
+        )
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "1"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 101,
+                        "seriesId": 1,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2024-01-01",
+                        "monitored": True,
+                    }
+                ],
+            )
+        )
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-101",
+                        "title": "Series.S01E01.2160p",
+                        "indexer": "Test",
+                        "size": 3000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        respx.get("http://sonarr:8989/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.post("http://sonarr:8989/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-available"})
+        )
+        respx.put("http://sonarr:8989/api/v3/series/1").mock(
+            return_value=Response(
+                200,
+                json={"id": 1, "title": "Series 1", "year": 2024, "seasons": [], "tags": [1]},
+            )
+        )
+
+        schedule = ScheduleDefinition(
+            name="test-backward-compat-series",
+            target=ScheduleTarget.SERIES,
+            trigger=IntervalTrigger(hours=6),
+            delay=0,
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+        # Call _check_series directly without a checker (backward compatibility)
+        result = await executor._check_series(1, schedule, checker=None)
+
+        assert result is not None
+        assert result.has_match is True
+
+
 class TestScheduleDefinitionConcurrency:
     """Tests for concurrency field in ScheduleDefinition model."""
 

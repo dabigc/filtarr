@@ -196,6 +196,9 @@ class JobExecutor:
     ) -> BatchResult:
         """Process a batch of movies with concurrent execution.
 
+        Uses a single ReleaseChecker instance for the entire batch to enable
+        connection pooling across all movie checks.
+
         Args:
             movies: List of movies to check
             schedule: Schedule definition
@@ -210,10 +213,13 @@ class JobExecutor:
         result = BatchResult()
         lock = asyncio.Lock()
 
+        # Create a single checker for the entire batch (connection pooling)
+        checker = self._create_checker(need_radarr=True)
+
         async def check_with_limit(movie: Movie) -> None:
             async with semaphore:
                 try:
-                    search_result = await self._check_movie(movie.id, schedule)
+                    search_result = await self._check_movie(movie.id, schedule, checker)
                     async with lock:
                         result.items_processed += 1
                         if search_result and search_result.has_match:
@@ -236,17 +242,21 @@ class JobExecutor:
                     async with lock:
                         result.errors.append(error_msg)
 
-                # Apply delay after each check (inside semaphore to rate limit)
-                if schedule.delay > 0:
-                    await asyncio.sleep(schedule.delay)
+            # Apply delay after releasing semaphore to avoid blocking concurrent workers
+            if schedule.delay > 0:
+                await asyncio.sleep(schedule.delay)
 
-        await asyncio.gather(*[check_with_limit(movie) for movie in movies])
+        async with checker:
+            await asyncio.gather(*[check_with_limit(movie) for movie in movies])
         return result
 
     async def _process_series_batch(
         self, series_list: list[Series], schedule: ScheduleDefinition
     ) -> BatchResult:
         """Process a batch of series with concurrent execution.
+
+        Uses a single ReleaseChecker instance for the entire batch to enable
+        connection pooling across all series checks.
 
         Args:
             series_list: List of series to check
@@ -262,10 +272,13 @@ class JobExecutor:
         result = BatchResult()
         lock = asyncio.Lock()
 
+        # Create a single checker for the entire batch (connection pooling)
+        checker = self._create_checker(need_sonarr=True)
+
         async def check_with_limit(series: Series) -> None:
             async with semaphore:
                 try:
-                    search_result = await self._check_series(series.id, schedule)
+                    search_result = await self._check_series(series.id, schedule, checker)
                     async with lock:
                         result.items_processed += 1
                         if search_result and search_result.has_match:
@@ -288,11 +301,12 @@ class JobExecutor:
                     async with lock:
                         result.errors.append(error_msg)
 
-                # Apply delay after each check (inside semaphore to rate limit)
-                if schedule.delay > 0:
-                    await asyncio.sleep(schedule.delay)
+            # Apply delay after releasing semaphore to avoid blocking concurrent workers
+            if schedule.delay > 0:
+                await asyncio.sleep(schedule.delay)
 
-        await asyncio.gather(*[check_with_limit(series) for series in series_list])
+        async with checker:
+            await asyncio.gather(*[check_with_limit(series) for series in series_list])
         return result
 
     async def _get_movies_to_check(self, schedule: ScheduleDefinition) -> list[Movie]:
@@ -358,18 +372,25 @@ class JobExecutor:
             ]
 
     async def _check_movie(
-        self, movie_id: int, schedule: ScheduleDefinition
+        self,
+        movie_id: int,
+        schedule: ScheduleDefinition,
+        checker: ReleaseChecker | None = None,
     ) -> SearchResult | None:
         """Check a single movie for 4K availability.
 
         Args:
             movie_id: Movie ID to check
             schedule: Schedule definition
+            checker: Optional pre-created ReleaseChecker for connection pooling.
+                     If not provided, creates a new checker (backward compatibility).
 
         Returns:
             SearchResult if successful, None otherwise
         """
-        checker = self._create_checker(need_radarr=True)
+        if checker is None:
+            # Backward compatibility: create a new checker if none provided
+            checker = self._create_checker(need_radarr=True)
         return await checker.check_movie(
             movie_id,
             apply_tags=not schedule.no_tag,
@@ -377,13 +398,18 @@ class JobExecutor:
         )
 
     async def _check_series(
-        self, series_id: int, schedule: ScheduleDefinition
+        self,
+        series_id: int,
+        schedule: ScheduleDefinition,
+        checker: ReleaseChecker | None = None,
     ) -> SearchResult | None:
         """Check a single series for 4K availability.
 
         Args:
             series_id: Series ID to check
             schedule: Schedule definition
+            checker: Optional pre-created ReleaseChecker for connection pooling.
+                     If not provided, creates a new checker (backward compatibility).
 
         Returns:
             SearchResult if successful, None otherwise
@@ -396,7 +422,9 @@ class JobExecutor:
         }
         sampling_strategy = strategy_map[schedule.strategy]
 
-        checker = self._create_checker(need_sonarr=True)
+        if checker is None:
+            # Backward compatibility: create a new checker if none provided
+            checker = self._create_checker(need_sonarr=True)
         return await checker.check_series(
             series_id,
             strategy=sampling_strategy,

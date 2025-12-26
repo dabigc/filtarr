@@ -14,6 +14,7 @@ lazy client creation (creates/destroys client per operation).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -197,6 +198,7 @@ class ReleaseChecker:
         self._timeout = timeout
         self._tag_config = tag_config or TagConfig()
         self._tag_cache: dict[str, list[Tag]] | None = None
+        self._tag_cache_lock = asyncio.Lock()
 
         # Connection pooling: store client instances for reuse
         self._radarr_client: RadarrClient | None = None
@@ -293,6 +295,9 @@ class ReleaseChecker:
         Tags are cached per client type (radarr/sonarr) to avoid repeated
         API calls when processing batches of items.
 
+        Uses a lock to prevent race conditions when multiple concurrent
+        calls check the cache simultaneously.
+
         Args:
             client: The RadarrClient or SonarrClient instance
             cache_key: Key for caching ("radarr" or "sonarr")
@@ -300,11 +305,12 @@ class ReleaseChecker:
         Returns:
             List of Tag models
         """
-        if self._tag_cache is None:
-            self._tag_cache = {}
-        if cache_key not in self._tag_cache:
-            self._tag_cache[cache_key] = await client.get_tags()
-        return self._tag_cache[cache_key]
+        async with self._tag_cache_lock:
+            if self._tag_cache is None:
+                self._tag_cache = {}
+            if cache_key not in self._tag_cache:
+                self._tag_cache[cache_key] = await client.get_tags()
+            return self._tag_cache[cache_key]
 
     def clear_tag_cache(self) -> None:
         """Clear the tag cache.
