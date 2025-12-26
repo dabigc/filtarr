@@ -4,6 +4,7 @@ import pytest
 import respx
 from httpx import ConnectError, ConnectTimeout, ReadTimeout, Response
 
+from filtarr.clients.base import BaseArrClient
 from filtarr.clients.radarr import RadarrClient
 
 
@@ -228,3 +229,111 @@ class TestRetry:
                 await client.get_movie_releases(123)
 
             assert route.call_count == 3
+
+
+class TestParseRelease:
+    """Tests for _parse_release() static method."""
+
+    def test_parse_release_full_data(self) -> None:
+        """Should parse release with all fields populated."""
+        item = {
+            "guid": "abc123",
+            "title": "Movie.Name.2024.2160p.UHD.BluRay.x265-GROUP",
+            "indexer": "TestIndexer",
+            "size": 15_000_000_000,
+            "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+        }
+
+        release = BaseArrClient._parse_release(item)
+
+        assert release.guid == "abc123"
+        assert release.title == "Movie.Name.2024.2160p.UHD.BluRay.x265-GROUP"
+        assert release.indexer == "TestIndexer"
+        assert release.size == 15_000_000_000
+        assert release.quality.id == 19
+        assert release.quality.name == "WEBDL-2160p"
+        assert release.is_4k() is True
+
+    def test_parse_release_minimal_data(self) -> None:
+        """Should parse release with only required fields, using defaults for optional."""
+        item = {
+            "guid": "xyz789",
+            "title": "Movie.1080p",
+        }
+
+        release = BaseArrClient._parse_release(item)
+
+        assert release.guid == "xyz789"
+        assert release.title == "Movie.1080p"
+        assert release.indexer == "Unknown"
+        assert release.size == 0
+        assert release.quality.id == 0
+        assert release.quality.name == "Unknown"
+        assert release.is_4k() is False
+
+    def test_parse_release_missing_quality_nested(self) -> None:
+        """Should handle missing nested quality structure."""
+        item = {
+            "guid": "test",
+            "title": "Test Release",
+            "indexer": "Indexer1",
+            "size": 1000,
+            "quality": {},  # Missing nested "quality" key
+        }
+
+        release = BaseArrClient._parse_release(item)
+
+        assert release.quality.id == 0
+        assert release.quality.name == "Unknown"
+
+    def test_parse_release_empty_quality(self) -> None:
+        """Should handle empty quality object at top level."""
+        item = {
+            "guid": "test2",
+            "title": "Test Release 2",
+            "indexer": "Indexer2",
+            "size": 2000,
+            # No "quality" key at all
+        }
+
+        release = BaseArrClient._parse_release(item)
+
+        assert release.quality.id == 0
+        assert release.quality.name == "Unknown"
+
+    def test_parse_release_partial_quality(self) -> None:
+        """Should handle partial quality data with some fields missing."""
+        item = {
+            "guid": "partial",
+            "title": "Partial Quality Release",
+            "quality": {"quality": {"id": 7}},  # Missing "name"
+        }
+
+        release = BaseArrClient._parse_release(item)
+
+        assert release.quality.id == 7
+        assert release.quality.name == "Unknown"
+
+    def test_parse_release_4k_detection_via_quality_name(self) -> None:
+        """Should detect 4K from quality name."""
+        item = {
+            "guid": "4k-quality",
+            "title": "Movie.720p",  # Title says 720p
+            "quality": {"quality": {"id": 19, "name": "Bluray-2160p"}},  # Quality is 4K
+        }
+
+        release = BaseArrClient._parse_release(item)
+
+        assert release.is_4k() is True
+
+    def test_parse_release_4k_detection_via_title(self) -> None:
+        """Should detect 4K from title when quality name does not indicate 4K."""
+        item = {
+            "guid": "4k-title",
+            "title": "Movie.2024.2160p.WEB-DL",
+            "quality": {"quality": {"id": 1, "name": "Unknown"}},
+        }
+
+        release = BaseArrClient._parse_release(item)
+
+        assert release.is_4k() is True

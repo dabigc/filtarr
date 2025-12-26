@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
 
 import httpx
 from cachetools import TTLCache
@@ -16,7 +16,62 @@ from tenacity import (
     wait_exponential,
 )
 
+if TYPE_CHECKING:
+    from filtarr.models.common import Release, Tag
+
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class TaggableClient(Protocol):
+    """Protocol for clients that support tag operations.
+
+    This protocol defines the interface for clients that can manage tags
+    on media items. Both RadarrClient and SonarrClient implement this protocol.
+    """
+
+    async def get_tags(self) -> list[Tag]:
+        """Fetch all tags.
+
+        Returns:
+            List of Tag models
+        """
+        ...
+
+    async def create_tag(self, label: str) -> Tag:
+        """Create a new tag.
+
+        Args:
+            label: The tag label
+
+        Returns:
+            The created Tag model
+        """
+        ...
+
+    async def add_tag_to_item(self, item_id: int, tag_id: int) -> Any:
+        """Add a tag to an item (movie or series).
+
+        Args:
+            item_id: The item ID
+            tag_id: The tag ID to add
+
+        Returns:
+            The updated item model
+        """
+        ...
+
+    async def remove_tag_from_item(self, item_id: int, tag_id: int) -> Any:
+        """Remove a tag from an item (movie or series).
+
+        Args:
+            item_id: The item ID
+            tag_id: The tag ID to remove
+
+        Returns:
+            The updated item model
+        """
+        ...
 
 
 class BaseArrClient:
@@ -290,3 +345,27 @@ class BaseArrClient:
             httpx.HTTPStatusError: On HTTP errors (after retries exhausted)
         """
         return await self._request_with_retry("PUT", endpoint, json=json)
+
+    @staticmethod
+    def _parse_release(item: dict[str, Any]) -> Release:
+        """Parse a release from API response.
+
+        Args:
+            item: A single release item from the API response
+
+        Returns:
+            A Release model instance
+        """
+        from filtarr.models.common import Quality, Release
+
+        quality_data = item.get("quality", {}).get("quality", {})
+        return Release(
+            guid=item["guid"],
+            title=item["title"],
+            indexer=item.get("indexer", "Unknown"),
+            size=item.get("size", 0),
+            quality=Quality(
+                id=quality_data.get("id", 0),
+                name=quality_data.get("name", "Unknown"),
+            ),
+        )
