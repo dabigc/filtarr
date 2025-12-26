@@ -677,13 +677,7 @@ class TestParseBatchFile:
         """Should parse valid lines and skip invalid ones."""
         batch_file = tmp_path / "items.txt"
         batch_file.write_text(
-            "# Comment\n"
-            "movie:123\n"
-            "invalid_line\n"
-            "tv:456\n"
-            "series:Breaking Bad\n"
-            "\n"
-            "movie:The Matrix\n"
+            "# Comment\nmovie:123\ninvalid_line\ntv:456\nseries:Breaking Bad\n\nmovie:The Matrix\n"
         )
 
         error_console = Console(stderr=True, force_terminal=False)
