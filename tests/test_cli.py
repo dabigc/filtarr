@@ -1550,3 +1550,38 @@ class TestTTLForceFlag:
         assert result.exit_code == 0
         # get_cached_result should NOT have been called because of --dry-run
         mock_state_manager.get_cached_result.assert_not_called()
+
+
+class TestServeLogLevelValidation:
+    """Tests for serve command log level validation."""
+
+    def test_serve_invalid_log_level_exits_with_error(self) -> None:
+        """Should exit with error when an invalid log level is provided."""
+        mock_config = Config(
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
+        )
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(app, ["serve", "--log-level", "INVALID"])
+
+        assert result.exit_code == 1
+        assert "Invalid log level: INVALID" in result.output
+        assert "Valid options:" in result.output
+
+    def test_serve_valid_log_level_accepted(self) -> None:
+        """Should accept valid log levels (case-insensitive)."""
+        mock_config = Config(
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
+        )
+
+        # Mock run_server to avoid actually starting the server
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.webhook.run_server"),
+        ):
+            result = runner.invoke(app, ["serve", "--log-level", "debug"])
+
+        # Should not exit with error (log level is valid)
+        # The command will either succeed or fail for other reasons (like missing deps)
+        # but not due to log level validation
+        assert "Invalid log level" not in result.output

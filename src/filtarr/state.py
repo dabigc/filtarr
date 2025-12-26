@@ -378,7 +378,7 @@ class StateManager:
             last_checked = last_checked.replace(tzinfo=UTC)
 
         elapsed = now - last_checked
-        return elapsed.total_seconds() < (ttl_hours * 3600)
+        return elapsed.total_seconds() <= (ttl_hours * 3600)
 
     def get_cached_result(
         self, item_type: Literal["movie", "series"], item_id: int, ttl_hours: int

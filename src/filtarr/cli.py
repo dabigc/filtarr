@@ -20,7 +20,7 @@ from filtarr import __version__
 from filtarr.checker import ReleaseChecker, SamplingStrategy, SearchResult
 from filtarr.clients.radarr import RadarrClient
 from filtarr.clients.sonarr import SonarrClient
-from filtarr.config import Config, ConfigurationError
+from filtarr.config import VALID_LOG_LEVELS, Config, ConfigurationError
 from filtarr.criteria import MOVIE_ONLY_CRITERIA, SearchCriteria
 from filtarr.state import BatchProgress, CheckRecord, StateManager
 
@@ -234,15 +234,16 @@ def _format_cached_time(cached: CheckRecord) -> str:
 
     now = datetime.now(UTC)
     elapsed = now - last_checked
+    total_seconds = elapsed.total_seconds()
 
-    if elapsed.total_seconds() < 3600:
-        minutes = int(elapsed.total_seconds() / 60)
+    if total_seconds < 3600:
+        minutes = int(total_seconds / 60)
         return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
-    elif elapsed.total_seconds() < 86400:
-        hours = int(elapsed.total_seconds() / 3600)
+    elif total_seconds < 86400:
+        hours = int(total_seconds / 3600)
         return f"{hours} hour{'s' if hours != 1 else ''} ago"
     else:
-        days = int(elapsed.total_seconds() / 86400)
+        days = int(total_seconds / 86400)
         return f"{days} day{'s' if days != 1 else ''} ago"
 
 
@@ -1717,6 +1718,14 @@ def serve(
     server_host = host or config.webhook.host
     server_port = port or config.webhook.port
     scheduler_enabled = scheduler and config.scheduler.enabled
+
+    # Validate CLI log level if provided
+    if log_level and log_level.upper() not in VALID_LOG_LEVELS:
+        error_console.print(
+            f"[red]Invalid log level: {log_level}[/red]\n"
+            f"Valid options: {', '.join(sorted(VALID_LOG_LEVELS))}"
+        )
+        raise typer.Exit(1)
 
     # Priority: CLI flag > config (which includes env var > config file > default)
     effective_log_level = log_level or config.logging.level
