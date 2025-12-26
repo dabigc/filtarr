@@ -362,7 +362,7 @@ class TestExceptionHandlingInContext:
                     assert checker._radarr_client is not None
                     raise RuntimeError("Test exception")
 
-            # Client should have been cleaned up despite the exception
+            # pytest.raises catches the exception, so assertions below ARE reachable
             radarr_exit.assert_called_once()
             assert checker._radarr_client is None
             assert checker._in_context is False
@@ -385,7 +385,7 @@ class TestExceptionHandlingInContext:
                 async with checker:
                     raise ValueError("Test error")
 
-            # Verify __aexit__ was called with exception info
+            # pytest.raises catches the exception, so code below IS reachable
             call_args = radarr_exit.call_args
             exc_type, exc_val, exc_tb = call_args[0]
             assert exc_type is ValueError
