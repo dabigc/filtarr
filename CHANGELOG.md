@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1](https://github.com/dabigc/filtarr/compare/v1.3.0...v1.3.1) (2025-12-26)
+
+
+### Bug Fixes
+
+* Convert log level to lowercase for uvicorn compatibility ([#54](https://github.com/dabigc/filtarr/issues/54)) ([9a96d48](https://github.com/dabigc/filtarr/commit/9a96d48f72d60e510cef471a05db1ec4df0ec653))
+
 ## [1.3.0](https://github.com/dabigc/filtarr/compare/v1.2.1...v1.3.0) (2025-12-26)
 
 
