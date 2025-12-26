@@ -24,8 +24,8 @@ from filtarr.criteria import SearchCriteria
 def mock_config() -> Config:
     """Create a mock config for testing."""
     return Config(
-        radarr=RadarrConfig(url="http://radarr:7878", api_key="radarr-key"),
-        sonarr=SonarrConfig(url="http://sonarr:8989", api_key="sonarr-key"),
+        radarr=RadarrConfig(url="http://localhost:7878", api_key="radarr-key"),
+        sonarr=SonarrConfig(url="http://127.0.0.1:8989", api_key="sonarr-key"),
         timeout=30.0,
         tags=TagConfig(),
     )
@@ -56,7 +56,7 @@ class TestFetchMoviesToCheck:
         self, mock_config: Config, mock_console: Console
     ) -> None:
         """skip_tagged=True should filter out movies with matching tags."""
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[
@@ -65,7 +65,7 @@ class TestFetchMoviesToCheck:
                 ],
             )
         )
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[
@@ -91,7 +91,7 @@ class TestFetchMoviesToCheck:
         self, mock_config: Config, mock_console: Console
     ) -> None:
         """skip_tagged=False should return all movies."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[
@@ -115,7 +115,7 @@ class TestFetchMoviesToCheck:
         self, mock_config: Config, mock_console: Console
     ) -> None:
         """Different criteria should use different tag names for filtering."""
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[
@@ -125,7 +125,7 @@ class TestFetchMoviesToCheck:
                 ],
             )
         )
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[
@@ -154,7 +154,7 @@ class TestFetchSeriesToCheck:
         self, mock_config: Config, mock_console: Console
     ) -> None:
         """skip_tagged=True should filter out series with matching tags."""
-        respx.get("http://sonarr:8989/api/v3/tag").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[
@@ -163,7 +163,7 @@ class TestFetchSeriesToCheck:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/series").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(
             return_value=Response(
                 200,
                 json=[
@@ -188,7 +188,7 @@ class TestFetchSeriesToCheck:
         self, mock_config: Config, mock_console: Console
     ) -> None:
         """skip_tagged=False should return all series."""
-        respx.get("http://sonarr:8989/api/v3/series").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(
             return_value=Response(
                 200,
                 json=[
@@ -216,9 +216,9 @@ class TestProcessMovieItem:
         self, mock_console: Console, mock_error_console: Console
     ) -> None:
         """Movie lookup by name with no matches should return None."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(return_value=Response(200, json=[]))
+        respx.get("http://localhost:7878/api/v3/movie").mock(return_value=Response(200, json=[]))
 
-        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
 
         result = await _process_movie_item(
             checker=checker,
@@ -243,7 +243,7 @@ class TestProcessMovieItem:
         self, mock_console: Console, mock_error_console: Console
     ) -> None:
         """Movie lookup by name with multiple matches should return None."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[
@@ -254,7 +254,7 @@ class TestProcessMovieItem:
             )
         )
 
-        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
 
         result = await _process_movie_item(
             checker=checker,
@@ -278,13 +278,13 @@ class TestProcessMovieItem:
         self, mock_console: Console, mock_error_console: Console
     ) -> None:
         """Movie lookup by ID should check the movie directly."""
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -299,7 +299,7 @@ class TestProcessMovieItem:
             )
         )
 
-        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
 
         result = await _process_movie_item(
             checker=checker,
@@ -322,24 +322,24 @@ class TestProcessMovieItem:
         self, mock_console: Console, mock_error_console: Console
     ) -> None:
         """Movie lookup by name with single match should process the movie."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[{"id": 456, "title": "Inception", "year": 2010}],
             )
         )
         # check_movie fetches movie info first
-        respx.get("http://radarr:7878/api/v3/movie/456").mock(
+        respx.get("http://localhost:7878/api/v3/movie/456").mock(
             return_value=Response(
                 200,
                 json={"id": 456, "title": "Inception", "year": 2010, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "456"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "456"}).mock(
             return_value=Response(200, json=[])
         )
 
-        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
 
         result = await _process_movie_item(
             checker=checker,
@@ -366,9 +366,9 @@ class TestProcessSeriesItem:
         self, mock_console: Console, mock_error_console: Console
     ) -> None:
         """Series lookup by name with no matches should return None."""
-        respx.get("http://sonarr:8989/api/v3/series").mock(return_value=Response(200, json=[]))
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(return_value=Response(200, json=[]))
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
 
         result = await _process_series_item(
             checker=checker,
@@ -394,7 +394,7 @@ class TestProcessSeriesItem:
         self, mock_console: Console, mock_error_console: Console
     ) -> None:
         """Series lookup by name with multiple matches should return None."""
-        respx.get("http://sonarr:8989/api/v3/series").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(
             return_value=Response(
                 200,
                 json=[
@@ -404,7 +404,7 @@ class TestProcessSeriesItem:
             )
         )
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
 
         result = await _process_series_item(
             checker=checker,
@@ -430,13 +430,13 @@ class TestProcessSeriesItem:
         self, mock_console: Console, mock_error_console: Console
     ) -> None:
         """Series lookup by ID should check the series directly."""
-        respx.get("http://sonarr:8989/api/v3/series/789").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/789").mock(
             return_value=Response(
                 200,
                 json={"id": 789, "title": "Test Series", "year": 2020, "seasons": [], "tags": []},
             )
         )
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "789"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "789"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -451,7 +451,7 @@ class TestProcessSeriesItem:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -466,7 +466,7 @@ class TestProcessSeriesItem:
             )
         )
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
 
         result = await _process_series_item(
             checker=checker,
@@ -491,19 +491,19 @@ class TestProcessSeriesItem:
         self, mock_console: Console, mock_error_console: Console
     ) -> None:
         """Series lookup by name with single match should process the series."""
-        respx.get("http://sonarr:8989/api/v3/series").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(
             return_value=Response(
                 200,
                 json=[{"id": 456, "title": "Game of Thrones", "year": 2011, "seasons": []}],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/series/456").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/456").mock(
             return_value=Response(
                 200,
                 json={"id": 456, "title": "Game of Thrones", "year": 2011, "seasons": []},
             )
         )
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "456"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "456"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -518,11 +518,11 @@ class TestProcessSeriesItem:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "1001"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "1001"}).mock(
             return_value=Response(200, json=[])
         )
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
 
         result = await _process_series_item(
             checker=checker,
@@ -551,13 +551,13 @@ class TestProcessMovieItemWithDifferentCriteria:
         self, mock_console: Console, mock_error_console: Console
     ) -> None:
         """Movie processing with HDR criteria should search for HDR releases."""
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "HDR Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -572,7 +572,7 @@ class TestProcessMovieItemWithDifferentCriteria:
             )
         )
 
-        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
 
         result = await _process_movie_item(
             checker=checker,
@@ -598,13 +598,13 @@ class TestProcessSeriesItemWithStrategies:
         self, mock_console: Console, mock_error_console: Console
     ) -> None:
         """Series processing with ALL strategy should check all seasons."""
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Short Series", "year": 2023, "seasons": []},
             )
         )
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -627,14 +627,14 @@ class TestProcessSeriesItemWithStrategies:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(200, json=[])
         )
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "201"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "201"}).mock(
             return_value=Response(200, json=[])
         )
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
 
         result = await _process_series_item(
             checker=checker,
@@ -659,13 +659,13 @@ class TestProcessSeriesItemWithStrategies:
         self, mock_console: Console, mock_error_console: Console
     ) -> None:
         """Series processing with DISTRIBUTED strategy should check first, middle, last."""
-        respx.get("http://sonarr:8989/api/v3/series/456").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/456").mock(
             return_value=Response(
                 200,
                 json={"id": 456, "title": "Long Series", "year": 2018, "seasons": []},
             )
         )
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "456"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "456"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -683,11 +683,11 @@ class TestProcessSeriesItemWithStrategies:
         )
         # Distributed should check seasons 1, 3, 5
         for ep_id in [101, 103, 105]:
-            respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": str(ep_id)}).mock(
-                return_value=Response(200, json=[])
-            )
+            respx.get(
+                "http://127.0.0.1:8989/api/v3/release", params={"episodeId": str(ep_id)}
+            ).mock(return_value=Response(200, json=[]))
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
 
         result = await _process_series_item(
             checker=checker,
@@ -716,13 +716,13 @@ class TestProcessItemsWithDryRun:
         self, mock_console: Console, mock_error_console: Console
     ) -> None:
         """dry_run mode should not apply actual tags."""
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -739,7 +739,7 @@ class TestProcessItemsWithDryRun:
         # No tag API mocks needed - dry_run shouldn't call them
 
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=TagConfig(),
         )
@@ -770,7 +770,7 @@ class TestProcessMovieItemEdgeCases:
         self, mock_console: Console, mock_error_console: Console
     ) -> None:
         """When many matches are found, display should be truncated."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[
@@ -780,7 +780,7 @@ class TestProcessMovieItemEdgeCases:
             )
         )
 
-        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
 
         result = await _process_movie_item(
             checker=checker,
@@ -808,7 +808,7 @@ class TestProcessSeriesItemEdgeCases:
         self, mock_console: Console, mock_error_console: Console
     ) -> None:
         """When many series matches are found, display should be truncated."""
-        respx.get("http://sonarr:8989/api/v3/series").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(
             return_value=Response(
                 200,
                 json=[
@@ -818,7 +818,7 @@ class TestProcessSeriesItemEdgeCases:
             )
         )
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
 
         result = await _process_series_item(
             checker=checker,

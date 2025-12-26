@@ -55,8 +55,8 @@ class TestServeCommand:
         from filtarr.config import Config, RadarrConfig, SonarrConfig, WebhookConfig
 
         mock_config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="test"),
-            sonarr=SonarrConfig(url="http://sonarr:8989", api_key="test"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="test"),
+            sonarr=SonarrConfig(url="http://127.0.0.1:8989", api_key="test"),
             webhook=WebhookConfig(host="127.0.0.1", port=8080),
         )
         mock_config_load.return_value = mock_config
@@ -76,7 +76,7 @@ class TestServeCommand:
         from filtarr.config import Config, RadarrConfig, WebhookConfig
 
         mock_config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="test"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="test"),
             webhook=WebhookConfig(host="127.0.0.1", port=8080),
         )
         mock_config_load.return_value = mock_config
@@ -97,7 +97,7 @@ class TestServeCommand:
         from filtarr.config import Config, RadarrConfig, WebhookConfig
 
         mock_config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="test"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="test"),
             webhook=WebhookConfig(host="127.0.0.1", port=8080),
         )
         mock_config_load.return_value = mock_config
@@ -117,7 +117,7 @@ class TestServeCommand:
         from filtarr.config import Config, RadarrConfig, SchedulerConfig, WebhookConfig
 
         mock_config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="test"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="test"),
             webhook=WebhookConfig(host="127.0.0.1", port=8080),
             scheduler=SchedulerConfig(enabled=True),
         )
@@ -138,7 +138,7 @@ class TestServeCommand:
         from filtarr.config import Config, RadarrConfig, SchedulerConfig, WebhookConfig
 
         mock_config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="test"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="test"),
             webhook=WebhookConfig(host="127.0.0.1", port=8080),
             scheduler=SchedulerConfig(enabled=True, schedules=[]),
         )
@@ -164,8 +164,8 @@ class TestServeCommand:
         from filtarr.config import Config, RadarrConfig, SonarrConfig, WebhookConfig
 
         mock_config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="test"),
-            sonarr=SonarrConfig(url="http://sonarr:8989", api_key="test"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="test"),
+            sonarr=SonarrConfig(url="http://127.0.0.1:8989", api_key="test"),
             webhook=WebhookConfig(host="127.0.0.1", port=8080),
         )
         mock_config_load.return_value = mock_config
@@ -184,7 +184,7 @@ class TestServeCommand:
         from filtarr.config import Config, RadarrConfig, WebhookConfig
 
         mock_config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="test"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="test"),
             webhook=WebhookConfig(host="127.0.0.1", port=8080),
         )
         mock_config_load.return_value = mock_config

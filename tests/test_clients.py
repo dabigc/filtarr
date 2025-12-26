@@ -15,11 +15,11 @@ class TestRadarrClient:
     @pytest.mark.asyncio
     async def test_get_movie_releases(self, sample_radarr_response: list[dict]) -> None:
         """Should parse releases from Radarr API response."""
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(200, json=sample_radarr_response)
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             releases = await client.get_movie_releases(123)
 
         assert len(releases) == 2
@@ -31,11 +31,11 @@ class TestRadarrClient:
     @pytest.mark.asyncio
     async def test_has_4k_releases_true(self, sample_radarr_response: list[dict]) -> None:
         """Should return True when 4K releases exist."""
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(200, json=sample_radarr_response)
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             has_4k = await client.has_4k_releases(123)
 
         assert has_4k is True
@@ -44,7 +44,7 @@ class TestRadarrClient:
     @pytest.mark.asyncio
     async def test_has_4k_releases_false(self) -> None:
         """Should return False when no 4K releases exist."""
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -59,7 +59,7 @@ class TestRadarrClient:
             )
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             has_4k = await client.has_4k_releases(123)
 
         assert has_4k is False
@@ -67,7 +67,7 @@ class TestRadarrClient:
     @pytest.mark.asyncio
     async def test_client_not_in_context_raises(self) -> None:
         """Should raise when client used outside context manager."""
-        client = RadarrClient("http://radarr:7878", "test-api-key")
+        client = RadarrClient("http://localhost:7878", "test-api-key")
         with pytest.raises(RuntimeError, match="must be used within async context"):
             _ = client.client
 
@@ -79,7 +79,7 @@ class TestRadarrClientSearch:
     @pytest.mark.asyncio
     async def test_get_all_movies(self) -> None:
         """Should fetch and parse all movies."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[
@@ -105,7 +105,7 @@ class TestRadarrClientSearch:
             )
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             movies = await client.get_all_movies()
 
         assert len(movies) == 2
@@ -117,7 +117,7 @@ class TestRadarrClientSearch:
     @pytest.mark.asyncio
     async def test_search_movies_case_insensitive(self) -> None:
         """Should search movies case-insensitively."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[
@@ -128,7 +128,7 @@ class TestRadarrClientSearch:
             )
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             results = await client.search_movies("matrix")
 
         assert len(results) == 2
@@ -138,7 +138,7 @@ class TestRadarrClientSearch:
     @pytest.mark.asyncio
     async def test_search_movies_no_matches(self) -> None:
         """Should return empty list when no matches."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[
@@ -147,7 +147,7 @@ class TestRadarrClientSearch:
             )
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             results = await client.search_movies("inception")
 
         assert results == []
@@ -156,7 +156,7 @@ class TestRadarrClientSearch:
     @pytest.mark.asyncio
     async def test_find_movie_by_name_exact_match(self) -> None:
         """Should return exact match when found."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[
@@ -166,7 +166,7 @@ class TestRadarrClientSearch:
             )
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             movie = await client.find_movie_by_name("The Matrix")
 
         assert movie is not None
@@ -177,7 +177,7 @@ class TestRadarrClientSearch:
     @pytest.mark.asyncio
     async def test_find_movie_by_name_closest_match(self) -> None:
         """Should return shortest title when no exact match."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[
@@ -187,7 +187,7 @@ class TestRadarrClientSearch:
             )
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             movie = await client.find_movie_by_name("Matrix")
 
         assert movie is not None
@@ -199,14 +199,14 @@ class TestRadarrClientSearch:
     @pytest.mark.asyncio
     async def test_find_movie_by_name_not_found(self) -> None:
         """Should return None when movie not found."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[{"id": 1, "title": "The Matrix", "year": 1999}],
             )
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             movie = await client.find_movie_by_name("Inception")
 
         assert movie is None
@@ -219,7 +219,7 @@ class TestSonarrClientSearch:
     @pytest.mark.asyncio
     async def test_get_all_series(self) -> None:
         """Should fetch and parse all series."""
-        respx.get("http://sonarr:8989/api/v3/series").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(
             return_value=Response(
                 200,
                 json=[
@@ -241,7 +241,7 @@ class TestSonarrClientSearch:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             series = await client.get_all_series()
 
         assert len(series) == 2
@@ -252,7 +252,7 @@ class TestSonarrClientSearch:
     @pytest.mark.asyncio
     async def test_search_series_case_insensitive(self) -> None:
         """Should search series case-insensitively."""
-        respx.get("http://sonarr:8989/api/v3/series").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(
             return_value=Response(
                 200,
                 json=[
@@ -263,7 +263,7 @@ class TestSonarrClientSearch:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             results = await client.search_series("breaking")
 
         assert len(results) == 1
@@ -273,7 +273,7 @@ class TestSonarrClientSearch:
     @pytest.mark.asyncio
     async def test_find_series_by_name_exact_match(self) -> None:
         """Should return exact match when found."""
-        respx.get("http://sonarr:8989/api/v3/series").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(
             return_value=Response(
                 200,
                 json=[
@@ -283,7 +283,7 @@ class TestSonarrClientSearch:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             series = await client.find_series_by_name("Breaking Bad")
 
         assert series is not None
@@ -294,14 +294,14 @@ class TestSonarrClientSearch:
     @pytest.mark.asyncio
     async def test_find_series_by_name_not_found(self) -> None:
         """Should return None when series not found."""
-        respx.get("http://sonarr:8989/api/v3/series").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(
             return_value=Response(
                 200,
                 json=[{"id": 1, "title": "Breaking Bad", "year": 2008, "seasons": []}],
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             series = await client.find_series_by_name("The Office")
 
         assert series is None
@@ -314,7 +314,7 @@ class TestSonarrClient:
     @pytest.mark.asyncio
     async def test_get_series_releases(self) -> None:
         """Should parse releases from Sonarr API response."""
-        respx.get("http://sonarr:8989/api/v3/release", params={"seriesId": "456"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"seriesId": "456"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -329,7 +329,7 @@ class TestSonarrClient:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             releases = await client.get_series_releases(456)
 
         assert len(releases) == 1
@@ -343,7 +343,7 @@ class TestRadarrTagManagement:
     @pytest.mark.asyncio
     async def test_get_tags(self) -> None:
         """Should fetch and parse all tags."""
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[
@@ -354,7 +354,7 @@ class TestRadarrTagManagement:
             )
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             tags = await client.get_tags()
 
         assert len(tags) == 3
@@ -366,9 +366,9 @@ class TestRadarrTagManagement:
     @pytest.mark.asyncio
     async def test_get_tags_empty(self) -> None:
         """Should return empty list when no tags exist."""
-        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.get("http://localhost:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             tags = await client.get_tags()
 
         assert tags == []
@@ -377,11 +377,11 @@ class TestRadarrTagManagement:
     @pytest.mark.asyncio
     async def test_create_tag(self) -> None:
         """Should create a new tag and return it."""
-        respx.post("http://radarr:7878/api/v3/tag").mock(
+        respx.post("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(201, json={"id": 5, "label": "new-tag"})
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             tag = await client.create_tag("new-tag")
 
         assert tag.id == 5
@@ -391,7 +391,7 @@ class TestRadarrTagManagement:
     @pytest.mark.asyncio
     async def test_get_or_create_tag_existing(self) -> None:
         """Should return existing tag when it exists."""
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[
@@ -401,7 +401,7 @@ class TestRadarrTagManagement:
             )
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             tag = await client.get_or_create_tag("4k-available")
 
         assert tag.id == 1
@@ -411,14 +411,14 @@ class TestRadarrTagManagement:
     @pytest.mark.asyncio
     async def test_get_or_create_tag_case_insensitive(self) -> None:
         """Should find tag case-insensitively."""
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[{"id": 1, "label": "4K-Available"}],
             )
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             tag = await client.get_or_create_tag("4k-available")
 
         assert tag.id == 1
@@ -428,12 +428,12 @@ class TestRadarrTagManagement:
     @pytest.mark.asyncio
     async def test_get_or_create_tag_new(self) -> None:
         """Should create tag when it doesn't exist."""
-        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
-        respx.post("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.post("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(201, json={"id": 1, "label": "new-tag"})
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             tag = await client.get_or_create_tag("new-tag")
 
         assert tag.id == 1
@@ -454,11 +454,11 @@ class TestRadarrTagManagement:
             "tags": [1, 2],
             "extraField": "ignored",
         }
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(200, json=movie_data)
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             result = await client.get_movie_raw(123)
 
         assert result["id"] == 123
@@ -480,11 +480,11 @@ class TestRadarrTagManagement:
             "hasFile": True,
             "tags": [1, 2, 3],
         }
-        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+        respx.put("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(200, json=movie_data)
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             movie = await client.update_movie(movie_data)
 
         assert movie.id == 123
@@ -495,7 +495,7 @@ class TestRadarrTagManagement:
     async def test_add_tag_to_movie_new_tag(self) -> None:
         """Should add new tag to movie."""
         # First fetch the movie
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -507,7 +507,7 @@ class TestRadarrTagManagement:
             )
         )
         # Then update with new tag
-        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+        respx.put("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -519,7 +519,7 @@ class TestRadarrTagManagement:
             )
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             movie = await client.add_tag_to_movie(123, 2)
 
         assert movie.id == 123
@@ -530,7 +530,7 @@ class TestRadarrTagManagement:
     async def test_add_tag_to_movie_already_exists(self) -> None:
         """Should return movie unchanged when tag already exists."""
         # First fetch shows tag already exists
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -542,7 +542,7 @@ class TestRadarrTagManagement:
             )
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             movie = await client.add_tag_to_movie(123, 2)
 
         assert movie.id == 123
@@ -553,7 +553,7 @@ class TestRadarrTagManagement:
     async def test_remove_tag_from_movie(self) -> None:
         """Should remove tag from movie."""
         # First fetch the movie
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -565,7 +565,7 @@ class TestRadarrTagManagement:
             )
         )
         # Then update without the tag
-        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+        respx.put("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -577,7 +577,7 @@ class TestRadarrTagManagement:
             )
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             movie = await client.remove_tag_from_movie(123, 2)
 
         assert movie.id == 123
@@ -587,7 +587,7 @@ class TestRadarrTagManagement:
     @pytest.mark.asyncio
     async def test_remove_tag_from_movie_not_present(self) -> None:
         """Should return movie unchanged when tag not present."""
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -599,7 +599,7 @@ class TestRadarrTagManagement:
             )
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             movie = await client.remove_tag_from_movie(123, 99)
 
         assert movie.id == 123
@@ -609,7 +609,7 @@ class TestRadarrTagManagement:
     @pytest.mark.asyncio
     async def test_add_tag_to_movie_empty_tags(self) -> None:
         """Should handle movie with no existing tags."""
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -620,7 +620,7 @@ class TestRadarrTagManagement:
                 },
             )
         )
-        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+        respx.put("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -632,7 +632,7 @@ class TestRadarrTagManagement:
             )
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             movie = await client.add_tag_to_movie(123, 5)
 
         assert movie.tags == [5]
@@ -641,7 +641,7 @@ class TestRadarrTagManagement:
     @pytest.mark.asyncio
     async def test_remove_tag_from_movie_last_tag(self) -> None:
         """Should handle removing last tag from movie."""
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -652,7 +652,7 @@ class TestRadarrTagManagement:
                 },
             )
         )
-        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+        respx.put("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -664,7 +664,7 @@ class TestRadarrTagManagement:
             )
         )
 
-        async with RadarrClient("http://radarr:7878", "test-api-key") as client:
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
             movie = await client.remove_tag_from_movie(123, 1)
 
         assert movie.tags == []

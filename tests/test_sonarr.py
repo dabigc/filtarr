@@ -16,7 +16,7 @@ class TestGetSeries:
     @pytest.mark.asyncio
     async def test_get_series_parses_response(self) -> None:
         """Should parse series with seasons from API response."""
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -46,7 +46,7 @@ class TestGetSeries:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             series = await client.get_series(123)
 
         assert series.id == 123
@@ -67,7 +67,7 @@ class TestGetEpisodes:
     @pytest.mark.asyncio
     async def test_get_episodes_parses_response(self) -> None:
         """Should parse episode list from API response."""
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -97,7 +97,7 @@ class TestGetEpisodes:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             episodes = await client.get_episodes(123)
 
         assert len(episodes) == 2
@@ -114,7 +114,7 @@ class TestGetEpisodes:
     async def test_get_episodes_with_season_filter(self) -> None:
         """Should include seasonNumber in query params when specified."""
         respx.get(
-            "http://sonarr:8989/api/v3/episode",
+            "http://127.0.0.1:8989/api/v3/episode",
             params={"seriesId": "123", "seasonNumber": "2"},
         ).mock(
             return_value=Response(
@@ -133,7 +133,7 @@ class TestGetEpisodes:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             episodes = await client.get_episodes(123, season_number=2)
 
         assert len(episodes) == 1
@@ -147,7 +147,7 @@ class TestGetEpisodeReleases:
     @pytest.mark.asyncio
     async def test_get_episode_releases_parses_response(self) -> None:
         """Should parse releases for a specific episode."""
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "1001"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "1001"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -169,7 +169,7 @@ class TestGetEpisodeReleases:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             releases = await client.get_episode_releases(1001)
 
         assert len(releases) == 2
@@ -191,7 +191,7 @@ class TestGetLatestAiredEpisode:
         last_week = today - timedelta(days=7)
         tomorrow = today + timedelta(days=1)
 
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -226,7 +226,7 @@ class TestGetLatestAiredEpisode:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             latest = await client.get_latest_aired_episode(123)
 
         assert latest is not None
@@ -240,7 +240,7 @@ class TestGetLatestAiredEpisode:
         tomorrow = date.today() + timedelta(days=1)
         next_week = date.today() + timedelta(days=7)
 
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -266,7 +266,7 @@ class TestGetLatestAiredEpisode:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             latest = await client.get_latest_aired_episode(123)
 
         assert latest is None
@@ -275,11 +275,11 @@ class TestGetLatestAiredEpisode:
     @pytest.mark.asyncio
     async def test_returns_none_when_no_episodes(self) -> None:
         """Should return None if series has no episodes."""
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(200, json=[])
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             latest = await client.get_latest_aired_episode(123)
 
         assert latest is None
@@ -290,7 +290,7 @@ class TestGetLatestAiredEpisode:
         """Should skip episodes without air dates."""
         yesterday = date.today() - timedelta(days=1)
 
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -316,7 +316,7 @@ class TestGetLatestAiredEpisode:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             latest = await client.get_latest_aired_episode(123)
 
         assert latest is not None
@@ -398,7 +398,7 @@ class TestSonarrTagManagement:
     @pytest.mark.asyncio
     async def test_get_tags(self) -> None:
         """Should fetch and parse all tags."""
-        respx.get("http://sonarr:8989/api/v3/tag").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[
@@ -409,7 +409,7 @@ class TestSonarrTagManagement:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             tags = await client.get_tags()
 
         assert len(tags) == 3
@@ -421,9 +421,9 @@ class TestSonarrTagManagement:
     @pytest.mark.asyncio
     async def test_get_tags_empty(self) -> None:
         """Should return empty list when no tags exist."""
-        respx.get("http://sonarr:8989/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(return_value=Response(200, json=[]))
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             tags = await client.get_tags()
 
         assert tags == []
@@ -432,11 +432,11 @@ class TestSonarrTagManagement:
     @pytest.mark.asyncio
     async def test_create_tag(self) -> None:
         """Should create a new tag and return it."""
-        respx.post("http://sonarr:8989/api/v3/tag").mock(
+        respx.post("http://127.0.0.1:8989/api/v3/tag").mock(
             return_value=Response(201, json={"id": 5, "label": "new-tag"})
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             tag = await client.create_tag("new-tag")
 
         assert tag.id == 5
@@ -446,7 +446,7 @@ class TestSonarrTagManagement:
     @pytest.mark.asyncio
     async def test_get_or_create_tag_existing(self) -> None:
         """Should return existing tag when it exists."""
-        respx.get("http://sonarr:8989/api/v3/tag").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[
@@ -456,7 +456,7 @@ class TestSonarrTagManagement:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             tag = await client.get_or_create_tag("4k-available")
 
         assert tag.id == 1
@@ -466,14 +466,14 @@ class TestSonarrTagManagement:
     @pytest.mark.asyncio
     async def test_get_or_create_tag_case_insensitive(self) -> None:
         """Should find tag case-insensitively."""
-        respx.get("http://sonarr:8989/api/v3/tag").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[{"id": 1, "label": "4K-Available"}],
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             tag = await client.get_or_create_tag("4k-available")
 
         assert tag.id == 1
@@ -483,12 +483,12 @@ class TestSonarrTagManagement:
     @pytest.mark.asyncio
     async def test_get_or_create_tag_new(self) -> None:
         """Should create tag when it doesn't exist."""
-        respx.get("http://sonarr:8989/api/v3/tag").mock(return_value=Response(200, json=[]))
-        respx.post("http://sonarr:8989/api/v3/tag").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.post("http://127.0.0.1:8989/api/v3/tag").mock(
             return_value=Response(201, json={"id": 1, "label": "new-tag"})
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             tag = await client.get_or_create_tag("new-tag")
 
         assert tag.id == 1
@@ -507,11 +507,11 @@ class TestSonarrTagManagement:
             "tags": [1, 2],
             "extraField": "ignored",
         }
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(200, json=series_data)
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             result = await client.get_series_raw(123)
 
         assert result["id"] == 123
@@ -531,11 +531,11 @@ class TestSonarrTagManagement:
             "seasons": [],
             "tags": [1, 2, 3],
         }
-        respx.put("http://sonarr:8989/api/v3/series/123").mock(
+        respx.put("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(200, json=series_data)
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             series = await client.update_series(series_data)
 
         assert series.id == 123
@@ -546,7 +546,7 @@ class TestSonarrTagManagement:
     async def test_add_tag_to_series_new_tag(self) -> None:
         """Should add new tag to series."""
         # First fetch the series
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -559,7 +559,7 @@ class TestSonarrTagManagement:
             )
         )
         # Then update with new tag
-        respx.put("http://sonarr:8989/api/v3/series/123").mock(
+        respx.put("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -572,7 +572,7 @@ class TestSonarrTagManagement:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             series = await client.add_tag_to_series(123, 2)
 
         assert series.id == 123
@@ -583,7 +583,7 @@ class TestSonarrTagManagement:
     async def test_add_tag_to_series_already_exists(self) -> None:
         """Should return series unchanged when tag already exists."""
         # First fetch shows tag already exists
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -596,7 +596,7 @@ class TestSonarrTagManagement:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             series = await client.add_tag_to_series(123, 2)
 
         assert series.id == 123
@@ -607,7 +607,7 @@ class TestSonarrTagManagement:
     async def test_remove_tag_from_series(self) -> None:
         """Should remove tag from series."""
         # First fetch the series
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -620,7 +620,7 @@ class TestSonarrTagManagement:
             )
         )
         # Then update without the tag
-        respx.put("http://sonarr:8989/api/v3/series/123").mock(
+        respx.put("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -633,7 +633,7 @@ class TestSonarrTagManagement:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             series = await client.remove_tag_from_series(123, 2)
 
         assert series.id == 123
@@ -643,7 +643,7 @@ class TestSonarrTagManagement:
     @pytest.mark.asyncio
     async def test_remove_tag_from_series_not_present(self) -> None:
         """Should return series unchanged when tag not present."""
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -656,7 +656,7 @@ class TestSonarrTagManagement:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             series = await client.remove_tag_from_series(123, 99)
 
         assert series.id == 123
@@ -666,7 +666,7 @@ class TestSonarrTagManagement:
     @pytest.mark.asyncio
     async def test_add_tag_to_series_empty_tags(self) -> None:
         """Should handle series with no existing tags."""
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -678,7 +678,7 @@ class TestSonarrTagManagement:
                 },
             )
         )
-        respx.put("http://sonarr:8989/api/v3/series/123").mock(
+        respx.put("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -691,7 +691,7 @@ class TestSonarrTagManagement:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             series = await client.add_tag_to_series(123, 5)
 
         assert series.tags == [5]
@@ -700,7 +700,7 @@ class TestSonarrTagManagement:
     @pytest.mark.asyncio
     async def test_remove_tag_from_series_last_tag(self) -> None:
         """Should handle removing last tag from series."""
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -712,7 +712,7 @@ class TestSonarrTagManagement:
                 },
             )
         )
-        respx.put("http://sonarr:8989/api/v3/series/123").mock(
+        respx.put("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -725,7 +725,7 @@ class TestSonarrTagManagement:
             )
         )
 
-        async with SonarrClient("http://sonarr:8989", "test-api-key") as client:
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
             series = await client.remove_tag_from_series(123, 1)
 
         assert series.tags == []

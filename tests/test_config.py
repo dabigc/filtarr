@@ -17,7 +17,7 @@ class TestConfigFromEnv:
         with patch.dict(
             os.environ,
             {
-                "FILTARR_RADARR_URL": "http://radarr:7878",
+                "FILTARR_RADARR_URL": "http://localhost:7878",
                 "FILTARR_RADARR_API_KEY": "test-key",
             },
             clear=False,
@@ -25,7 +25,7 @@ class TestConfigFromEnv:
             config = Config.load()
 
         assert config.radarr is not None
-        assert config.radarr.url == "http://radarr:7878"
+        assert config.radarr.url == "http://localhost:7878"
         assert config.radarr.api_key == "test-key"
 
     def test_load_sonarr_from_env(self) -> None:
@@ -33,7 +33,7 @@ class TestConfigFromEnv:
         with patch.dict(
             os.environ,
             {
-                "FILTARR_SONARR_URL": "http://sonarr:8989",
+                "FILTARR_SONARR_URL": "http://localhost:8989",
                 "FILTARR_SONARR_API_KEY": "sonarr-key",
             },
             clear=False,
@@ -41,7 +41,7 @@ class TestConfigFromEnv:
             config = Config.load()
 
         assert config.sonarr is not None
-        assert config.sonarr.url == "http://sonarr:8989"
+        assert config.sonarr.url == "http://localhost:8989"
         assert config.sonarr.api_key == "sonarr-key"
 
     def test_partial_env_vars_ignored(self, tmp_path: Path) -> None:
@@ -51,7 +51,7 @@ class TestConfigFromEnv:
             patch.object(Path, "home", return_value=tmp_path),
             patch.dict(
                 os.environ,
-                {"FILTARR_RADARR_URL": "http://radarr:7878"},
+                {"FILTARR_RADARR_URL": "http://localhost:7878"},
                 clear=True,
             ),
         ):
@@ -70,11 +70,11 @@ class TestConfigFromFile:
         config_file = config_dir / "config.toml"
         config_file.write_text("""
 [radarr]
-url = "http://radarr:7878"
+url = "http://localhost:7878"
 api_key = "file-radarr-key"
 
 [sonarr]
-url = "http://sonarr:8989"
+url = "http://localhost:8989"
 api_key = "file-sonarr-key"
 """)
 
@@ -85,10 +85,10 @@ api_key = "file-sonarr-key"
             config = Config.load()
 
         assert config.radarr is not None
-        assert config.radarr.url == "http://radarr:7878"
+        assert config.radarr.url == "http://localhost:7878"
         assert config.radarr.api_key == "file-radarr-key"
         assert config.sonarr is not None
-        assert config.sonarr.url == "http://sonarr:8989"
+        assert config.sonarr.url == "http://localhost:8989"
 
     def test_env_overrides_file(self, tmp_path: Path) -> None:
         """Environment variables should override file config."""
@@ -97,7 +97,7 @@ api_key = "file-sonarr-key"
         config_file = config_dir / "config.toml"
         config_file.write_text("""
 [radarr]
-url = "http://file-url:7878"
+url = "http://127.0.0.1:7878"
 api_key = "file-key"
 """)
 
@@ -106,7 +106,7 @@ api_key = "file-key"
             patch.dict(
                 os.environ,
                 {
-                    "FILTARR_RADARR_URL": "http://env-url:7878",
+                    "FILTARR_RADARR_URL": "http://localhost:7878",
                     "FILTARR_RADARR_API_KEY": "env-key",
                 },
                 clear=True,
@@ -115,7 +115,7 @@ api_key = "file-key"
             config = Config.load()
 
         assert config.radarr is not None
-        assert config.radarr.url == "http://env-url:7878"
+        assert config.radarr.url == "http://localhost:7878"
         assert config.radarr.api_key == "env-key"
 
     def test_invalid_toml_raises_error(self, tmp_path: Path) -> None:
@@ -138,9 +138,9 @@ class TestConfigRequireMethods:
 
     def test_require_radarr_when_configured(self) -> None:
         """Should return RadarrConfig when configured."""
-        config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+        config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
         radarr = config.require_radarr()
-        assert radarr.url == "http://test"
+        assert radarr.url == "http://localhost:7878"
 
     def test_require_radarr_when_not_configured(self) -> None:
         """Should raise ConfigurationError when Radarr not configured."""
@@ -150,9 +150,9 @@ class TestConfigRequireMethods:
 
     def test_require_sonarr_when_configured(self) -> None:
         """Should return SonarrConfig when configured."""
-        config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
         sonarr = config.require_sonarr()
-        assert sonarr.url == "http://test"
+        assert sonarr.url == "http://localhost:8989"
 
     def test_require_sonarr_when_not_configured(self) -> None:
         """Should raise ConfigurationError when Sonarr not configured."""
@@ -429,7 +429,7 @@ api_key = "some-key"
         config_file = config_dir / "config.toml"
         config_file.write_text("""
 [radarr]
-url = "http://radarr:7878"
+url = "http://localhost:7878"
 """)
 
         with (
@@ -465,7 +465,7 @@ api_key = "some-key"
         config_file = config_dir / "config.toml"
         config_file.write_text("""
 [sonarr]
-url = "http://sonarr:8989"
+url = "http://127.0.0.1:8989"
 """)
 
         with (
@@ -502,7 +502,7 @@ api_key = "some-key"
         config_file = config_dir / "config.toml"
         config_file.write_text("""
 [sonarr]
-url = "http://sonarr:8989"
+url = "http://127.0.0.1:8989"
 api_key = ""
 """)
 
@@ -789,3 +789,353 @@ path = "/original/state.json"
         # expanduser should expand ~ to home directory
         assert str(config.state.path).endswith("my-state.json")
         assert "~" not in str(config.state.path)
+
+
+class TestApiKeyMasking:
+    """Tests for API key masking in config repr/str methods."""
+
+    def test_radarr_config_repr_masks_api_key(self) -> None:
+        """RadarrConfig.__repr__ should mask the API key."""
+        config = RadarrConfig(url="http://localhost:7878", api_key="super-secret-key")
+        repr_str = repr(config)
+        assert "super-secret-key" not in repr_str
+        assert "***" in repr_str
+        assert "http://localhost:7878" in repr_str
+
+    def test_radarr_config_str_masks_api_key(self) -> None:
+        """RadarrConfig.__str__ should mask the API key."""
+        config = RadarrConfig(url="http://localhost:7878", api_key="super-secret-key")
+        str_str = str(config)
+        assert "super-secret-key" not in str_str
+        assert "***" in str_str
+        assert "http://localhost:7878" in str_str
+
+    def test_sonarr_config_repr_masks_api_key(self) -> None:
+        """SonarrConfig.__repr__ should mask the API key."""
+        config = SonarrConfig(url="http://localhost:8989", api_key="another-secret")
+        repr_str = repr(config)
+        assert "another-secret" not in repr_str
+        assert "***" in repr_str
+        assert "http://localhost:8989" in repr_str
+
+    def test_sonarr_config_str_masks_api_key(self) -> None:
+        """SonarrConfig.__str__ should mask the API key."""
+        config = SonarrConfig(url="http://localhost:8989", api_key="another-secret")
+        str_str = str(config)
+        assert "another-secret" not in str_str
+        assert "***" in str_str
+        assert "http://localhost:8989" in str_str
+
+    def test_config_with_radarr_masks_api_key_in_repr(self) -> None:
+        """Config repr should not leak Radarr API key."""
+        config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="radarr-secret"))
+        repr_str = repr(config)
+        assert "radarr-secret" not in repr_str
+        assert "***" in repr_str
+
+    def test_config_with_sonarr_masks_api_key_in_repr(self) -> None:
+        """Config repr should not leak Sonarr API key."""
+        config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="sonarr-secret"))
+        repr_str = repr(config)
+        assert "sonarr-secret" not in repr_str
+        assert "***" in repr_str
+
+    def test_config_with_both_arr_masks_api_keys_in_repr(self) -> None:
+        """Config repr should not leak any API keys when both are configured."""
+        config = Config(
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="radarr-secret"),
+            sonarr=SonarrConfig(url="http://localhost:8989", api_key="sonarr-secret"),
+        )
+        repr_str = repr(config)
+        assert "radarr-secret" not in repr_str
+        assert "sonarr-secret" not in repr_str
+
+    def test_api_key_still_accessible(self) -> None:
+        """API key should still be accessible as an attribute."""
+        radarr = RadarrConfig(url="http://localhost:7878", api_key="my-secret-key")
+        sonarr = SonarrConfig(url="http://localhost:8989", api_key="another-key")
+
+        # API keys should still be accessible for actual use
+        assert radarr.api_key == "my-secret-key"
+        assert sonarr.api_key == "another-key"
+
+
+class TestUrlValidation:
+    """Tests for URL validation and HTTPS enforcement."""
+
+    # --- Valid URL tests ---
+
+    def test_https_url_accepted(self) -> None:
+        """HTTPS URLs should be accepted for any host."""
+        config = RadarrConfig(url="https://radarr.example.com:7878", api_key="key")
+        assert config.url == "https://radarr.example.com:7878"
+
+    def test_http_localhost_accepted(self) -> None:
+        """HTTP URLs for localhost should be accepted."""
+        config = RadarrConfig(url="http://localhost:7878", api_key="key")
+        assert config.url == "http://localhost:7878"
+
+    def test_http_127_0_0_1_accepted(self) -> None:
+        """HTTP URLs for 127.0.0.1 should be accepted."""
+        config = RadarrConfig(url="http://127.0.0.1:7878", api_key="key")
+        assert config.url == "http://127.0.0.1:7878"
+
+    def test_http_ipv6_localhost_accepted(self) -> None:
+        """HTTP URLs for IPv6 localhost (::1) should be accepted."""
+        config = RadarrConfig(url="http://[::1]:7878", api_key="key")
+        assert config.url == "http://[::1]:7878"
+
+    def test_trailing_slash_removed(self) -> None:
+        """Trailing slashes should be removed from URLs."""
+        config = RadarrConfig(url="https://radarr.example.com:7878/", api_key="key")
+        assert config.url == "https://radarr.example.com:7878"
+
+    def test_multiple_trailing_slashes_removed(self) -> None:
+        """Multiple trailing slashes should be removed from URLs."""
+        config = RadarrConfig(url="http://localhost:7878///", api_key="key")
+        assert config.url == "http://localhost:7878"
+
+    # --- Invalid URL tests ---
+
+    def test_http_remote_host_rejected(self) -> None:
+        """HTTP URLs for non-localhost hosts should be rejected."""
+        with pytest.raises(ConfigurationError, match="HTTP URLs are only allowed for localhost"):
+            RadarrConfig(url="http://radarr.example.com:7878", api_key="key")
+
+    def test_http_ip_address_rejected(self) -> None:
+        """HTTP URLs for remote IP addresses should be rejected."""
+        with pytest.raises(ConfigurationError, match="HTTP URLs are only allowed for localhost"):
+            RadarrConfig(url="http://192.168.1.100:7878", api_key="key")
+
+    def test_ftp_scheme_rejected(self) -> None:
+        """FTP URLs should be rejected."""
+        with pytest.raises(ConfigurationError, match="Invalid URL scheme"):
+            RadarrConfig(url="ftp://radarr.example.com:7878", api_key="key")
+
+    def test_no_scheme_rejected(self) -> None:
+        """URLs without scheme should be rejected."""
+        with pytest.raises(ConfigurationError, match="Invalid URL scheme"):
+            RadarrConfig(url="radarr.example.com:7878", api_key="key")
+
+    # --- allow_insecure tests ---
+
+    def test_allow_insecure_permits_http_remote(self) -> None:
+        """allow_insecure=True should permit HTTP for remote hosts."""
+        config = RadarrConfig(
+            url="http://radarr.example.com:7878",
+            api_key="key",
+            allow_insecure=True,
+        )
+        assert config.url == "http://radarr.example.com:7878"
+
+    def test_allow_insecure_still_validates_scheme(self) -> None:
+        """allow_insecure=True should still reject invalid schemes."""
+        with pytest.raises(ConfigurationError, match="Invalid URL scheme"):
+            RadarrConfig(url="ftp://radarr.example.com", api_key="key", allow_insecure=True)
+
+    def test_allow_insecure_still_removes_trailing_slash(self) -> None:
+        """allow_insecure=True should still remove trailing slashes."""
+        config = RadarrConfig(
+            url="http://radarr.example.com:7878/",
+            api_key="key",
+            allow_insecure=True,
+        )
+        assert config.url == "http://radarr.example.com:7878"
+
+    # --- SonarrConfig tests ---
+
+    def test_sonarr_https_url_accepted(self) -> None:
+        """SonarrConfig should accept HTTPS URLs."""
+        config = SonarrConfig(url="https://sonarr.example.com:8989", api_key="key")
+        assert config.url == "https://sonarr.example.com:8989"
+
+    def test_sonarr_http_localhost_accepted(self) -> None:
+        """SonarrConfig should accept HTTP for localhost."""
+        config = SonarrConfig(url="http://localhost:8989", api_key="key")
+        assert config.url == "http://localhost:8989"
+
+    def test_sonarr_http_remote_rejected(self) -> None:
+        """SonarrConfig should reject HTTP for remote hosts."""
+        with pytest.raises(ConfigurationError, match="HTTP URLs are only allowed for localhost"):
+            SonarrConfig(url="http://sonarr.example.com:8989", api_key="key")
+
+    def test_sonarr_allow_insecure_permits_http(self) -> None:
+        """SonarrConfig allow_insecure should permit HTTP for remote hosts."""
+        config = SonarrConfig(
+            url="http://sonarr.example.com:8989",
+            api_key="key",
+            allow_insecure=True,
+        )
+        assert config.url == "http://sonarr.example.com:8989"
+
+
+class TestUrlValidationFromToml:
+    """Tests for URL validation when loading from TOML files."""
+
+    def test_http_localhost_from_file(self, tmp_path: Path) -> None:
+        """HTTP localhost URLs from TOML should be accepted."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[radarr]
+url = "http://localhost:7878"
+api_key = "test-key"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            config = Config.load()
+
+        assert config.radarr is not None
+        assert config.radarr.url == "http://localhost:7878"
+
+    def test_https_remote_from_file(self, tmp_path: Path) -> None:
+        """HTTPS remote URLs from TOML should be accepted."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[radarr]
+url = "https://radarr.example.com:7878"
+api_key = "test-key"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            config = Config.load()
+
+        assert config.radarr is not None
+        assert config.radarr.url == "https://radarr.example.com:7878"
+
+    def test_http_remote_from_file_rejected(self, tmp_path: Path) -> None:
+        """HTTP remote URLs from TOML should be rejected."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[radarr]
+url = "http://radarr.example.com:7878"
+api_key = "test-key"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+            pytest.raises(ConfigurationError, match="HTTP URLs are only allowed for localhost"),
+        ):
+            Config.load()
+
+    def test_allow_insecure_from_file(self, tmp_path: Path) -> None:
+        """allow_insecure=true from TOML should permit HTTP remote."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[radarr]
+url = "http://radarr.example.com:7878"
+api_key = "test-key"
+allow_insecure = true
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            config = Config.load()
+
+        assert config.radarr is not None
+        assert config.radarr.url == "http://radarr.example.com:7878"
+        assert config.radarr.allow_insecure is True
+
+
+class TestUrlValidationFromEnv:
+    """Tests for URL validation when loading from environment variables."""
+
+    def test_http_localhost_from_env(self) -> None:
+        """HTTP localhost URLs from env should be accepted."""
+        with patch.dict(
+            os.environ,
+            {
+                "FILTARR_RADARR_URL": "http://localhost:7878",
+                "FILTARR_RADARR_API_KEY": "test-key",
+            },
+            clear=False,
+        ):
+            config = Config.load()
+
+        assert config.radarr is not None
+        assert config.radarr.url == "http://localhost:7878"
+
+    def test_https_remote_from_env(self) -> None:
+        """HTTPS remote URLs from env should be accepted."""
+        with patch.dict(
+            os.environ,
+            {
+                "FILTARR_RADARR_URL": "https://radarr.example.com:7878",
+                "FILTARR_RADARR_API_KEY": "test-key",
+            },
+            clear=False,
+        ):
+            config = Config.load()
+
+        assert config.radarr is not None
+        assert config.radarr.url == "https://radarr.example.com:7878"
+
+    def test_http_remote_from_env_rejected(self, tmp_path: Path) -> None:
+        """HTTP remote URLs from env should be rejected."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {
+                    "FILTARR_RADARR_URL": "http://radarr.example.com:7878",
+                    "FILTARR_RADARR_API_KEY": "test-key",
+                },
+                clear=True,
+            ),
+            pytest.raises(ConfigurationError, match="HTTP URLs are only allowed for localhost"),
+        ):
+            Config.load()
+
+    def test_allow_insecure_from_env(self, tmp_path: Path) -> None:
+        """FILTARR_RADARR_ALLOW_INSECURE=true should permit HTTP remote."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {
+                    "FILTARR_RADARR_URL": "http://radarr.example.com:7878",
+                    "FILTARR_RADARR_API_KEY": "test-key",
+                    "FILTARR_RADARR_ALLOW_INSECURE": "true",
+                },
+                clear=True,
+            ),
+        ):
+            config = Config.load()
+
+        assert config.radarr is not None
+        assert config.radarr.url == "http://radarr.example.com:7878"
+
+    def test_allow_insecure_env_values(self, tmp_path: Path) -> None:
+        """FILTARR_*_ALLOW_INSECURE should accept true, 1, yes."""
+        for value in ("true", "1", "yes", "TRUE", "Yes"):
+            with (
+                patch.object(Path, "home", return_value=tmp_path),
+                patch.dict(
+                    os.environ,
+                    {
+                        "FILTARR_SONARR_URL": "http://sonarr.example.com:8989",
+                        "FILTARR_SONARR_API_KEY": "test-key",
+                        "FILTARR_SONARR_ALLOW_INSECURE": value,
+                    },
+                    clear=True,
+                ),
+            ):
+                config = Config.load()
+                assert config.sonarr is not None
+                assert config.sonarr.url == "http://sonarr.example.com:8989"

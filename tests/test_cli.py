@@ -65,7 +65,7 @@ class TestCheckMovieCommand:
     def test_check_movie_with_4k(self) -> None:
         """Should exit 0 when 4K is available."""
         mock_result = SearchResult(item_id=123, item_type="movie", has_match=True)
-        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
 
         async def mock_check_movie(_movie_id: int, **_kwargs: object) -> SearchResult:
             return mock_result
@@ -87,7 +87,7 @@ class TestCheckMovieCommand:
     def test_check_movie_no_4k(self) -> None:
         """Should exit 1 when no 4K available."""
         mock_result = SearchResult(item_id=123, item_type="movie", has_match=False)
-        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
 
         async def mock_check_movie(_movie_id: int, **_kwargs: object) -> SearchResult:
             return mock_result
@@ -127,7 +127,7 @@ class TestCheckSeriesCommand:
             has_match=True,
             strategy_used=SamplingStrategy.RECENT,
         )
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with (
             patch("filtarr.cli.Config.load", return_value=mock_config),
@@ -146,7 +146,7 @@ class TestCheckSeriesCommand:
             has_match=False,
             strategy_used=SamplingStrategy.DISTRIBUTED,
         )
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with (
             patch("filtarr.cli.Config.load", return_value=mock_config),
@@ -161,7 +161,7 @@ class TestCheckSeriesCommand:
 
     def test_check_series_invalid_strategy(self) -> None:
         """Should exit 2 for invalid strategy."""
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(app, ["check", "series", "456", "--strategy", "invalid"])
@@ -190,8 +190,8 @@ class TestBatchCommand:
             strategy_used=SamplingStrategy.RECENT,
         )
         mock_config = Config(
-            radarr=RadarrConfig(url="http://radarr", api_key="key"),
-            sonarr=SonarrConfig(url="http://sonarr", api_key="key"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
+            sonarr=SonarrConfig(url="http://127.0.0.1:8989", api_key="key"),
         )
 
         with (
@@ -216,7 +216,7 @@ class TestBatchCommand:
         batch_file.write_text("# This is a comment\n\nmovie:123\n")
 
         mock_result = SearchResult(item_id=123, item_type="movie", has_match=True)
-        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
 
         with (
             patch("filtarr.cli.Config.load", return_value=mock_config),
@@ -250,7 +250,7 @@ class TestCheckMovieByName:
     def test_check_movie_by_name_single_match(self) -> None:
         """Should use single match when searching by name."""
         mock_result = SearchResult(item_id=123, item_type="movie", has_match=True)
-        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
 
         async def mock_search_movies(_term: str) -> list[tuple[int, str, int]]:
             return [(123, "The Matrix", 1999)]
@@ -276,7 +276,7 @@ class TestCheckMovieByName:
 
     def test_check_movie_by_name_multiple_matches(self) -> None:
         """Should display choices when multiple matches found."""
-        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
 
         async def mock_search_movies(_term: str) -> list[tuple[int, str, int]]:
             return [(1, "The Matrix", 1999), (2, "The Matrix Reloaded", 2003)]
@@ -299,7 +299,7 @@ class TestCheckMovieByName:
 
     def test_check_movie_by_name_not_found(self) -> None:
         """Should exit 2 when movie not found by name."""
-        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
 
         async def mock_search_movies(_term: str) -> list[tuple[int, str, int]]:
             return []
@@ -330,7 +330,7 @@ class TestCheckSeriesByName:
             has_match=True,
             strategy_used=SamplingStrategy.RECENT,
         )
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         async def mock_search_series(_term: str) -> list[tuple[int, str, int]]:
             return [(456, "Breaking Bad", 2008)]
@@ -354,7 +354,7 @@ class TestCheckSeriesByName:
 
     def test_check_series_by_name_multiple_matches(self) -> None:
         """Should display choices when multiple matches found."""
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         async def mock_search_series(_term: str) -> list[tuple[int, str, int]]:
             return [(1, "Breaking Bad", 2008), (2, "Breaking Bad: El Camino", 2019)]
@@ -374,7 +374,7 @@ class TestCheckSeriesByName:
 
     def test_check_series_by_name_not_found(self) -> None:
         """Should exit 2 when series not found by name."""
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         async def mock_search_series(_term: str) -> list[tuple[int, str, int]]:
             return []
@@ -401,7 +401,7 @@ class TestBatchWithNames:
         batch_file.write_text("movie:The Matrix\n")
 
         mock_result = SearchResult(item_id=123, item_type="movie", has_match=True)
-        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
 
         with (
             patch("filtarr.cli.Config.load", return_value=mock_config),
@@ -425,7 +425,7 @@ class TestBatchWithNames:
         batch_file = tmp_path / "items.txt"
         batch_file.write_text("movie:Matrix\n")
 
-        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
 
         with (
             patch("filtarr.cli.Config.load", return_value=mock_config),
@@ -454,7 +454,7 @@ class TestBatchWithNames:
         batch_file = tmp_path / "items.txt"
         batch_file.write_text("movie:Nonexistent\n")
 
-        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
 
         with (
             patch("filtarr.cli.Config.load", return_value=mock_config),
@@ -708,7 +708,7 @@ class TestCheckMovieCriteriaValidation:
 
     def test_check_movie_invalid_criteria(self) -> None:
         """Should exit 2 when invalid criteria is provided."""
-        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
 
         with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(app, ["check", "movie", "123", "--criteria", "xyz"])
@@ -720,7 +720,7 @@ class TestCheckMovieCriteriaValidation:
 
     def test_check_movie_invalid_criteria_mixed_case(self) -> None:
         """Should exit 2 when invalid criteria with mixed case is provided."""
-        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
 
         with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(app, ["check", "movie", "123", "--criteria", "FooBar"])
@@ -735,7 +735,7 @@ class TestCheckMovieCriteriaValidation:
         mock_result = SearchResult(
             item_id=123, item_type="movie", has_match=True, result_type=ResultType.HDR
         )
-        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
 
         async def mock_check_movie(_movie_id: int, **_kwargs: object) -> SearchResult:
             return mock_result
@@ -763,7 +763,7 @@ class TestCheckSeriesCriteriaValidation:
 
     def test_check_series_invalid_criteria(self) -> None:
         """Should exit 2 when invalid criteria is provided."""
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(app, ["check", "series", "456", "--criteria", "xyz"])
@@ -774,7 +774,7 @@ class TestCheckSeriesCriteriaValidation:
 
     def test_check_series_directors_cut_error(self) -> None:
         """Should exit 2 when directors-cut criteria is used for series."""
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(app, ["check", "series", "456", "--criteria", "directors-cut"])
@@ -785,7 +785,7 @@ class TestCheckSeriesCriteriaValidation:
 
     def test_check_series_extended_error(self) -> None:
         """Should exit 2 when extended criteria is used for series."""
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(app, ["check", "series", "456", "--criteria", "extended"])
@@ -796,7 +796,7 @@ class TestCheckSeriesCriteriaValidation:
 
     def test_check_series_remaster_error(self) -> None:
         """Should exit 2 when remaster criteria is used for series."""
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(app, ["check", "series", "456", "--criteria", "remaster"])
@@ -807,7 +807,7 @@ class TestCheckSeriesCriteriaValidation:
 
     def test_check_series_imax_error(self) -> None:
         """Should exit 2 when imax criteria is used for series."""
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(app, ["check", "series", "456", "--criteria", "imax"])
@@ -818,7 +818,7 @@ class TestCheckSeriesCriteriaValidation:
 
     def test_check_series_special_edition_error(self) -> None:
         """Should exit 2 when special-edition criteria is used for series."""
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(app, ["check", "series", "456", "--criteria", "special-edition"])
@@ -835,7 +835,7 @@ class TestCheckSeriesCriteriaValidation:
             has_match=True,
             strategy_used=SamplingStrategy.RECENT,
         )
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with (
             patch("filtarr.cli.Config.load", return_value=mock_config),
@@ -859,7 +859,7 @@ class TestCheckSeriesCriteriaValidation:
             result_type=ResultType.HDR,
             strategy_used=SamplingStrategy.RECENT,
         )
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with (
             patch("filtarr.cli.Config.load", return_value=mock_config),
@@ -883,7 +883,7 @@ class TestCheckSeriesCriteriaValidation:
             result_type=ResultType.DOLBY_VISION,
             strategy_used=SamplingStrategy.RECENT,
         )
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with (
             patch("filtarr.cli.Config.load", return_value=mock_config),
@@ -917,7 +917,7 @@ class TestValidateBatchInputs:
 
     def test_batch_invalid_criteria_error(self) -> None:
         """Should exit 2 when invalid criteria is provided."""
-        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
 
         with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(
@@ -930,7 +930,7 @@ class TestValidateBatchInputs:
 
     def test_batch_movie_only_criteria_with_all_series_error(self) -> None:
         """Should exit 2 when movie-only criteria is used with --all-series."""
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(
@@ -944,7 +944,7 @@ class TestValidateBatchInputs:
 
     def test_batch_extended_with_all_series_error(self) -> None:
         """Should exit 2 when extended criteria is used with --all-series."""
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(
@@ -956,7 +956,7 @@ class TestValidateBatchInputs:
 
     def test_batch_remaster_with_all_series_error(self) -> None:
         """Should exit 2 when remaster criteria is used with --all-series."""
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(
@@ -968,7 +968,7 @@ class TestValidateBatchInputs:
 
     def test_batch_imax_with_all_series_error(self) -> None:
         """Should exit 2 when imax criteria is used with --all-series."""
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(app, ["check", "batch", "--all-series", "--criteria", "imax"])
@@ -978,7 +978,7 @@ class TestValidateBatchInputs:
 
     def test_batch_special_edition_with_all_series_error(self) -> None:
         """Should exit 2 when special-edition criteria is used with --all-series."""
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(
@@ -990,7 +990,7 @@ class TestValidateBatchInputs:
 
     def test_batch_invalid_strategy_error(self) -> None:
         """Should exit 2 when invalid strategy is provided."""
-        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
 
         with patch("filtarr.cli.Config.load", return_value=mock_config):
             result = runner.invoke(
@@ -1002,7 +1002,7 @@ class TestValidateBatchInputs:
 
     def test_batch_valid_criteria_with_all_movies(self) -> None:
         """Should accept movie-only criteria with --all-movies."""
-        mock_config = Config(radarr=RadarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
 
         with (
             patch("filtarr.cli.Config.load", return_value=mock_config),
@@ -1022,7 +1022,7 @@ class TestValidateBatchInputs:
 
     def test_batch_valid_criteria_with_all_series(self) -> None:
         """Should accept valid series criteria with --all-series."""
-        mock_config = Config(sonarr=SonarrConfig(url="http://test", api_key="key"))
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
 
         with (
             patch("filtarr.cli.Config.load", return_value=mock_config),

@@ -7,26 +7,109 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Self
+from urllib.parse import urlparse
 
 
 class ConfigurationError(Exception):
     """Raised when configuration is invalid or missing."""
 
 
+def _validate_url(url: str, allow_http_localhost: bool = True) -> str:
+    """Validate and normalize URL, enforcing HTTPS by default.
+
+    Args:
+        url: The URL to validate
+        allow_http_localhost: If True, allow HTTP for localhost URLs
+
+    Returns:
+        The validated and normalized URL (with trailing slashes removed)
+
+    Raises:
+        ConfigurationError: If URL scheme is invalid or HTTP is used for non-localhost
+    """
+    parsed = urlparse(url)
+
+    if parsed.scheme not in ("http", "https"):
+        raise ConfigurationError(f"Invalid URL scheme: {parsed.scheme}")
+
+    if parsed.scheme == "http":
+        is_localhost = parsed.hostname in ("localhost", "127.0.0.1", "::1")
+        if not (allow_http_localhost and is_localhost):
+            raise ConfigurationError(
+                "HTTP URLs are only allowed for localhost. " "Use HTTPS for remote servers."
+            )
+
+    return url.rstrip("/")
+
+
 @dataclass
 class RadarrConfig:
-    """Radarr connection configuration."""
+    """Radarr connection configuration.
+
+    Attributes:
+        url: Radarr server URL (must be HTTPS for remote servers)
+        api_key: Radarr API key
+        allow_insecure: If True, allow HTTP for non-localhost URLs (not recommended)
+    """
 
     url: str
     api_key: str
+    allow_insecure: bool = False
+
+    def __post_init__(self) -> None:
+        """Validate URL after initialization."""
+        if self.allow_insecure:
+            # When allow_insecure is True, just validate scheme and normalize
+            parsed = urlparse(self.url)
+            if parsed.scheme not in ("http", "https"):
+                raise ConfigurationError(f"Invalid URL scheme: {parsed.scheme}")
+            self.url = self.url.rstrip("/")
+        else:
+            # Normal validation: HTTPS required for non-localhost
+            self.url = _validate_url(self.url, allow_http_localhost=True)
+
+    def __repr__(self) -> str:
+        """Return string representation with masked API key."""
+        return f"RadarrConfig(url={self.url!r}, api_key='***')"
+
+    def __str__(self) -> str:
+        """Return string representation with masked API key."""
+        return self.__repr__()
 
 
 @dataclass
 class SonarrConfig:
-    """Sonarr connection configuration."""
+    """Sonarr connection configuration.
+
+    Attributes:
+        url: Sonarr server URL (must be HTTPS for remote servers)
+        api_key: Sonarr API key
+        allow_insecure: If True, allow HTTP for non-localhost URLs (not recommended)
+    """
 
     url: str
     api_key: str
+    allow_insecure: bool = False
+
+    def __post_init__(self) -> None:
+        """Validate URL after initialization."""
+        if self.allow_insecure:
+            # When allow_insecure is True, just validate scheme and normalize
+            parsed = urlparse(self.url)
+            if parsed.scheme not in ("http", "https"):
+                raise ConfigurationError(f"Invalid URL scheme: {parsed.scheme}")
+            self.url = self.url.rstrip("/")
+        else:
+            # Normal validation: HTTPS required for non-localhost
+            self.url = _validate_url(self.url, allow_http_localhost=True)
+
+    def __repr__(self) -> str:
+        """Return string representation with masked API key."""
+        return f"SonarrConfig(url={self.url!r}, api_key='***')"
+
+    def __str__(self) -> str:
+        """Return string representation with masked API key."""
+        return self.__repr__()
 
 
 @dataclass
@@ -106,43 +189,48 @@ DEFAULT_TIMEOUT = 120.0
 def _parse_arr_config_from_dict(
     data: dict[str, Any],
     section: str,
-) -> tuple[str, str] | None:
-    """Parse URL and API key from a config dict section.
+) -> tuple[str, str, bool] | None:
+    """Parse URL, API key, and allow_insecure from a config dict section.
 
     Args:
         data: The full config dictionary
         section: The section name (e.g., "radarr", "sonarr")
 
     Returns:
-        Tuple of (url, api_key) if both present, None otherwise
+        Tuple of (url, api_key, allow_insecure) if url and api_key present, None otherwise
     """
     if section not in data:
         return None
     section_data = data[section]
     url = section_data.get("url")
     api_key = section_data.get("api_key")
+    allow_insecure = section_data.get("allow_insecure", False)
     if url and api_key:
-        return (url, api_key)
+        return (url, api_key, allow_insecure)
     return None
 
 
 def _parse_arr_config_from_env(
     url_var: str,
     key_var: str,
-) -> tuple[str, str] | None:
-    """Parse URL and API key from environment variables.
+    insecure_var: str,
+) -> tuple[str, str, bool] | None:
+    """Parse URL, API key, and allow_insecure from environment variables.
 
     Args:
         url_var: Environment variable name for URL
         key_var: Environment variable name for API key
+        insecure_var: Environment variable name for allow_insecure flag
 
     Returns:
-        Tuple of (url, api_key) if both present, None otherwise
+        Tuple of (url, api_key, allow_insecure) if url and api_key present, None otherwise
     """
     url = os.environ.get(url_var)
     api_key = os.environ.get(key_var)
+    allow_insecure_str = os.environ.get(insecure_var, "")
+    allow_insecure = allow_insecure_str.lower() in ("true", "1", "yes")
     if url and api_key:
-        return (url, api_key)
+        return (url, api_key, allow_insecure)
     return None
 
 
@@ -396,14 +484,22 @@ class Config:
         # Parse *arr configs from env
         radarr = (
             _build_radarr_config(
-                _parse_arr_config_from_env("FILTARR_RADARR_URL", "FILTARR_RADARR_API_KEY")
+                _parse_arr_config_from_env(
+                    "FILTARR_RADARR_URL",
+                    "FILTARR_RADARR_API_KEY",
+                    "FILTARR_RADARR_ALLOW_INSECURE",
+                )
             )
             or base.radarr
         )
 
         sonarr = (
             _build_sonarr_config(
-                _parse_arr_config_from_env("FILTARR_SONARR_URL", "FILTARR_SONARR_API_KEY")
+                _parse_arr_config_from_env(
+                    "FILTARR_SONARR_URL",
+                    "FILTARR_SONARR_API_KEY",
+                    "FILTARR_SONARR_ALLOW_INSECURE",
+                )
             )
             or base.sonarr
         )
@@ -477,32 +573,32 @@ def _load_toml_file(path: Path) -> dict[str, Any]:
 
 
 def _build_radarr_config(
-    parsed: tuple[str, str] | None,
+    parsed: tuple[str, str, bool] | None,
 ) -> RadarrConfig | None:
-    """Build RadarrConfig from parsed URL and API key.
+    """Build RadarrConfig from parsed URL, API key, and allow_insecure.
 
     Args:
-        parsed: Tuple of (url, api_key) or None
+        parsed: Tuple of (url, api_key, allow_insecure) or None
 
     Returns:
         RadarrConfig instance or None
     """
     if parsed is None:
         return None
-    return RadarrConfig(url=parsed[0], api_key=parsed[1])
+    return RadarrConfig(url=parsed[0], api_key=parsed[1], allow_insecure=parsed[2])
 
 
 def _build_sonarr_config(
-    parsed: tuple[str, str] | None,
+    parsed: tuple[str, str, bool] | None,
 ) -> SonarrConfig | None:
-    """Build SonarrConfig from parsed URL and API key.
+    """Build SonarrConfig from parsed URL, API key, and allow_insecure.
 
     Args:
-        parsed: Tuple of (url, api_key) or None
+        parsed: Tuple of (url, api_key, allow_insecure) or None
 
     Returns:
         SonarrConfig instance or None
     """
     if parsed is None:
         return None
-    return SonarrConfig(url=parsed[0], api_key=parsed[1])
+    return SonarrConfig(url=parsed[0], api_key=parsed[1], allow_insecure=parsed[2])

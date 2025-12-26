@@ -33,8 +33,8 @@ if TYPE_CHECKING:
 def mock_config() -> Config:
     """Create a mock config for testing."""
     return Config(
-        radarr=RadarrConfig(url="http://radarr:7878", api_key="radarr-key"),
-        sonarr=SonarrConfig(url="http://sonarr:8989", api_key="sonarr-key"),
+        radarr=RadarrConfig(url="http://localhost:7878", api_key="radarr-key"),
+        sonarr=SonarrConfig(url="http://127.0.0.1:8989", api_key="sonarr-key"),
         timeout=30.0,
         tags=TagConfig(),
         scheduler=SchedulerConfig(enabled=True, history_limit=100, schedules=[]),
@@ -52,7 +52,7 @@ def mock_state_manager(tmp_path: Path) -> StateManager:
 def config_with_schedule() -> Config:
     """Create a config with a schedule defined."""
     return Config(
-        radarr=RadarrConfig(url="http://radarr:7878", api_key="radarr-key"),
+        radarr=RadarrConfig(url="http://localhost:7878", api_key="radarr-key"),
         scheduler=SchedulerConfig(
             enabled=True,
             schedules=[
@@ -79,7 +79,7 @@ class TestSchedulerManagerStart:
     async def test_start_with_enabled_schedules(self, mock_state_manager: StateManager) -> None:
         """Test starting scheduler with enabled schedules."""
         config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="key"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
             scheduler=SchedulerConfig(
                 enabled=True,
                 schedules=[
@@ -132,7 +132,7 @@ class TestSchedulerManagerStart:
     ) -> None:
         """Test that starting an already started scheduler logs warning."""
         config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="key"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
             scheduler=SchedulerConfig(
                 enabled=True,
                 schedules=[
@@ -158,7 +158,7 @@ class TestSchedulerManagerStart:
     async def test_start_apscheduler_not_installed(self, mock_state_manager: StateManager) -> None:
         """Test start when APScheduler is not installed."""
         config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="key"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
             scheduler=SchedulerConfig(
                 enabled=True,
                 schedules=[
@@ -231,7 +231,7 @@ class TestSchedulerManagerStart:
     ) -> None:
         """Test start when all schedules are disabled."""
         config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="key"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
             scheduler=SchedulerConfig(
                 enabled=True,
                 schedules=[
@@ -256,7 +256,7 @@ class TestSchedulerManagerStart:
     async def test_start_handles_add_schedule_error(self, mock_state_manager: StateManager) -> None:
         """Test that start handles errors when adding individual schedules."""
         config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="key"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
             scheduler=SchedulerConfig(
                 enabled=True,
                 schedules=[
@@ -299,7 +299,7 @@ class TestSchedulerManagerStop:
     async def test_stop_normal(self, mock_state_manager: StateManager) -> None:
         """Test normal stop operation."""
         config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="key"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
             scheduler=SchedulerConfig(enabled=True, schedules=[]),
         )
 
@@ -322,7 +322,7 @@ class TestSchedulerManagerStop:
     async def test_stop_with_running_jobs_wait_true(self, mock_state_manager: StateManager) -> None:
         """Test stop with running jobs and wait=True."""
         config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="key"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
             scheduler=SchedulerConfig(enabled=True, schedules=[]),
         )
 
@@ -356,7 +356,7 @@ class TestSchedulerManagerStop:
     ) -> None:
         """Test stop with running jobs and wait=False."""
         config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="key"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
             scheduler=SchedulerConfig(enabled=True, schedules=[]),
         )
 
@@ -637,7 +637,7 @@ class TestSchedulerManagerJobCallback:
     async def test_job_callback_executes_schedule(self, mock_state_manager: StateManager) -> None:
         """Test that job callback executes the found schedule."""
         config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="key"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
             scheduler=SchedulerConfig(
                 enabled=True,
                 schedules=[
@@ -708,7 +708,7 @@ class TestSchedulerManagerRunSchedule:
     ) -> None:
         """Test that run_schedule executes and returns a record."""
         config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="key"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
             scheduler=SchedulerConfig(
                 enabled=True,
                 schedules=[
