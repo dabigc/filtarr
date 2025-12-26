@@ -99,7 +99,7 @@ from filtarr.clients.radarr import RadarrClient
 from filtarr.clients.sonarr import SonarrClient
 from filtarr.criteria import ResultType, SearchCriteria
 
-__version__ = "1.1.4"
+__version__ = "1.2.0"
 
 __all__ = [
     "RadarrClient",
