@@ -969,6 +969,11 @@ class TestUrlValidation:
         )
         assert config.url == "http://sonarr.example.com:8989"
 
+    def test_sonarr_allow_insecure_still_validates_scheme(self) -> None:
+        """SonarrConfig allow_insecure=True should still reject invalid schemes."""
+        with pytest.raises(ConfigurationError, match="Invalid URL scheme"):
+            SonarrConfig(url="ftp://sonarr.example.com", api_key="key", allow_insecure=True)
+
 
 class TestUrlValidationFromToml:
     """Tests for URL validation when loading from TOML files."""

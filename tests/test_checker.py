@@ -555,6 +555,59 @@ class TestNameBasedLookup:
 
     @respx.mock
     @pytest.mark.asyncio
+    async def test_check_movie_by_name_with_tags(self) -> None:
+        """Should check movie by name and apply tags."""
+        # Mock search
+        respx.get("http://localhost:7878/api/v3/movie").mock(
+            return_value=Response(
+                200,
+                json=[{"id": 123, "title": "The Matrix", "year": 1999, "tags": []}],
+            )
+        )
+        # Mock movie by id (needed for tagging)
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "The Matrix", "year": 1999, "tags": []},
+            )
+        )
+        # Mock releases - has 4K
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-1",
+                        "title": "The.Matrix.2160p.UHD",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 31, "name": "Bluray-2160p"}},
+                    }
+                ],
+            )
+        )
+        # Mock tags endpoint
+        respx.get("http://localhost:7878/api/v3/tag").mock(
+            return_value=Response(200, json=[{"id": 1, "label": "4k-available"}])
+        )
+        # Mock movie update
+        respx.put("http://localhost:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "The Matrix", "year": 1999, "tags": [1]},
+            )
+        )
+
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
+        result = await checker.check_movie_by_name("The Matrix", apply_tags=True)
+
+        assert result.has_match is True
+        assert result.item_id == 123
+        assert result.tag_result is not None
+        assert result.tag_result.tag_applied == "4k-available"
+
+    @respx.mock
+    @pytest.mark.asyncio
     async def test_check_series_by_name(self) -> None:
         """Should check series by name."""
         # Mock search
