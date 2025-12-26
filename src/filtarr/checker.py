@@ -1,12 +1,26 @@
-"""Main release checker combining Radarr and Sonarr."""
+"""Main release checker combining Radarr and Sonarr.
+
+This module provides connection pooling for efficient reuse of HTTP clients
+across multiple check operations. Use ReleaseChecker as an async context manager
+for optimal performance when making multiple API calls:
+
+    async with ReleaseChecker(...) as checker:
+        result1 = await checker.check_movie(123)
+        result2 = await checker.check_movie(456)  # Reuses same HTTP connection
+
+For single operations, ReleaseChecker also supports standalone usage with
+lazy client creation (creates/destroys client per operation).
+"""
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from pydantic import ValidationError
@@ -22,9 +36,10 @@ from filtarr.criteria import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import AsyncIterator, Callable
+    from typing import Self
 
-    from filtarr.models.common import Release
+    from filtarr.models.common import Release, Tag
     from filtarr.models.sonarr import Episode
 
 logger = logging.getLogger(__name__)
@@ -143,6 +158,16 @@ class ReleaseChecker:
 
     Supports searching for various release criteria including 4K, HDR,
     Director's Cut, and custom criteria via callables.
+
+    This class can be used as an async context manager for connection pooling,
+    which reuses HTTP clients across multiple operations:
+
+        async with ReleaseChecker(...) as checker:
+            result1 = await checker.check_movie(123)
+            result2 = await checker.check_movie(456)
+
+    It also supports standalone usage for backward compatibility, where clients
+    are created and destroyed per operation.
     """
 
     def __init__(
@@ -172,6 +197,128 @@ class ReleaseChecker:
         )
         self._timeout = timeout
         self._tag_config = tag_config or TagConfig()
+        self._tag_cache: dict[str, list[Tag]] | None = None
+        self._tag_cache_lock = asyncio.Lock()
+
+        # Connection pooling: store client instances for reuse
+        self._radarr_client: RadarrClient | None = None
+        self._sonarr_client: SonarrClient | None = None
+        self._in_context: bool = False
+
+    async def __aenter__(self) -> Self:
+        """Enter async context manager, initializing pooled clients.
+
+        When used as a context manager, clients are created once and reused
+        across all operations, providing connection pooling benefits.
+        """
+        self._in_context = True
+
+        if self._radarr_config:
+            url, api_key = self._radarr_config
+            self._radarr_client = RadarrClient(url, api_key, timeout=self._timeout)
+            await self._radarr_client.__aenter__()
+
+        if self._sonarr_config:
+            url, api_key = self._sonarr_config
+            self._sonarr_client = SonarrClient(url, api_key, timeout=self._timeout)
+            await self._sonarr_client.__aenter__()
+
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
+        """Exit async context manager, cleaning up pooled clients."""
+        self._in_context = False
+
+        if self._radarr_client:
+            await self._radarr_client.__aexit__(exc_type, exc_val, exc_tb)
+            self._radarr_client = None
+
+        if self._sonarr_client:
+            await self._sonarr_client.__aexit__(exc_type, exc_val, exc_tb)
+            self._sonarr_client = None
+
+        # Clear tag cache when exiting context
+        self._tag_cache = None
+
+    @asynccontextmanager
+    async def _get_radarr_client(self) -> AsyncIterator[RadarrClient]:
+        """Get a Radarr client, using pooled client if in context.
+
+        When used within an async context manager, returns the pooled client.
+        Otherwise, creates a temporary client for the operation.
+
+        Yields:
+            RadarrClient instance
+        """
+        if self._in_context and self._radarr_client:
+            # Use pooled client
+            yield self._radarr_client
+        else:
+            # Create temporary client (backward compatibility)
+            if not self._radarr_config:
+                raise ValueError("Radarr is not configured")
+            url, api_key = self._radarr_config
+            async with RadarrClient(url, api_key, timeout=self._timeout) as client:
+                yield client
+
+    @asynccontextmanager
+    async def _get_sonarr_client(self) -> AsyncIterator[SonarrClient]:
+        """Get a Sonarr client, using pooled client if in context.
+
+        When used within an async context manager, returns the pooled client.
+        Otherwise, creates a temporary client for the operation.
+
+        Yields:
+            SonarrClient instance
+        """
+        if self._in_context and self._sonarr_client:
+            # Use pooled client
+            yield self._sonarr_client
+        else:
+            # Create temporary client (backward compatibility)
+            if not self._sonarr_config:
+                raise ValueError("Sonarr is not configured")
+            url, api_key = self._sonarr_config
+            async with SonarrClient(url, api_key, timeout=self._timeout) as client:
+                yield client
+
+    async def _get_cached_tags(
+        self, client: RadarrClient | SonarrClient, cache_key: str
+    ) -> list[Tag]:
+        """Get tags from cache or fetch from client.
+
+        Tags are cached per client type (radarr/sonarr) to avoid repeated
+        API calls when processing batches of items.
+
+        Uses a lock to prevent race conditions when multiple concurrent
+        calls check the cache simultaneously.
+
+        Args:
+            client: The RadarrClient or SonarrClient instance
+            cache_key: Key for caching ("radarr" or "sonarr")
+
+        Returns:
+            List of Tag models
+        """
+        async with self._tag_cache_lock:
+            if self._tag_cache is None:
+                self._tag_cache = {}
+            if cache_key not in self._tag_cache:
+                self._tag_cache[cache_key] = await client.get_tags()
+            return self._tag_cache[cache_key]
+
+    def clear_tag_cache(self) -> None:
+        """Clear the tag cache.
+
+        Call this method when you need to refresh tag data, for example
+        after creating new tags or if tags may have been modified externally.
+        """
+        self._tag_cache = None
 
     async def check_movie(
         self,
@@ -198,8 +345,7 @@ class ReleaseChecker:
         if not self._radarr_config:
             raise ValueError("Radarr is not configured")
 
-        url, api_key = self._radarr_config
-        async with RadarrClient(url, api_key, timeout=self._timeout) as client:
+        async with self._get_radarr_client() as client:
             # Get movie info for the name
             movie = await client.get_movie(movie_id)
             movie_name = movie.title if movie else None
@@ -270,8 +416,8 @@ class ReleaseChecker:
                 result.tag_removed = tag_to_remove
                 return result
 
-            # Get existing tags ONCE to check if tag already exists
-            tags = await client.get_tags()
+            # Get existing tags from cache (or fetch once per batch)
+            tags = await self._get_cached_tags(client, "radarr")
             existing_labels = {t.label.lower(): t for t in tags}
 
             # Check if tag already exists before creating
@@ -283,6 +429,9 @@ class ReleaseChecker:
                 # Create the tag since it doesn't exist
                 tag = await client.create_tag(tag_to_apply)
                 result.tag_created = True
+                # Update cache with the new tag
+                if self._tag_cache is not None and "radarr" in self._tag_cache:
+                    self._tag_cache["radarr"].append(tag)
 
             result.tag_applied = tag_to_apply
 
@@ -345,8 +494,8 @@ class ReleaseChecker:
                 result.tag_removed = tag_to_remove
                 return result
 
-            # Get existing tags ONCE to check if tag already exists
-            tags = await client.get_tags()
+            # Get existing tags from cache (or fetch once per batch)
+            tags = await self._get_cached_tags(client, "sonarr")
             existing_labels = {t.label.lower(): t for t in tags}
 
             # Check if tag already exists before creating
@@ -358,6 +507,9 @@ class ReleaseChecker:
                 # Create the tag since it doesn't exist
                 tag = await client.create_tag(tag_to_apply)
                 result.tag_created = True
+                # Update cache with the new tag
+                if self._tag_cache is not None and "sonarr" in self._tag_cache:
+                    self._tag_cache["sonarr"].append(tag)
 
             result.tag_applied = tag_to_apply
 
@@ -412,8 +564,7 @@ class ReleaseChecker:
         if not self._radarr_config:
             raise ValueError("Radarr is not configured")
 
-        url, api_key = self._radarr_config
-        async with RadarrClient(url, api_key, timeout=self._timeout) as client:
+        async with self._get_radarr_client() as client:
             movie = await client.find_movie_by_name(name)
             if movie is None:
                 raise ValueError(f"Movie not found: {name}")
@@ -465,8 +616,7 @@ class ReleaseChecker:
         if not self._radarr_config:
             raise ValueError("Radarr is not configured")
 
-        url, api_key = self._radarr_config
-        async with RadarrClient(url, api_key, timeout=self._timeout) as client:
+        async with self._get_radarr_client() as client:
             movies = await client.search_movies(term)
             return [(m.id, m.title, m.year) for m in movies]
 
@@ -517,8 +667,7 @@ class ReleaseChecker:
             matcher = criteria
             result_type = ResultType.CUSTOM
 
-        url, api_key = self._sonarr_config
-        async with SonarrClient(url, api_key, timeout=self._timeout) as client:
+        async with self._get_sonarr_client() as client:
             # Get series info for the name
             series = await client.get_series(series_id)
             series_name = series.title if series else None
@@ -670,8 +819,7 @@ class ReleaseChecker:
                 f"{criteria.name} criteria is only applicable to movies, not TV series"
             )
 
-        url, api_key = self._sonarr_config
-        async with SonarrClient(url, api_key, timeout=self._timeout) as client:
+        async with self._get_sonarr_client() as client:
             series = await client.find_series_by_name(name)
             if series is None:
                 raise ValueError(f"Series not found: {name}")
@@ -701,7 +849,6 @@ class ReleaseChecker:
         if not self._sonarr_config:
             raise ValueError("Sonarr is not configured")
 
-        url, api_key = self._sonarr_config
-        async with SonarrClient(url, api_key, timeout=self._timeout) as client:
+        async with self._get_sonarr_client() as client:
             series_list = await client.search_series(term)
             return [(s.id, s.title, s.year) for s in series_list]

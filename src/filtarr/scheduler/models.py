@@ -106,6 +106,9 @@ class ScheduleDefinition(BaseModel):
     # Batch operation parameters
     batch_size: int = Field(default=0, ge=0, description="Max items per run (0=unlimited)")
     delay: float = Field(default=0.5, ge=0, description="Delay between checks in seconds")
+    concurrency: int = Field(
+        default=1, ge=1, le=50, description="Max concurrent checks (1=sequential)"
+    )
     skip_tagged: bool = Field(default=True, description="Skip items with existing 4K tags")
     include_rechecks: bool = Field(default=True, description="Include stale unavailable items")
     no_tag: bool = Field(default=False, description="Disable automatic tagging")
