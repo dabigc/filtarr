@@ -87,6 +87,19 @@ is rejected by pre-commit, review the error output and fix the issues before ret
 3. **Pydantic models**: All API responses parsed into validated models
 4. **Minimal dependencies**: Only httpx and pydantic as runtime deps
 
+## Naming Conventions
+
+1. **Use full names for variables**: Prefer descriptive names over abbreviations
+   - `season_number` not `season_num`
+   - `episode` not `ep`
+   - `configuration` not `cfg` or `conf`
+
+2. **Keep API field names as-is**: Radarr/Sonarr APIs use camelCase (e.g., `seasonNumber`, `episodeId`). Pydantic models use `Field(alias="camelCase")` to map to snake_case.
+
+3. **Use snake_case for all internal Python code**: Following PEP 8 conventions for variables, functions, and methods.
+
+4. **Short iterator variables in comprehensions are acceptable**: Single-letter or brief names like `r`, `s`, `e` in list comprehensions are idiomatic Python (e.g., `[r for r in releases if r.is_4k()]`).
+
 ## Radarr/Sonarr API Notes
 
 - Radarr API v3: `/api/v3/release?movieId={id}` - search for releases

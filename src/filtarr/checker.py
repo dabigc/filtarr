@@ -702,10 +702,10 @@ class ReleaseChecker:
 
             # Group episodes by season
             episodes_by_season: dict[int, list[Episode]] = {}
-            for ep in aired_episodes:
-                if ep.season_number not in episodes_by_season:
-                    episodes_by_season[ep.season_number] = []
-                episodes_by_season[ep.season_number].append(ep)
+            for episode in aired_episodes:
+                if episode.season_number not in episodes_by_season:
+                    episodes_by_season[episode.season_number] = []
+                episodes_by_season[episode.season_number].append(episode)
 
             # Determine which seasons to check
             available_seasons = list(episodes_by_season.keys())
@@ -718,8 +718,8 @@ class ReleaseChecker:
             seasons_checked: list[int] = []
 
             # For each selected season, find the latest episode and check it
-            for season_num in seasons_to_sample:
-                season_episodes = episodes_by_season.get(season_num, [])
+            for season_number in seasons_to_sample:
+                season_episodes = episodes_by_season.get(season_number, [])
                 if not season_episodes:
                     continue
 
@@ -729,7 +729,7 @@ class ReleaseChecker:
                 # Check releases for this episode
                 releases = await client.get_episode_releases(latest_in_season.id)
                 episodes_checked.append(latest_in_season.id)
-                seasons_checked.append(season_num)
+                seasons_checked.append(season_number)
 
                 # Check if any matching releases found
                 match_found = any(matcher(r) for r in releases)
