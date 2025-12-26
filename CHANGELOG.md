@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1](https://github.com/dabigc/filtarr/compare/v1.2.0...v1.2.1) (2025-12-26)
+
+
+### Performance Improvements
+
+* Phase 1 critical performance fixes ([#48](https://github.com/dabigc/filtarr/issues/48)) ([3e75db9](https://github.com/dabigc/filtarr/commit/3e75db9fcf829a845c5354a797df8153c12cd17d))
+
 ## [1.2.0](https://github.com/dabigc/filtarr/compare/v1.1.4...v1.2.0) (2025-12-26)
 
 
