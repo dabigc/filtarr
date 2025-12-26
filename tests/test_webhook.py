@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -966,35 +967,61 @@ class TestBackgroundTaskManagement:
 class TestImportErrors:
     """Tests for import error handling in webhook module."""
 
-    def test_create_app_fastapi_import_error(self) -> None:
+    def test_create_app_fastapi_import_error(self, full_config: Config) -> None:
         """Should raise ImportError with helpful message when FastAPI not installed."""
-        # Test that the error message format is correct
-        # We can't easily mock the import in create_app since FastAPI is already imported,
-        # but we can verify the error message format by directly testing the exception logic
-        with pytest.raises(ImportError) as exc_info:
-            try:
-                raise ImportError("No module named 'fastapi'")
-            except ImportError as e:
-                raise ImportError(
-                    "FastAPI is required for webhook server. "
-                    "Install with: pip install filtarr[webhook]"
-                ) from e
+        import sys
+
+        # Save and remove fastapi from sys.modules to force re-import attempt
+        saved_modules: dict[str, Any] = {}
+        fastapi_modules = [
+            key
+            for key in list(sys.modules.keys())
+            if key == "fastapi" or key.startswith("fastapi.")
+        ]
+        for mod in fastapi_modules:
+            saved_modules[mod] = sys.modules.pop(mod)
+
+        try:
+            # Mock builtins.__import__ to fail for fastapi
+            import builtins
+
+            original_import = builtins.__import__
+
+            def mock_import(name: str, *args: Any, **kwargs: Any) -> Any:
+                if name == "fastapi" or name.startswith("fastapi."):
+                    raise ImportError("No module named 'fastapi'")
+                return original_import(name, *args, **kwargs)
+
+            with (
+                patch.object(builtins, "__import__", side_effect=mock_import),
+                pytest.raises(ImportError) as exc_info,
+            ):
+                # Call create_app which has a local import of fastapi
+                filtarr.webhook.create_app(full_config)
+
+        finally:
+            # Restore all saved modules
+            sys.modules.update(saved_modules)
 
         assert "filtarr[webhook]" in str(exc_info.value)
         assert "FastAPI is required" in str(exc_info.value)
 
-    def test_run_server_uvicorn_import_error(self) -> None:
+    def test_run_server_uvicorn_import_error(self, full_config: Config) -> None:
         """Should raise ImportError with helpful message when uvicorn not installed."""
-        # Test that the error message format is correct
-        # We verify the error message format by directly testing the exception logic
-        with pytest.raises(ImportError) as exc_info:
-            try:
+        import builtins
+
+        original_import = builtins.__import__
+
+        def mock_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if name == "uvicorn":
                 raise ImportError("No module named 'uvicorn'")
-            except ImportError as e:
-                raise ImportError(
-                    "uvicorn is required for webhook server. "
-                    "Install with: pip install filtarr[webhook]"
-                ) from e
+            return original_import(name, *args, **kwargs)
+
+        with (
+            patch.object(builtins, "__import__", side_effect=mock_import),
+            pytest.raises(ImportError) as exc_info,
+        ):
+            filtarr.webhook.run_server(config=full_config, scheduler_enabled=False)
 
         assert "filtarr[webhook]" in str(exc_info.value)
         assert "uvicorn is required" in str(exc_info.value)
