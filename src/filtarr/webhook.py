@@ -437,7 +437,7 @@ def run_server(
             app,
             host=host,
             port=port,
-            log_level=log_level,
+            log_level=log_level.lower(),
         )
         server = uvicorn.Server(uvicorn_config)
 
@@ -472,4 +472,4 @@ def run_server(
         asyncio.run(run_with_scheduler())
     else:
         # Simple case - just run uvicorn directly
-        uvicorn.run(app, host=host, port=port, log_level=log_level)
+        uvicorn.run(app, host=host, port=port, log_level=log_level.lower())
