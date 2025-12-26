@@ -4,7 +4,7 @@ from datetime import date
 from typing import Any
 
 from filtarr.clients.base import BaseArrClient
-from filtarr.models.common import Quality, Release, Tag
+from filtarr.models.common import Release, Tag
 from filtarr.models.sonarr import Episode, Season, Series
 
 
@@ -161,23 +161,7 @@ class SonarrClient(BaseArrClient):
             List of releases found by indexers
         """
         data = await self._get("/api/v3/release", params={"episodeId": episode_id})
-
-        releases = []
-        for item in data:
-            quality_data = item.get("quality", {}).get("quality", {})
-            releases.append(
-                Release(
-                    guid=item["guid"],
-                    title=item["title"],
-                    indexer=item.get("indexer", "Unknown"),
-                    size=item.get("size", 0),
-                    quality=Quality(
-                        id=quality_data.get("id", 0),
-                        name=quality_data.get("name", "Unknown"),
-                    ),
-                )
-            )
-        return releases
+        return [self._parse_release(item) for item in data]
 
     async def get_latest_aired_episode(self, series_id: int) -> Episode | None:
         """Find the most recently aired episode.
@@ -210,23 +194,7 @@ class SonarrClient(BaseArrClient):
             List of releases found by indexers
         """
         data = await self._get("/api/v3/release", params={"seriesId": series_id})
-
-        releases = []
-        for item in data:
-            quality_data = item.get("quality", {}).get("quality", {})
-            releases.append(
-                Release(
-                    guid=item["guid"],
-                    title=item["title"],
-                    indexer=item.get("indexer", "Unknown"),
-                    size=item.get("size", 0),
-                    quality=Quality(
-                        id=quality_data.get("id", 0),
-                        name=quality_data.get("name", "Unknown"),
-                    ),
-                )
-            )
-        return releases
+        return [self._parse_release(item) for item in data]
 
     async def has_4k_releases(self, series_id: int) -> bool:
         """Check if a series has any 4K releases available.
@@ -363,3 +331,33 @@ class SonarrClient(BaseArrClient):
             series_data["tags"] = tags
             return await self.update_series(series_data)
         return await self.get_series(series_id)
+
+    # TaggableClient protocol methods (aliases for generic tag operations)
+
+    async def add_tag_to_item(self, item_id: int, tag_id: int) -> Series:
+        """Add a tag to an item (series).
+
+        This is an alias for add_tag_to_series to conform to TaggableClient protocol.
+
+        Args:
+            item_id: The series ID
+            tag_id: The tag ID to add
+
+        Returns:
+            The updated Series model
+        """
+        return await self.add_tag_to_series(item_id, tag_id)
+
+    async def remove_tag_from_item(self, item_id: int, tag_id: int) -> Series:
+        """Remove a tag from an item (series).
+
+        This is an alias for remove_tag_from_series to conform to TaggableClient protocol.
+
+        Args:
+            item_id: The series ID
+            tag_id: The tag ID to remove
+
+        Returns:
+            The updated Series model
+        """
+        return await self.remove_tag_from_series(item_id, tag_id)

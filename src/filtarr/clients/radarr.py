@@ -3,7 +3,7 @@
 from typing import Any
 
 from filtarr.clients.base import BaseArrClient
-from filtarr.models.common import Quality, Release, Tag
+from filtarr.models.common import Release, Tag
 from filtarr.models.radarr import Movie
 
 
@@ -88,23 +88,7 @@ class RadarrClient(BaseArrClient):
             List of releases found by indexers
         """
         data = await self._get("/api/v3/release", params={"movieId": movie_id})
-
-        releases = []
-        for item in data:
-            quality_data = item.get("quality", {}).get("quality", {})
-            releases.append(
-                Release(
-                    guid=item["guid"],
-                    title=item["title"],
-                    indexer=item.get("indexer", "Unknown"),
-                    size=item.get("size", 0),
-                    quality=Quality(
-                        id=quality_data.get("id", 0),
-                        name=quality_data.get("name", "Unknown"),
-                    ),
-                )
-            )
-        return releases
+        return [self._parse_release(item) for item in data]
 
     async def has_4k_releases(self, movie_id: int) -> bool:
         """Check if a movie has any 4K releases available.
@@ -221,3 +205,33 @@ class RadarrClient(BaseArrClient):
             return await self.update_movie(movie_data)
         # Tag doesn't exist - return properly validated Movie from server
         return await self.get_movie(movie_id)
+
+    # TaggableClient protocol methods (aliases for generic tag operations)
+
+    async def add_tag_to_item(self, item_id: int, tag_id: int) -> Movie:
+        """Add a tag to an item (movie).
+
+        This is an alias for add_tag_to_movie to conform to TaggableClient protocol.
+
+        Args:
+            item_id: The movie ID
+            tag_id: The tag ID to add
+
+        Returns:
+            The updated Movie model
+        """
+        return await self.add_tag_to_movie(item_id, tag_id)
+
+    async def remove_tag_from_item(self, item_id: int, tag_id: int) -> Movie:
+        """Remove a tag from an item (movie).
+
+        This is an alias for remove_tag_from_movie to conform to TaggableClient protocol.
+
+        Args:
+            item_id: The movie ID
+            tag_id: The tag ID to remove
+
+        Returns:
+            The updated Movie model
+        """
+        return await self.remove_tag_from_movie(item_id, tag_id)

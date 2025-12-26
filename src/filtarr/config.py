@@ -4,29 +4,113 @@ from __future__ import annotations
 
 import os
 import tomllib
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Self
+from urllib.parse import urlparse
 
 
 class ConfigurationError(Exception):
     """Raised when configuration is invalid or missing."""
 
 
+def _validate_url(url: str, allow_http_localhost: bool = True) -> str:
+    """Validate and normalize URL, enforcing HTTPS by default.
+
+    Args:
+        url: The URL to validate
+        allow_http_localhost: If True, allow HTTP for localhost URLs
+
+    Returns:
+        The validated and normalized URL (with trailing slashes removed)
+
+    Raises:
+        ConfigurationError: If URL scheme is invalid or HTTP is used for non-localhost
+    """
+    parsed = urlparse(url)
+
+    if parsed.scheme not in ("http", "https"):
+        raise ConfigurationError(f"Invalid URL scheme: {parsed.scheme}")
+
+    if parsed.scheme == "http":
+        is_localhost = parsed.hostname in ("localhost", "127.0.0.1", "::1")
+        if not (allow_http_localhost and is_localhost):
+            raise ConfigurationError(
+                "HTTP URLs are only allowed for localhost. Use HTTPS for remote servers."
+            )
+
+    return url.rstrip("/")
+
+
 @dataclass
 class RadarrConfig:
-    """Radarr connection configuration."""
+    """Radarr connection configuration.
+
+    Attributes:
+        url: Radarr server URL (must be HTTPS for remote servers)
+        api_key: Radarr API key
+        allow_insecure: If True, allow HTTP for non-localhost URLs (not recommended)
+    """
 
     url: str
     api_key: str
+    allow_insecure: bool = False
+
+    def __post_init__(self) -> None:
+        """Validate URL after initialization."""
+        if self.allow_insecure:
+            # When allow_insecure is True, just validate scheme and normalize
+            parsed = urlparse(self.url)
+            if parsed.scheme not in ("http", "https"):
+                raise ConfigurationError(f"Invalid URL scheme: {parsed.scheme}")
+            self.url = self.url.rstrip("/")
+        else:
+            # Normal validation: HTTPS required for non-localhost
+            self.url = _validate_url(self.url, allow_http_localhost=True)
+
+    def __repr__(self) -> str:
+        """Return string representation with masked API key."""
+        return f"RadarrConfig(url={self.url!r}, api_key='***')"
+
+    def __str__(self) -> str:
+        """Return string representation with masked API key."""
+        return self.__repr__()
 
 
 @dataclass
 class SonarrConfig:
-    """Sonarr connection configuration."""
+    """Sonarr connection configuration.
+
+    Attributes:
+        url: Sonarr server URL (must be HTTPS for remote servers)
+        api_key: Sonarr API key
+        allow_insecure: If True, allow HTTP for non-localhost URLs (not recommended)
+    """
 
     url: str
     api_key: str
+    allow_insecure: bool = False
+
+    def __post_init__(self) -> None:
+        """Validate URL after initialization."""
+        if self.allow_insecure:
+            # When allow_insecure is True, just validate scheme and normalize
+            parsed = urlparse(self.url)
+            if parsed.scheme not in ("http", "https"):
+                raise ConfigurationError(f"Invalid URL scheme: {parsed.scheme}")
+            self.url = self.url.rstrip("/")
+        else:
+            # Normal validation: HTTPS required for non-localhost
+            self.url = _validate_url(self.url, allow_http_localhost=True)
+
+    def __repr__(self) -> str:
+        """Return string representation with masked API key."""
+        return f"SonarrConfig(url={self.url!r}, api_key='***')"
+
+    def __str__(self) -> str:
+        """Return string representation with masked API key."""
+        return self.__repr__()
 
 
 @dataclass
@@ -35,9 +119,23 @@ class TagConfig:
 
     Tags are generated using patterns with {criteria} placeholder.
     For example, with default patterns:
-        - 4K criteria → "4k-available" / "4k-unavailable"
-        - IMAX criteria → "imax-available" / "imax-unavailable"
-        - Director's Cut → "directors-cut-available" / "directors-cut-unavailable"
+        - 4K criteria -> "4k-available" / "4k-unavailable"
+        - IMAX criteria -> "imax-available" / "imax-unavailable"
+        - Director's Cut -> "directors-cut-available" / "directors-cut-unavailable"
+
+    Migration Guide:
+        The ``available`` and ``unavailable`` fields are deprecated in favor of
+        ``pattern_available`` and ``pattern_unavailable``. These legacy fields
+        will be removed in filtarr 2.0.0.
+
+        Old usage::
+            TagConfig(available="4k-available", unavailable="4k-unavailable")
+
+        New usage::
+            TagConfig(
+                pattern_available="{criteria}-available",
+                pattern_unavailable="{criteria}-unavailable"
+            )
     """
 
     pattern_available: str = "{criteria}-available"
@@ -48,8 +146,66 @@ class TagConfig:
     # Legacy fields for backward compatibility (deprecated).
     # These fields are scheduled for removal in filtarr 2.0.0.
     # Use ``pattern_available`` / ``pattern_unavailable`` instead.
-    available: str = "4k-available"
-    unavailable: str = "4k-unavailable"
+    _available: str | None = field(default=None, repr=False)
+    _unavailable: str | None = field(default=None, repr=False)
+
+    @property
+    def available(self) -> str:
+        """Legacy property for backward compatibility.
+
+        .. deprecated:: 1.0.0
+            Use :meth:`get_tag_names` with ``pattern_available`` instead.
+            This will be removed in filtarr 2.0.0.
+        """
+        warnings.warn(
+            "TagConfig.available is deprecated. Use pattern_available with "
+            "get_tag_names() instead. This will be removed in filtarr 2.0.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if self._available is not None:
+            return self._available
+        return self.pattern_available.format(criteria="4k")
+
+    @available.setter
+    def available(self, value: str) -> None:
+        """Set legacy available field with deprecation warning."""
+        warnings.warn(
+            "TagConfig.available is deprecated. Use pattern_available instead. "
+            "This will be removed in filtarr 2.0.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self._available = value
+
+    @property
+    def unavailable(self) -> str:
+        """Legacy property for backward compatibility.
+
+        .. deprecated:: 1.0.0
+            Use :meth:`get_tag_names` with ``pattern_unavailable`` instead.
+            This will be removed in filtarr 2.0.0.
+        """
+        warnings.warn(
+            "TagConfig.unavailable is deprecated. Use pattern_unavailable with "
+            "get_tag_names() instead. This will be removed in filtarr 2.0.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if self._unavailable is not None:
+            return self._unavailable
+        return self.pattern_unavailable.format(criteria="4k")
+
+    @unavailable.setter
+    def unavailable(self, value: str) -> None:
+        """Set legacy unavailable field with deprecation warning."""
+        warnings.warn(
+            "TagConfig.unavailable is deprecated. Use pattern_unavailable instead. "
+            "This will be removed in filtarr 2.0.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self._unavailable = value
 
     def get_tag_names(self, criteria_value: str) -> tuple[str, str]:
         """Get tag names for a specific criteria.
@@ -60,7 +216,7 @@ class TagConfig:
         Returns:
             Tuple of (available_tag, unavailable_tag)
         """
-        # Convert underscores to hyphens for tag slugs (e.g., "directors_cut" → "directors-cut")
+        # Convert underscores to hyphens for tag slugs (e.g., "directors_cut" -> "directors-cut")
         slug = criteria_value.replace("_", "-")
         return (
             self.pattern_available.format(criteria=slug),
@@ -106,43 +262,48 @@ DEFAULT_TIMEOUT = 120.0
 def _parse_arr_config_from_dict(
     data: dict[str, Any],
     section: str,
-) -> tuple[str, str] | None:
-    """Parse URL and API key from a config dict section.
+) -> tuple[str, str, bool] | None:
+    """Parse URL, API key, and allow_insecure from a config dict section.
 
     Args:
         data: The full config dictionary
         section: The section name (e.g., "radarr", "sonarr")
 
     Returns:
-        Tuple of (url, api_key) if both present, None otherwise
+        Tuple of (url, api_key, allow_insecure) if url and api_key present, None otherwise
     """
     if section not in data:
         return None
     section_data = data[section]
     url = section_data.get("url")
     api_key = section_data.get("api_key")
+    allow_insecure = section_data.get("allow_insecure", False)
     if url and api_key:
-        return (url, api_key)
+        return (url, api_key, allow_insecure)
     return None
 
 
 def _parse_arr_config_from_env(
     url_var: str,
     key_var: str,
-) -> tuple[str, str] | None:
-    """Parse URL and API key from environment variables.
+    insecure_var: str,
+) -> tuple[str, str, bool] | None:
+    """Parse URL, API key, and allow_insecure from environment variables.
 
     Args:
         url_var: Environment variable name for URL
         key_var: Environment variable name for API key
+        insecure_var: Environment variable name for allow_insecure flag
 
     Returns:
-        Tuple of (url, api_key) if both present, None otherwise
+        Tuple of (url, api_key, allow_insecure) if url and api_key present, None otherwise
     """
     url = os.environ.get(url_var)
     api_key = os.environ.get(key_var)
+    allow_insecure_str = os.environ.get(insecure_var, "")
+    allow_insecure = allow_insecure_str.lower() in ("true", "1", "yes")
     if url and api_key:
-        return (url, api_key)
+        return (url, api_key, allow_insecure)
     return None
 
 
@@ -159,13 +320,36 @@ def _parse_tags_from_dict(data: dict[str, Any], defaults: TagConfig) -> TagConfi
     if "tags" not in data:
         return defaults
     tags_data = data["tags"]
+
+    # Check for deprecated legacy fields and emit warnings
+    legacy_available: str | None = None
+    legacy_unavailable: str | None = None
+
+    if "available" in tags_data:
+        warnings.warn(
+            "Config key 'tags.available' is deprecated. Use 'tags.pattern_available' "
+            "instead. This will be removed in filtarr 2.0.0.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        legacy_available = tags_data["available"]
+
+    if "unavailable" in tags_data:
+        warnings.warn(
+            "Config key 'tags.unavailable' is deprecated. Use 'tags.pattern_unavailable' "
+            "instead. This will be removed in filtarr 2.0.0.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        legacy_unavailable = tags_data["unavailable"]
+
     return TagConfig(
         pattern_available=tags_data.get("pattern_available", defaults.pattern_available),
         pattern_unavailable=tags_data.get("pattern_unavailable", defaults.pattern_unavailable),
         create_if_missing=tags_data.get("create_if_missing", defaults.create_if_missing),
         recheck_days=tags_data.get("recheck_days", defaults.recheck_days),
-        available=tags_data.get("available", defaults.available),
-        unavailable=tags_data.get("unavailable", defaults.unavailable),
+        _available=legacy_available or defaults._available,
+        _unavailable=legacy_unavailable or defaults._unavailable,
     )
 
 
@@ -187,13 +371,37 @@ def _parse_tags_from_env(base: TagConfig) -> TagConfig:
     if not any([pattern_available, pattern_unavailable, tag_available, tag_unavailable]):
         return base
 
+    # Check for deprecated legacy environment variables and emit warnings
+    legacy_available: str | None = base._available
+    legacy_unavailable: str | None = base._unavailable
+
+    if tag_available:
+        warnings.warn(
+            "Environment variable 'FILTARR_TAG_AVAILABLE' is deprecated. "
+            "Use 'FILTARR_TAG_PATTERN_AVAILABLE' instead. "
+            "This will be removed in filtarr 2.0.0.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        legacy_available = tag_available
+
+    if tag_unavailable:
+        warnings.warn(
+            "Environment variable 'FILTARR_TAG_UNAVAILABLE' is deprecated. "
+            "Use 'FILTARR_TAG_PATTERN_UNAVAILABLE' instead. "
+            "This will be removed in filtarr 2.0.0.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        legacy_unavailable = tag_unavailable
+
     return TagConfig(
         pattern_available=pattern_available or base.pattern_available,
         pattern_unavailable=pattern_unavailable or base.pattern_unavailable,
         create_if_missing=base.create_if_missing,
         recheck_days=base.recheck_days,
-        available=tag_available or base.available,
-        unavailable=tag_unavailable or base.unavailable,
+        _available=legacy_available,
+        _unavailable=legacy_unavailable,
     )
 
 
@@ -396,14 +604,22 @@ class Config:
         # Parse *arr configs from env
         radarr = (
             _build_radarr_config(
-                _parse_arr_config_from_env("FILTARR_RADARR_URL", "FILTARR_RADARR_API_KEY")
+                _parse_arr_config_from_env(
+                    "FILTARR_RADARR_URL",
+                    "FILTARR_RADARR_API_KEY",
+                    "FILTARR_RADARR_ALLOW_INSECURE",
+                )
             )
             or base.radarr
         )
 
         sonarr = (
             _build_sonarr_config(
-                _parse_arr_config_from_env("FILTARR_SONARR_URL", "FILTARR_SONARR_API_KEY")
+                _parse_arr_config_from_env(
+                    "FILTARR_SONARR_URL",
+                    "FILTARR_SONARR_API_KEY",
+                    "FILTARR_SONARR_ALLOW_INSECURE",
+                )
             )
             or base.sonarr
         )
@@ -477,32 +693,32 @@ def _load_toml_file(path: Path) -> dict[str, Any]:
 
 
 def _build_radarr_config(
-    parsed: tuple[str, str] | None,
+    parsed: tuple[str, str, bool] | None,
 ) -> RadarrConfig | None:
-    """Build RadarrConfig from parsed URL and API key.
+    """Build RadarrConfig from parsed URL, API key, and allow_insecure.
 
     Args:
-        parsed: Tuple of (url, api_key) or None
+        parsed: Tuple of (url, api_key, allow_insecure) or None
 
     Returns:
         RadarrConfig instance or None
     """
     if parsed is None:
         return None
-    return RadarrConfig(url=parsed[0], api_key=parsed[1])
+    return RadarrConfig(url=parsed[0], api_key=parsed[1], allow_insecure=parsed[2])
 
 
 def _build_sonarr_config(
-    parsed: tuple[str, str] | None,
+    parsed: tuple[str, str, bool] | None,
 ) -> SonarrConfig | None:
-    """Build SonarrConfig from parsed URL and API key.
+    """Build SonarrConfig from parsed URL, API key, and allow_insecure.
 
     Args:
-        parsed: Tuple of (url, api_key) or None
+        parsed: Tuple of (url, api_key, allow_insecure) or None
 
     Returns:
         SonarrConfig instance or None
     """
     if parsed is None:
         return None
-    return SonarrConfig(url=parsed[0], api_key=parsed[1])
+    return SonarrConfig(url=parsed[0], api_key=parsed[1], allow_insecure=parsed[2])

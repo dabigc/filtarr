@@ -325,11 +325,9 @@ class JobExecutor:
             if not schedule.skip_tagged:
                 return all_movies
 
-            # Get tags to skip
-            tag_names = {
-                self._config.tags.available,
-                self._config.tags.unavailable,
-            }
+            # Get tags to skip using the new pattern-based API
+            available_tag, unavailable_tag = self._config.tags.get_tag_names("4k")
+            tag_names = {available_tag, unavailable_tag}
             all_tags = await client.get_tags()
             skip_tag_ids = {tag.id for tag in all_tags if tag.label in tag_names}
 
@@ -356,11 +354,9 @@ class JobExecutor:
             if not schedule.skip_tagged:
                 return all_series
 
-            # Get tags to skip
-            tag_names = {
-                self._config.tags.available,
-                self._config.tags.unavailable,
-            }
+            # Get tags to skip using the new pattern-based API
+            available_tag, unavailable_tag = self._config.tags.get_tag_names("4k")
+            tag_names = {available_tag, unavailable_tag}
             all_tags = await client.get_tags()
             skip_tag_ids = {tag.id for tag in all_tags if tag.label in tag_names}
 

@@ -22,13 +22,13 @@ class TestMovieCheckIntegration:
     async def test_check_movie_with_4k_available(self) -> None:
         """Full flow: check movie by ID, find 4K releases."""
         # Mock the movie info endpoint
-        respx.get("http://radarr.local:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(200, json={"id": 123, "title": "Test Movie", "year": 2024})
         )
 
         # Mock the release search endpoint
         respx.get(
-            "http://radarr.local:7878/api/v3/release",
+            "http://localhost:7878/api/v3/release",
             params={"movieId": "123"},
         ).mock(
             return_value=Response(
@@ -53,7 +53,7 @@ class TestMovieCheckIntegration:
         )
 
         checker = ReleaseChecker(
-            radarr_url="http://radarr.local:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test-key",
         )
 
@@ -72,7 +72,7 @@ class TestMovieCheckIntegration:
     async def test_check_movie_by_name_flow(self) -> None:
         """Full flow: search movie by name, then check for 4K."""
         # Mock get all movies
-        respx.get("http://radarr.local:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[
@@ -84,13 +84,13 @@ class TestMovieCheckIntegration:
         )
 
         # Mock movie info for found movie
-        respx.get("http://radarr.local:7878/api/v3/movie/100").mock(
+        respx.get("http://localhost:7878/api/v3/movie/100").mock(
             return_value=Response(200, json={"id": 100, "title": "The Matrix", "year": 1999})
         )
 
         # Mock release search for found movie
         respx.get(
-            "http://radarr.local:7878/api/v3/release",
+            "http://localhost:7878/api/v3/release",
             params={"movieId": "100"},
         ).mock(
             return_value=Response(
@@ -108,7 +108,7 @@ class TestMovieCheckIntegration:
         )
 
         checker = ReleaseChecker(
-            radarr_url="http://radarr.local:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test-key",
         )
 
@@ -135,7 +135,7 @@ class TestSeriesCheckIntegration:
         last_week = today - timedelta(days=7)
 
         # Mock series info endpoint
-        respx.get("http://sonarr.local:8989/api/v3/series/456").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/456").mock(
             return_value=Response(
                 200, json={"id": 456, "title": "Test Series", "year": 2020, "seasons": []}
             )
@@ -143,7 +143,7 @@ class TestSeriesCheckIntegration:
 
         # Mock episodes endpoint
         respx.get(
-            "http://sonarr.local:8989/api/v3/episode",
+            "http://127.0.0.1:8989/api/v3/episode",
             params={"seriesId": "456"},
         ).mock(
             return_value=Response(
@@ -198,7 +198,7 @@ class TestSeriesCheckIntegration:
 
         # Mock releases for season 2 latest episode (no 4K)
         respx.get(
-            "http://sonarr.local:8989/api/v3/release",
+            "http://127.0.0.1:8989/api/v3/release",
             params={"episodeId": "2002"},
         ).mock(
             return_value=Response(
@@ -217,7 +217,7 @@ class TestSeriesCheckIntegration:
 
         # Mock releases for season 3 latest episode (has 4K!)
         respx.get(
-            "http://sonarr.local:8989/api/v3/release",
+            "http://127.0.0.1:8989/api/v3/release",
             params={"episodeId": "3001"},
         ).mock(
             return_value=Response(
@@ -235,7 +235,7 @@ class TestSeriesCheckIntegration:
         )
 
         checker = ReleaseChecker(
-            sonarr_url="http://sonarr.local:8989",
+            sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test-key",
         )
 
@@ -257,7 +257,7 @@ class TestSeriesCheckIntegration:
     async def test_check_series_distributed_strategy(self) -> None:
         """Full flow: check series with DISTRIBUTED strategy (first, middle, last)."""
         # Mock series info endpoint
-        respx.get("http://sonarr.local:8989/api/v3/series/789").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/789").mock(
             return_value=Response(
                 200, json={"id": 789, "title": "Long Series", "year": 2019, "seasons": []}
             )
@@ -265,7 +265,7 @@ class TestSeriesCheckIntegration:
 
         # Mock episodes for 5 seasons
         respx.get(
-            "http://sonarr.local:8989/api/v3/episode",
+            "http://127.0.0.1:8989/api/v3/episode",
             params={"seriesId": "789"},
         ).mock(
             return_value=Response(
@@ -318,7 +318,7 @@ class TestSeriesCheckIntegration:
         # Mock releases for seasons 1, 3, 5 (first, middle, last) - all no 4K
         for ep_id in [1001, 3001, 5001]:
             respx.get(
-                "http://sonarr.local:8989/api/v3/release",
+                "http://127.0.0.1:8989/api/v3/release",
                 params={"episodeId": str(ep_id)},
             ).mock(
                 return_value=Response(
@@ -336,7 +336,7 @@ class TestSeriesCheckIntegration:
             )
 
         checker = ReleaseChecker(
-            sonarr_url="http://sonarr.local:8989",
+            sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test-key",
         )
 
@@ -354,7 +354,7 @@ class TestSeriesCheckIntegration:
     async def test_check_series_by_name_flow(self) -> None:
         """Full flow: search series by name, then check for 4K."""
         # Mock get all series
-        respx.get("http://sonarr.local:8989/api/v3/series").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(
             return_value=Response(
                 200,
                 json=[
@@ -365,7 +365,7 @@ class TestSeriesCheckIntegration:
         )
 
         # Mock series info for Breaking Bad
-        respx.get("http://sonarr.local:8989/api/v3/series/500").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/500").mock(
             return_value=Response(
                 200, json={"id": 500, "title": "Breaking Bad", "year": 2008, "seasons": []}
             )
@@ -373,7 +373,7 @@ class TestSeriesCheckIntegration:
 
         # Mock episodes for Breaking Bad
         respx.get(
-            "http://sonarr.local:8989/api/v3/episode",
+            "http://127.0.0.1:8989/api/v3/episode",
             params={"seriesId": "500"},
         ).mock(
             return_value=Response(
@@ -393,7 +393,7 @@ class TestSeriesCheckIntegration:
 
         # Mock releases
         respx.get(
-            "http://sonarr.local:8989/api/v3/release",
+            "http://127.0.0.1:8989/api/v3/release",
             params={"episodeId": "5001"},
         ).mock(
             return_value=Response(
@@ -411,7 +411,7 @@ class TestSeriesCheckIntegration:
         )
 
         checker = ReleaseChecker(
-            sonarr_url="http://sonarr.local:8989",
+            sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test-key",
         )
 
@@ -434,13 +434,13 @@ class TestCombinedCheckerIntegration:
     async def test_checker_with_both_services(self) -> None:
         """Should be able to check both movies and series with same checker."""
         # Mock movie info
-        respx.get("http://radarr.local:7878/api/v3/movie/10").mock(
+        respx.get("http://localhost:7878/api/v3/movie/10").mock(
             return_value=Response(200, json={"id": 10, "title": "Some Movie", "year": 2023})
         )
 
         # Mock movie releases
         respx.get(
-            "http://radarr.local:7878/api/v3/release",
+            "http://localhost:7878/api/v3/release",
             params={"movieId": "10"},
         ).mock(
             return_value=Response(
@@ -458,7 +458,7 @@ class TestCombinedCheckerIntegration:
         )
 
         # Mock series info
-        respx.get("http://sonarr.local:8989/api/v3/series/20").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/20").mock(
             return_value=Response(
                 200, json={"id": 20, "title": "Some Series", "year": 2023, "seasons": []}
             )
@@ -466,7 +466,7 @@ class TestCombinedCheckerIntegration:
 
         # Mock series episodes
         respx.get(
-            "http://sonarr.local:8989/api/v3/episode",
+            "http://127.0.0.1:8989/api/v3/episode",
             params={"seriesId": "20"},
         ).mock(
             return_value=Response(
@@ -486,7 +486,7 @@ class TestCombinedCheckerIntegration:
 
         # Mock series releases
         respx.get(
-            "http://sonarr.local:8989/api/v3/release",
+            "http://127.0.0.1:8989/api/v3/release",
             params={"episodeId": "2001"},
         ).mock(
             return_value=Response(
@@ -504,9 +504,9 @@ class TestCombinedCheckerIntegration:
         )
 
         checker = ReleaseChecker(
-            radarr_url="http://radarr.local:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="radarr-key",
-            sonarr_url="http://sonarr.local:8989",
+            sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="sonarr-key",
         )
 
@@ -527,7 +527,7 @@ class TestErrorHandlingIntegration:
     async def test_check_movie_without_radarr_config(self) -> None:
         """Should raise ValueError when checking movie without Radarr configured."""
         checker = ReleaseChecker(
-            sonarr_url="http://sonarr.local:8989",
+            sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="key",
         )
 
@@ -538,7 +538,7 @@ class TestErrorHandlingIntegration:
     async def test_check_series_without_sonarr_config(self) -> None:
         """Should raise ValueError when checking series without Sonarr configured."""
         checker = ReleaseChecker(
-            radarr_url="http://radarr.local:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="key",
         )
 
@@ -550,17 +550,17 @@ class TestErrorHandlingIntegration:
     async def test_handles_empty_release_response(self) -> None:
         """Should handle case where no releases are found."""
         # Mock movie info
-        respx.get("http://radarr.local:7878/api/v3/movie/999").mock(
+        respx.get("http://localhost:7878/api/v3/movie/999").mock(
             return_value=Response(200, json={"id": 999, "title": "Empty Movie", "year": 2024})
         )
 
         respx.get(
-            "http://radarr.local:7878/api/v3/release",
+            "http://localhost:7878/api/v3/release",
             params={"movieId": "999"},
         ).mock(return_value=Response(200, json=[]))
 
         checker = ReleaseChecker(
-            radarr_url="http://radarr.local:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="key",
         )
 

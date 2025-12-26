@@ -14,16 +14,12 @@ lazy client creation (creates/destroys client per operation).
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 from typing import TYPE_CHECKING, Any
-
-import httpx
-from pydantic import ValidationError
 
 from filtarr.clients.radarr import RadarrClient
 from filtarr.clients.sonarr import SonarrClient
@@ -34,12 +30,13 @@ from filtarr.criteria import (
     SearchCriteria,
     get_matcher_for_criteria,
 )
+from filtarr.tagger import ReleaseTagger, TagResult
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
     from typing import Self
 
-    from filtarr.models.common import Release, Tag
+    from filtarr.models.common import Release
     from filtarr.models.sonarr import Episode
 
 logger = logging.getLogger(__name__)
@@ -57,17 +54,6 @@ class SamplingStrategy(Enum):
     RECENT = "recent"
     DISTRIBUTED = "distributed"
     ALL = "all"
-
-
-@dataclass
-class TagResult:
-    """Result of a tag operation."""
-
-    tag_applied: str | None = None
-    tag_removed: str | None = None
-    tag_created: bool = False
-    tag_error: str | None = None
-    dry_run: bool = False
 
 
 @dataclass
@@ -178,6 +164,7 @@ class ReleaseChecker:
         sonarr_api_key: str | None = None,
         timeout: float = 120.0,
         tag_config: TagConfig | None = None,
+        tagger: ReleaseTagger | None = None,
     ) -> None:
         """Initialize the release checker.
 
@@ -188,6 +175,7 @@ class ReleaseChecker:
             sonarr_api_key: The Sonarr API key
             timeout: Request timeout in seconds (default 120.0)
             tag_config: Configuration for tagging (optional)
+            tagger: Custom ReleaseTagger instance (optional, created from tag_config if not provided)
         """
         self._radarr_config = (
             (radarr_url, radarr_api_key) if radarr_url and radarr_api_key else None
@@ -197,8 +185,7 @@ class ReleaseChecker:
         )
         self._timeout = timeout
         self._tag_config = tag_config or TagConfig()
-        self._tag_cache: dict[str, list[Tag]] | None = None
-        self._tag_cache_lock = asyncio.Lock()
+        self._tagger = tagger or ReleaseTagger(self._tag_config)
 
         # Connection pooling: store client instances for reuse
         self._radarr_client: RadarrClient | None = None
@@ -243,7 +230,7 @@ class ReleaseChecker:
             self._sonarr_client = None
 
         # Clear tag cache when exiting context
-        self._tag_cache = None
+        self._tagger.clear_tag_cache()
 
     @asynccontextmanager
     async def _get_radarr_client(self) -> AsyncIterator[RadarrClient]:
@@ -287,38 +274,13 @@ class ReleaseChecker:
             async with SonarrClient(url, api_key, timeout=self._timeout) as client:
                 yield client
 
-    async def _get_cached_tags(
-        self, client: RadarrClient | SonarrClient, cache_key: str
-    ) -> list[Tag]:
-        """Get tags from cache or fetch from client.
-
-        Tags are cached per client type (radarr/sonarr) to avoid repeated
-        API calls when processing batches of items.
-
-        Uses a lock to prevent race conditions when multiple concurrent
-        calls check the cache simultaneously.
-
-        Args:
-            client: The RadarrClient or SonarrClient instance
-            cache_key: Key for caching ("radarr" or "sonarr")
-
-        Returns:
-            List of Tag models
-        """
-        async with self._tag_cache_lock:
-            if self._tag_cache is None:
-                self._tag_cache = {}
-            if cache_key not in self._tag_cache:
-                self._tag_cache[cache_key] = await client.get_tags()
-            return self._tag_cache[cache_key]
-
     def clear_tag_cache(self) -> None:
         """Clear the tag cache.
 
         Call this method when you need to refresh tag data, for example
         after creating new tags or if tags may have been modified externally.
         """
-        self._tag_cache = None
+        self._tagger.clear_tag_cache()
 
     async def check_movie(
         self,
@@ -368,8 +330,8 @@ class ReleaseChecker:
                 tag_criteria = (
                     criteria if isinstance(criteria, SearchCriteria) else SearchCriteria.FOUR_K
                 )
-                tag_result = await self._apply_movie_tags(
-                    client, movie_id, has_match, dry_run, tag_criteria
+                tag_result = await self._tagger.apply_movie_tags(
+                    client, movie_id, has_match, tag_criteria, dry_run
                 )
 
             return SearchResult(
@@ -382,162 +344,6 @@ class ReleaseChecker:
                 tag_result=tag_result,
                 _criteria=criteria,
             )
-
-    async def _apply_movie_tags(
-        self,
-        client: RadarrClient,
-        movie_id: int,
-        has_match: bool,
-        dry_run: bool,
-        criteria: SearchCriteria = SearchCriteria.FOUR_K,
-    ) -> TagResult:
-        """Apply appropriate tags to a movie based on release availability.
-
-        Args:
-            client: The RadarrClient instance
-            movie_id: The movie ID to tag
-            has_match: Whether the movie has matching releases available
-            dry_run: If True, don't actually apply tags
-            criteria: The search criteria used (determines tag names)
-
-        Returns:
-            TagResult with the operation details
-        """
-        available_tag, unavailable_tag = self._tag_config.get_tag_names(criteria.value)
-        tag_to_apply = available_tag if has_match else unavailable_tag
-        tag_to_remove = unavailable_tag if has_match else available_tag
-
-        result = TagResult(dry_run=dry_run)
-
-        try:
-            if dry_run:
-                # Just report what would happen
-                result.tag_applied = tag_to_apply
-                result.tag_removed = tag_to_remove
-                return result
-
-            # Get existing tags from cache (or fetch once per batch)
-            tags = await self._get_cached_tags(client, "radarr")
-            existing_labels = {t.label.lower(): t for t in tags}
-
-            # Check if tag already exists before creating
-            tag_already_exists = tag_to_apply.lower() in existing_labels
-
-            if tag_already_exists:
-                tag = existing_labels[tag_to_apply.lower()]
-            else:
-                # Create the tag since it doesn't exist
-                tag = await client.create_tag(tag_to_apply)
-                result.tag_created = True
-                # Update cache with the new tag
-                if self._tag_cache is not None and "radarr" in self._tag_cache:
-                    self._tag_cache["radarr"].append(tag)
-
-            result.tag_applied = tag_to_apply
-
-            # Apply the tag
-            await client.add_tag_to_movie(movie_id, tag.id)
-
-            # Remove the opposite tag if it exists
-            if tag_to_remove.lower() in existing_labels:
-                opposite_tag = existing_labels[tag_to_remove.lower()]
-                await client.remove_tag_from_movie(movie_id, opposite_tag.id)
-                result.tag_removed = tag_to_remove
-
-        except httpx.HTTPStatusError as e:
-            logger.warning(
-                "HTTP error applying tags to movie %d: %s %s",
-                movie_id,
-                e.response.status_code,
-                e.response.reason_phrase,
-            )
-            result.tag_error = f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
-        except (httpx.ConnectError, httpx.TimeoutException) as e:
-            logger.warning("Network error applying tags to movie %d: %s", movie_id, e)
-            result.tag_error = f"Network error: {e}"
-        except ValidationError as e:
-            logger.warning("Validation error applying tags to movie %d: %s", movie_id, e)
-            result.tag_error = f"Validation error: {e}"
-
-        return result
-
-    async def _apply_series_tags(
-        self,
-        client: SonarrClient,
-        series_id: int,
-        has_match: bool,
-        dry_run: bool,
-        criteria: SearchCriteria = SearchCriteria.FOUR_K,
-    ) -> TagResult:
-        """Apply appropriate tags to a series based on release availability.
-
-        Args:
-            client: The SonarrClient instance
-            series_id: The series ID to tag
-            has_match: Whether the series has matching releases available
-            dry_run: If True, don't actually apply tags
-            criteria: The search criteria used (determines tag names)
-
-        Returns:
-            TagResult with the operation details
-        """
-        available_tag, unavailable_tag = self._tag_config.get_tag_names(criteria.value)
-        tag_to_apply = available_tag if has_match else unavailable_tag
-        tag_to_remove = unavailable_tag if has_match else available_tag
-
-        result = TagResult(dry_run=dry_run)
-
-        try:
-            if dry_run:
-                # Just report what would happen
-                result.tag_applied = tag_to_apply
-                result.tag_removed = tag_to_remove
-                return result
-
-            # Get existing tags from cache (or fetch once per batch)
-            tags = await self._get_cached_tags(client, "sonarr")
-            existing_labels = {t.label.lower(): t for t in tags}
-
-            # Check if tag already exists before creating
-            tag_already_exists = tag_to_apply.lower() in existing_labels
-
-            if tag_already_exists:
-                tag = existing_labels[tag_to_apply.lower()]
-            else:
-                # Create the tag since it doesn't exist
-                tag = await client.create_tag(tag_to_apply)
-                result.tag_created = True
-                # Update cache with the new tag
-                if self._tag_cache is not None and "sonarr" in self._tag_cache:
-                    self._tag_cache["sonarr"].append(tag)
-
-            result.tag_applied = tag_to_apply
-
-            # Apply the tag
-            await client.add_tag_to_series(series_id, tag.id)
-
-            # Remove the opposite tag if it exists
-            if tag_to_remove.lower() in existing_labels:
-                opposite_tag = existing_labels[tag_to_remove.lower()]
-                await client.remove_tag_from_series(series_id, opposite_tag.id)
-                result.tag_removed = tag_to_remove
-
-        except httpx.HTTPStatusError as e:
-            logger.warning(
-                "HTTP error applying tags to series %d: %s %s",
-                series_id,
-                e.response.status_code,
-                e.response.reason_phrase,
-            )
-            result.tag_error = f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
-        except (httpx.ConnectError, httpx.TimeoutException) as e:
-            logger.warning("Network error applying tags to series %d: %s", series_id, e)
-            result.tag_error = f"Network error: {e}"
-        except ValidationError as e:
-            logger.warning("Validation error applying tags to series %d: %s", series_id, e)
-            result.tag_error = f"Validation error: {e}"
-
-        return result
 
     async def check_movie_by_name(
         self,
@@ -586,8 +392,8 @@ class ReleaseChecker:
                 tag_criteria = (
                     criteria if isinstance(criteria, SearchCriteria) else SearchCriteria.FOUR_K
                 )
-                tag_result = await self._apply_movie_tags(
-                    client, movie.id, has_match, dry_run, tag_criteria
+                tag_result = await self._tagger.apply_movie_tags(
+                    client, movie.id, has_match, tag_criteria, dry_run
                 )
 
             return SearchResult(
@@ -686,8 +492,8 @@ class ReleaseChecker:
                     tag_criteria = (
                         criteria if isinstance(criteria, SearchCriteria) else SearchCriteria.FOUR_K
                     )
-                    tag_result = await self._apply_series_tags(
-                        client, series_id, False, dry_run, tag_criteria
+                    tag_result = await self._tagger.apply_series_tags(
+                        client, series_id, False, tag_criteria, dry_run
                     )
                 return SearchResult(
                     item_id=series_id,
@@ -702,10 +508,10 @@ class ReleaseChecker:
 
             # Group episodes by season
             episodes_by_season: dict[int, list[Episode]] = {}
-            for ep in aired_episodes:
-                if ep.season_number not in episodes_by_season:
-                    episodes_by_season[ep.season_number] = []
-                episodes_by_season[ep.season_number].append(ep)
+            for episode in aired_episodes:
+                if episode.season_number not in episodes_by_season:
+                    episodes_by_season[episode.season_number] = []
+                episodes_by_season[episode.season_number].append(episode)
 
             # Determine which seasons to check
             available_seasons = list(episodes_by_season.keys())
@@ -718,8 +524,8 @@ class ReleaseChecker:
             seasons_checked: list[int] = []
 
             # For each selected season, find the latest episode and check it
-            for season_num in seasons_to_sample:
-                season_episodes = episodes_by_season.get(season_num, [])
+            for season_number in seasons_to_sample:
+                season_episodes = episodes_by_season.get(season_number, [])
                 if not season_episodes:
                     continue
 
@@ -729,7 +535,7 @@ class ReleaseChecker:
                 # Check releases for this episode
                 releases = await client.get_episode_releases(latest_in_season.id)
                 episodes_checked.append(latest_in_season.id)
-                seasons_checked.append(season_num)
+                seasons_checked.append(season_number)
 
                 # Check if any matching releases found
                 match_found = any(matcher(r) for r in releases)
@@ -744,8 +550,8 @@ class ReleaseChecker:
                             if isinstance(criteria, SearchCriteria)
                             else SearchCriteria.FOUR_K
                         )
-                        tag_result = await self._apply_series_tags(
-                            client, series_id, True, dry_run, tag_criteria
+                        tag_result = await self._tagger.apply_series_tags(
+                            client, series_id, True, tag_criteria, dry_run
                         )
                     return SearchResult(
                         item_id=series_id,
@@ -767,8 +573,8 @@ class ReleaseChecker:
                 tag_criteria = (
                     criteria if isinstance(criteria, SearchCriteria) else SearchCriteria.FOUR_K
                 )
-                tag_result = await self._apply_series_tags(
-                    client, series_id, False, dry_run, tag_criteria
+                tag_result = await self._tagger.apply_series_tags(
+                    client, series_id, False, tag_criteria, dry_run
                 )
             return SearchResult(
                 item_id=series_id,

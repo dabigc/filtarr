@@ -86,12 +86,12 @@ class TestReleaseCheckerContextManager:
             radarr_enter.return_value = None
 
             async with checker:
-                # Simulate that tag cache was populated
-                checker._tag_cache = {"radarr": []}
-                assert checker._tag_cache is not None
+                # Simulate that tag cache was populated (on the tagger)
+                checker._tagger._tag_cache = {"radarr": []}
+                assert checker._tagger._tag_cache is not None
 
             # Tag cache should be cleared after exiting
-            assert checker._tag_cache is None
+            assert checker._tagger._tag_cache is None
 
     @pytest.mark.asyncio
     async def test_context_manager_returns_self(self) -> None:
@@ -362,7 +362,7 @@ class TestExceptionHandlingInContext:
                     assert checker._radarr_client is not None
                     raise RuntimeError("Test exception")
 
-            # Client should have been cleaned up despite the exception
+            # pytest.raises catches the exception, so assertions below ARE reachable
             radarr_exit.assert_called_once()
             assert checker._radarr_client is None
             assert checker._in_context is False
@@ -385,7 +385,7 @@ class TestExceptionHandlingInContext:
                 async with checker:
                     raise ValueError("Test error")
 
-            # Verify __aexit__ was called with exception info
+            # pytest.raises catches the exception, so code below IS reachable
             call_args = radarr_exit.call_args
             exc_type, exc_val, exc_tb = call_args[0]
             assert exc_type is ValueError

@@ -33,13 +33,13 @@ from tests.test_utils import CreateTaskMock
 @pytest.fixture
 def radarr_config() -> RadarrConfig:
     """Create a test Radarr configuration."""
-    return RadarrConfig(url="http://radarr:7878", api_key="radarr-api-key")
+    return RadarrConfig(url="http://localhost:7878", api_key="radarr-api-key")
 
 
 @pytest.fixture
 def sonarr_config() -> SonarrConfig:
     """Create a test Sonarr configuration."""
-    return SonarrConfig(url="http://sonarr:8989", api_key="sonarr-api-key")
+    return SonarrConfig(url="http://127.0.0.1:8989", api_key="sonarr-api-key")
 
 
 @pytest.fixture
@@ -534,14 +534,14 @@ class TestProcessMovieCheck:
     async def test_process_movie_check_success(self, full_config: Config) -> None:
         """Should successfully check movie for 4K availability."""
         # Mock movie info endpoint
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
         # Mock releases endpoint with 4K release
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -556,11 +556,11 @@ class TestProcessMovieCheck:
             )
         )
         # Mock tags endpoint
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(200, json=[{"id": 1, "label": "4k-available"}])
         )
         # Mock update movie
-        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+        respx.put("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": [1]},
@@ -591,14 +591,14 @@ class TestProcessSeriesCheck:
     async def test_process_series_check_success(self, full_config: Config) -> None:
         """Should successfully check series for 4K availability."""
         # Mock series info endpoint
-        respx.get("http://sonarr:8989/api/v3/series/456").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/456").mock(
             return_value=Response(
                 200,
                 json={"id": 456, "title": "Test Series", "year": 2020, "seasons": [], "tags": []},
             )
         )
         # Mock episodes endpoint
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "456"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "456"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -614,7 +614,7 @@ class TestProcessSeriesCheck:
             )
         )
         # Mock releases endpoint
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "1001"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "1001"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -629,11 +629,11 @@ class TestProcessSeriesCheck:
             )
         )
         # Mock tags endpoint
-        respx.get("http://sonarr:8989/api/v3/tag").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(
             return_value=Response(200, json=[{"id": 1, "label": "4k-available"}])
         )
         # Mock update series
-        respx.put("http://sonarr:8989/api/v3/series/456").mock(
+        respx.put("http://127.0.0.1:8989/api/v3/series/456").mock(
             return_value=Response(
                 200,
                 json={"id": 456, "title": "Test Series", "year": 2020, "tags": [1]},
@@ -873,7 +873,7 @@ class TestCreateAppWithoutConfig:
         # Mock Config.load() to return a test config
         with patch("filtarr.webhook.Config.load") as mock_load:
             mock_config = Config(
-                radarr=RadarrConfig(url="http://test:7878", api_key="test-key"),
+                radarr=RadarrConfig(url="http://localhost:7878", api_key="test-key"),
             )
             mock_load.return_value = mock_config
 

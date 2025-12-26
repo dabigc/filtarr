@@ -277,8 +277,8 @@ class TestTriggerConversion:
 def mock_config() -> Config:
     """Create a mock config for testing."""
     return Config(
-        radarr=RadarrConfig(url="http://radarr:7878", api_key="radarr-key"),
-        sonarr=SonarrConfig(url="http://sonarr:8989", api_key="sonarr-key"),
+        radarr=RadarrConfig(url="http://localhost:7878", api_key="radarr-key"),
+        sonarr=SonarrConfig(url="http://127.0.0.1:8989", api_key="sonarr-key"),
         timeout=30.0,
         tags=TagConfig(),
         scheduler=SchedulerConfig(enabled=True, history_limit=100, schedules=[]),
@@ -302,7 +302,7 @@ class TestJobExecutor:
     ) -> None:
         """Test executing a movies-only schedule successfully."""
         # Mock Radarr endpoints
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[
@@ -311,17 +311,19 @@ class TestJobExecutor:
                 ],
             )
         )
-        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.get("http://localhost:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
 
         # Mock movie info and releases for each movie
         for movie_id in [1, 2]:
-            respx.get(f"http://radarr:7878/api/v3/movie/{movie_id}").mock(
+            respx.get(f"http://localhost:7878/api/v3/movie/{movie_id}").mock(
                 return_value=Response(
                     200,
                     json={"id": movie_id, "title": f"Movie {movie_id}", "year": 2024, "tags": []},
                 )
             )
-            respx.get("http://radarr:7878/api/v3/release", params={"movieId": str(movie_id)}).mock(
+            respx.get(
+                "http://localhost:7878/api/v3/release", params={"movieId": str(movie_id)}
+            ).mock(
                 return_value=Response(
                     200,
                     json=[
@@ -335,10 +337,10 @@ class TestJobExecutor:
                     ],
                 )
             )
-            respx.post("http://radarr:7878/api/v3/tag").mock(
+            respx.post("http://localhost:7878/api/v3/tag").mock(
                 return_value=Response(201, json={"id": 1, "label": "4k-available"})
             )
-            respx.put(f"http://radarr:7878/api/v3/movie/{movie_id}").mock(
+            respx.put(f"http://localhost:7878/api/v3/movie/{movie_id}").mock(
                 return_value=Response(
                     200,
                     json={
@@ -371,7 +373,7 @@ class TestJobExecutor:
         self, mock_config: Config, mock_state_manager: StateManager
     ) -> None:
         """Test that batch size limits the number of items processed."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[
@@ -381,22 +383,22 @@ class TestJobExecutor:
                 ],
             )
         )
-        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.get("http://localhost:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
 
         # Only mock movie 1 since batch_size=1
-        respx.get("http://radarr:7878/api/v3/movie/1").mock(
+        respx.get("http://localhost:7878/api/v3/movie/1").mock(
             return_value=Response(
                 200,
                 json={"id": 1, "title": "Movie 1", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "1"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "1"}).mock(
             return_value=Response(200, json=[])
         )
-        respx.post("http://radarr:7878/api/v3/tag").mock(
+        respx.post("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(201, json={"id": 2, "label": "4k-unavailable"})
         )
-        respx.put("http://radarr:7878/api/v3/movie/1").mock(
+        respx.put("http://localhost:7878/api/v3/movie/1").mock(
             return_value=Response(
                 200,
                 json={"id": 1, "title": "Movie 1", "year": 2024, "tags": [2]},
@@ -423,7 +425,7 @@ class TestJobExecutor:
     ) -> None:
         """Test executing a series-only schedule successfully."""
         # Mock Sonarr endpoints
-        respx.get("http://sonarr:8989/api/v3/series").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(
             return_value=Response(
                 200,
                 json=[
@@ -431,14 +433,14 @@ class TestJobExecutor:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/tag").mock(return_value=Response(200, json=[]))
-        respx.get("http://sonarr:8989/api/v3/series/1").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.get("http://127.0.0.1:8989/api/v3/series/1").mock(
             return_value=Response(
                 200,
                 json={"id": 1, "title": "Series 1", "year": 2024, "seasons": [], "tags": []},
             )
         )
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "1"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "1"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -453,7 +455,7 @@ class TestJobExecutor:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -467,10 +469,10 @@ class TestJobExecutor:
                 ],
             )
         )
-        respx.post("http://sonarr:8989/api/v3/tag").mock(
+        respx.post("http://127.0.0.1:8989/api/v3/tag").mock(
             return_value=Response(201, json={"id": 1, "label": "4k-available"})
         )
-        respx.put("http://sonarr:8989/api/v3/series/1").mock(
+        respx.put("http://127.0.0.1:8989/api/v3/series/1").mock(
             return_value=Response(
                 200,
                 json={"id": 1, "title": "Series 1", "year": 2024, "seasons": [], "tags": [1]},
@@ -497,20 +499,20 @@ class TestJobExecutor:
         self, mock_config: Config, mock_state_manager: StateManager
     ) -> None:
         """Test that dry_run mode does not apply tags."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[{"id": 1, "title": "Movie 1", "year": 2024, "tags": []}],
             )
         )
-        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
-        respx.get("http://radarr:7878/api/v3/movie/1").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.get("http://localhost:7878/api/v3/movie/1").mock(
             return_value=Response(
                 200,
                 json={"id": 1, "title": "Movie 1", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "1"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "1"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -546,7 +548,7 @@ class TestJobExecutor:
         self, mock_config: Config, mock_state_manager: StateManager
     ) -> None:
         """Test that skip_tagged skips already tagged movies."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[
@@ -555,7 +557,7 @@ class TestJobExecutor:
                 ],
             )
         )
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[
@@ -566,16 +568,16 @@ class TestJobExecutor:
         )
 
         # Only mock movie 2 since movie 1 should be skipped
-        respx.get("http://radarr:7878/api/v3/movie/2").mock(
+        respx.get("http://localhost:7878/api/v3/movie/2").mock(
             return_value=Response(
                 200,
                 json={"id": 2, "title": "Movie 2", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "2"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "2"}).mock(
             return_value=Response(200, json=[])
         )
-        respx.put("http://radarr:7878/api/v3/movie/2").mock(
+        respx.put("http://localhost:7878/api/v3/movie/2").mock(
             return_value=Response(
                 200,
                 json={"id": 2, "title": "Movie 2", "year": 2024, "tags": [2]},
@@ -601,14 +603,14 @@ class TestJobExecutor:
         self, mock_config: Config, mock_state_manager: StateManager
     ) -> None:
         """Test that when all items fail, status is FAILED."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[{"id": 1, "title": "Movie 1", "year": 2024, "tags": []}],
             )
         )
-        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
-        respx.get("http://radarr:7878/api/v3/movie/1").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.get("http://localhost:7878/api/v3/movie/1").mock(
             return_value=Response(500, json={"error": "Server error"})
         )
 
@@ -634,7 +636,7 @@ class TestJobExecutor:
         self, mock_config: Config, mock_state_manager: StateManager
     ) -> None:
         """Test that when some items succeed, status is COMPLETED with errors."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[
@@ -643,16 +645,16 @@ class TestJobExecutor:
                 ],
             )
         )
-        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.get("http://localhost:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
 
         # Movie 1 succeeds
-        respx.get("http://radarr:7878/api/v3/movie/1").mock(
+        respx.get("http://localhost:7878/api/v3/movie/1").mock(
             return_value=Response(
                 200,
                 json={"id": 1, "title": "Movie 1", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "1"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "1"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -666,10 +668,10 @@ class TestJobExecutor:
                 ],
             )
         )
-        respx.post("http://radarr:7878/api/v3/tag").mock(
+        respx.post("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(201, json={"id": 1, "label": "4k-available"})
         )
-        respx.put("http://radarr:7878/api/v3/movie/1").mock(
+        respx.put("http://localhost:7878/api/v3/movie/1").mock(
             return_value=Response(
                 200,
                 json={"id": 1, "title": "Movie 1", "year": 2024, "tags": [1]},
@@ -677,7 +679,7 @@ class TestJobExecutor:
         )
 
         # Movie 2 fails
-        respx.get("http://radarr:7878/api/v3/movie/2").mock(
+        respx.get("http://localhost:7878/api/v3/movie/2").mock(
             return_value=Response(500, json={"error": "Server error"})
         )
 
@@ -1038,7 +1040,7 @@ class TestSchedulerManager:
     def test_get_all_schedules_from_config(self, mock_state_manager: StateManager) -> None:
         """Test getting schedules from config."""
         config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="key"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
             scheduler=SchedulerConfig(
                 enabled=True,
                 schedules=[
@@ -1082,7 +1084,7 @@ class TestSchedulerManager:
     def test_get_schedule_by_name(self, mock_state_manager: StateManager) -> None:
         """Test getting a specific schedule by name."""
         config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="key"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
             scheduler=SchedulerConfig(
                 enabled=True,
                 schedules=[
@@ -1366,7 +1368,7 @@ class TestSchedulerManager:
     async def test_start_already_started_warns(self, mock_state_manager: StateManager) -> None:
         """Test that starting an already started scheduler logs warning."""
         config = Config(
-            radarr=RadarrConfig(url="http://radarr:7878", api_key="key"),
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
             scheduler=SchedulerConfig(
                 enabled=True,
                 schedules=[

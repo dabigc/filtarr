@@ -120,14 +120,14 @@ class TestCheckSeriesWithSampling:
         yesterday = today - timedelta(days=1)
 
         # Mock series info endpoint
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
             )
         )
 
         # Mock episodes endpoint
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -190,7 +190,9 @@ class TestCheckSeriesWithSampling:
 
         # Mock release endpoints - no 4K releases
         for ep_id in [301, 401, 501]:  # Latest 3 seasons
-            respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": str(ep_id)}).mock(
+            respx.get(
+                "http://127.0.0.1:8989/api/v3/release", params={"episodeId": str(ep_id)}
+            ).mock(
                 return_value=Response(
                     200,
                     json=[
@@ -205,7 +207,7 @@ class TestCheckSeriesWithSampling:
                 )
             )
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         result = await checker.check_series(
             123, strategy=SamplingStrategy.RECENT, seasons_to_check=3, apply_tags=False
         )
@@ -223,13 +225,13 @@ class TestCheckSeriesWithSampling:
         yesterday = today - timedelta(days=1)
 
         # Mock series info endpoint
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
             )
         )
 
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -262,7 +264,7 @@ class TestCheckSeriesWithSampling:
         )
 
         # First season checked (season 1) - no 4K
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -278,7 +280,7 @@ class TestCheckSeriesWithSampling:
         )
 
         # Second season (season 2) - has 4K!
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "201"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "201"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -296,7 +298,7 @@ class TestCheckSeriesWithSampling:
         # Season 3 should NOT be called due to short-circuit
         # (we don't mock it - if called, test would fail)
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         result = await checker.check_series(123, strategy=SamplingStrategy.ALL, apply_tags=False)
 
         assert result.has_match is True
@@ -311,13 +313,13 @@ class TestCheckSeriesWithSampling:
         tomorrow = date.today() + timedelta(days=1)
 
         # Mock series info endpoint
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
             )
         )
 
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -333,7 +335,7 @@ class TestCheckSeriesWithSampling:
             )
         )
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         result = await checker.check_series(123, apply_tags=False)
 
         assert result.has_match is False
@@ -346,13 +348,13 @@ class TestCheckSeriesWithSampling:
     async def test_check_series_with_distributed_strategy(self) -> None:
         """Should check first, middle, and last seasons with DISTRIBUTED."""
         # Mock series info endpoint
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
             )
         )
 
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -402,11 +404,11 @@ class TestCheckSeriesWithSampling:
 
         # Mock releases for seasons 1, 3, 5 (first, middle, last)
         for ep_id in [101, 301, 501]:
-            respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": str(ep_id)}).mock(
-                return_value=Response(200, json=[])
-            )
+            respx.get(
+                "http://127.0.0.1:8989/api/v3/release", params={"episodeId": str(ep_id)}
+            ).mock(return_value=Response(200, json=[]))
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         result = await checker.check_series(
             123, strategy=SamplingStrategy.DISTRIBUTED, apply_tags=False
         )
@@ -428,11 +430,11 @@ class TestCheckSeriesWithSampling:
     async def test_check_movie_still_works(self) -> None:
         """Verify check_movie still functions correctly."""
         # Mock movie info endpoint
-        respx.get("http://radarr:7878/api/v3/movie/456").mock(
+        respx.get("http://localhost:7878/api/v3/movie/456").mock(
             return_value=Response(200, json={"id": 456, "title": "Test Movie", "year": 2024})
         )
 
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "456"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "456"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -447,7 +449,7 @@ class TestCheckSeriesWithSampling:
             )
         )
 
-        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
         result = await checker.check_movie(456, apply_tags=False)
 
         assert result.has_match is True
@@ -470,7 +472,7 @@ class TestNameBasedLookup:
     @pytest.mark.asyncio
     async def test_search_movies_returns_tuples(self) -> None:
         """Should return list of (id, title, year) tuples."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[
@@ -480,7 +482,7 @@ class TestNameBasedLookup:
             )
         )
 
-        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
         results = await checker.search_movies("Matrix")
 
         assert len(results) == 2
@@ -491,7 +493,7 @@ class TestNameBasedLookup:
     @pytest.mark.asyncio
     async def test_search_series_returns_tuples(self) -> None:
         """Should return list of (id, title, year) tuples."""
-        respx.get("http://sonarr:8989/api/v3/series").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(
             return_value=Response(
                 200,
                 json=[
@@ -500,7 +502,7 @@ class TestNameBasedLookup:
             )
         )
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         results = await checker.search_series("Breaking")
 
         assert len(results) == 1
@@ -511,14 +513,14 @@ class TestNameBasedLookup:
     async def test_check_movie_by_name(self) -> None:
         """Should check movie by name."""
         # Mock search
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[{"id": 123, "title": "The Matrix", "year": 1999}],
             )
         )
         # Mock releases
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -533,7 +535,7 @@ class TestNameBasedLookup:
             )
         )
 
-        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
         result = await checker.check_movie_by_name("The Matrix", apply_tags=False)
 
         assert result.has_match is True
@@ -544,32 +546,85 @@ class TestNameBasedLookup:
     @pytest.mark.asyncio
     async def test_check_movie_by_name_not_found(self) -> None:
         """Should raise ValueError when movie not found."""
-        respx.get("http://radarr:7878/api/v3/movie").mock(return_value=Response(200, json=[]))
+        respx.get("http://localhost:7878/api/v3/movie").mock(return_value=Response(200, json=[]))
 
-        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
 
         with pytest.raises(ValueError, match="Movie not found"):
             await checker.check_movie_by_name("Nonexistent Movie")
 
     @respx.mock
     @pytest.mark.asyncio
+    async def test_check_movie_by_name_with_tags(self) -> None:
+        """Should check movie by name and apply tags."""
+        # Mock search
+        respx.get("http://localhost:7878/api/v3/movie").mock(
+            return_value=Response(
+                200,
+                json=[{"id": 123, "title": "The Matrix", "year": 1999, "tags": []}],
+            )
+        )
+        # Mock movie by id (needed for tagging)
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "The Matrix", "year": 1999, "tags": []},
+            )
+        )
+        # Mock releases - has 4K
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-1",
+                        "title": "The.Matrix.2160p.UHD",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 31, "name": "Bluray-2160p"}},
+                    }
+                ],
+            )
+        )
+        # Mock tags endpoint
+        respx.get("http://localhost:7878/api/v3/tag").mock(
+            return_value=Response(200, json=[{"id": 1, "label": "4k-available"}])
+        )
+        # Mock movie update
+        respx.put("http://localhost:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "The Matrix", "year": 1999, "tags": [1]},
+            )
+        )
+
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
+        result = await checker.check_movie_by_name("The Matrix", apply_tags=True)
+
+        assert result.has_match is True
+        assert result.item_id == 123
+        assert result.tag_result is not None
+        assert result.tag_result.tag_applied == "4k-available"
+
+    @respx.mock
+    @pytest.mark.asyncio
     async def test_check_series_by_name(self) -> None:
         """Should check series by name."""
         # Mock search
-        respx.get("http://sonarr:8989/api/v3/series").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(
             return_value=Response(
                 200,
                 json=[{"id": 456, "title": "Breaking Bad", "year": 2008, "seasons": []}],
             )
         )
         # Mock series info
-        respx.get("http://sonarr:8989/api/v3/series/456").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/456").mock(
             return_value=Response(
                 200, json={"id": 456, "title": "Breaking Bad", "year": 2008, "seasons": []}
             )
         )
         # Mock episodes
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "456"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "456"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -585,7 +640,7 @@ class TestNameBasedLookup:
             )
         )
         # Mock releases
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "1001"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "1001"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -600,7 +655,7 @@ class TestNameBasedLookup:
             )
         )
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         result = await checker.check_series_by_name("Breaking Bad", apply_tags=False)
 
         assert result.has_match is True
@@ -611,9 +666,9 @@ class TestNameBasedLookup:
     @pytest.mark.asyncio
     async def test_check_series_by_name_not_found(self) -> None:
         """Should raise ValueError when series not found."""
-        respx.get("http://sonarr:8989/api/v3/series").mock(return_value=Response(200, json=[]))
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(return_value=Response(200, json=[]))
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
 
         with pytest.raises(ValueError, match="Series not found"):
             await checker.check_series_by_name("Nonexistent Series")
@@ -645,14 +700,14 @@ class TestTagApplication:
         from filtarr.config import TagConfig
 
         # Mock get_movie for name lookup
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
         # Mock releases
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -667,22 +722,22 @@ class TestTagApplication:
             )
         )
         # Mock get_tags (empty - no existing tags)
-        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.get("http://localhost:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
         # Mock create_tag
-        respx.post("http://radarr:7878/api/v3/tag").mock(
+        respx.post("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(201, json={"id": 1, "label": "4k-available"})
         )
         # Mock update_movie
-        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+        respx.put("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": [1]},
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -701,13 +756,13 @@ class TestTagApplication:
         """Should use existing tag without creating new one."""
         from filtarr.config import TagConfig
 
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -722,7 +777,7 @@ class TestTagApplication:
             )
         )
         # Mock get_tags (tag already exists)
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[
@@ -732,16 +787,16 @@ class TestTagApplication:
             )
         )
         # Mock update_movie
-        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+        respx.put("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": [1]},
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -759,13 +814,13 @@ class TestTagApplication:
         """Should remove opposite tag when applying new one."""
         from filtarr.config import TagConfig
 
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": [2]},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -779,7 +834,7 @@ class TestTagApplication:
                 ],
             )
         )
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[
@@ -788,16 +843,16 @@ class TestTagApplication:
                 ],
             )
         )
-        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+        respx.put("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": [1]},
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -814,13 +869,13 @@ class TestTagApplication:
         """Should not make tag API calls in dry run mode."""
         from filtarr.config import TagConfig
 
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -836,9 +891,9 @@ class TestTagApplication:
         )
         # No tag mocks needed - dry run shouldn't call them
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -857,14 +912,14 @@ class TestTagApplication:
         """Should apply unavailable tag when has_match is False."""
         from filtarr.config import TagConfig
 
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
         # No 4K releases
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -878,7 +933,7 @@ class TestTagApplication:
                 ],
             )
         )
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[
@@ -887,16 +942,16 @@ class TestTagApplication:
                 ],
             )
         )
-        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+        respx.put("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": [2]},
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -913,13 +968,13 @@ class TestTagApplication:
         """Should not apply tags when apply_tags is False."""
         from filtarr.config import TagConfig
 
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -935,9 +990,9 @@ class TestTagApplication:
         )
         # No tag mocks needed - tagging is disabled
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -953,13 +1008,13 @@ class TestTagApplication:
         """Should catch tag errors and return them in result."""
         from filtarr.config import TagConfig
 
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -974,13 +1029,13 @@ class TestTagApplication:
             )
         )
         # Mock get_tags to fail
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(500, json={"error": "Server error"})
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -998,13 +1053,13 @@ class TestTagApplication:
         """Should find tags case-insensitively."""
         from filtarr.config import TagConfig
 
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1018,22 +1073,22 @@ class TestTagApplication:
                 ],
             )
         )
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[{"id": 1, "label": "4K-Available"}],  # Different case
             )
         )
-        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+        respx.put("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": [1]},
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -1053,7 +1108,7 @@ class TestMovieOnlyCriteriaEnforcement:
         """check_series should raise ValueError for DIRECTORS_CUT criteria."""
         from filtarr.criteria import SearchCriteria
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         with pytest.raises(ValueError, match="DIRECTORS_CUT criteria is only applicable to movies"):
             await checker.check_series(123, criteria=SearchCriteria.DIRECTORS_CUT)
 
@@ -1062,7 +1117,7 @@ class TestMovieOnlyCriteriaEnforcement:
         """check_series should raise ValueError for EXTENDED criteria."""
         from filtarr.criteria import SearchCriteria
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         with pytest.raises(ValueError, match="EXTENDED criteria is only applicable to movies"):
             await checker.check_series(123, criteria=SearchCriteria.EXTENDED)
 
@@ -1071,7 +1126,7 @@ class TestMovieOnlyCriteriaEnforcement:
         """check_series should raise ValueError for REMASTER criteria."""
         from filtarr.criteria import SearchCriteria
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         with pytest.raises(ValueError, match="REMASTER criteria is only applicable to movies"):
             await checker.check_series(123, criteria=SearchCriteria.REMASTER)
 
@@ -1080,7 +1135,7 @@ class TestMovieOnlyCriteriaEnforcement:
         """check_series should raise ValueError for IMAX criteria."""
         from filtarr.criteria import SearchCriteria
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         with pytest.raises(ValueError, match="IMAX criteria is only applicable to movies"):
             await checker.check_series(123, criteria=SearchCriteria.IMAX)
 
@@ -1089,7 +1144,7 @@ class TestMovieOnlyCriteriaEnforcement:
         """check_series should raise ValueError for SPECIAL_EDITION criteria."""
         from filtarr.criteria import SearchCriteria
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         with pytest.raises(
             ValueError, match="SPECIAL_EDITION criteria is only applicable to movies"
         ):
@@ -1107,13 +1162,13 @@ class TestTagApplicationExceptionHandling:
 
         from filtarr.config import TagConfig
 
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1128,13 +1183,13 @@ class TestTagApplicationExceptionHandling:
             )
         )
         # Mock get_tags to raise ConnectError
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             side_effect=httpx.ConnectError("Connection refused")
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -1155,13 +1210,13 @@ class TestTagApplicationExceptionHandling:
 
         from filtarr.config import TagConfig
 
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1176,13 +1231,13 @@ class TestTagApplicationExceptionHandling:
             )
         )
         # Mock get_tags to raise TimeoutException
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             side_effect=httpx.TimeoutException("Request timed out")
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -1201,13 +1256,13 @@ class TestTagApplicationExceptionHandling:
         """Should catch ValidationError when tag API returns invalid JSON."""
         from filtarr.config import TagConfig
 
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1222,16 +1277,16 @@ class TestTagApplicationExceptionHandling:
             )
         )
         # Mock get_tags to return invalid data (missing required fields)
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[{"invalid_field": "no id or label"}],
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -1251,13 +1306,13 @@ class TestTagApplicationExceptionHandling:
         from filtarr.config import TagConfig
 
         # Mock series info endpoint
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
             )
         )
         # Mock episodes endpoint
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1273,7 +1328,7 @@ class TestTagApplicationExceptionHandling:
             )
         )
         # Mock release endpoint with 4K content
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1288,13 +1343,13 @@ class TestTagApplicationExceptionHandling:
             )
         )
         # Mock get_tags to return HTTP 500
-        respx.get("http://sonarr:8989/api/v3/tag").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(
             return_value=Response(500, json={"error": "Internal Server Error"})
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            sonarr_url="http://sonarr:8989",
+            sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
             tag_config=tag_config,
         )
@@ -1316,13 +1371,13 @@ class TestTagApplicationExceptionHandling:
         from filtarr.config import TagConfig
 
         # Mock series info endpoint
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
             )
         )
         # Mock episodes endpoint
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1338,7 +1393,7 @@ class TestTagApplicationExceptionHandling:
             )
         )
         # Mock release endpoint with 4K content
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1353,13 +1408,13 @@ class TestTagApplicationExceptionHandling:
             )
         )
         # Mock get_tags to raise ConnectError
-        respx.get("http://sonarr:8989/api/v3/tag").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(
             side_effect=httpx.ConnectError("Connection refused")
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            sonarr_url="http://sonarr:8989",
+            sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
             tag_config=tag_config,
         )
@@ -1381,13 +1436,13 @@ class TestTagApplicationExceptionHandling:
         from filtarr.config import TagConfig
 
         # Mock series info endpoint
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
             )
         )
         # Mock episodes endpoint
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1403,7 +1458,7 @@ class TestTagApplicationExceptionHandling:
             )
         )
         # Mock release endpoint with 4K content
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1418,13 +1473,13 @@ class TestTagApplicationExceptionHandling:
             )
         )
         # Mock get_tags to raise TimeoutException
-        respx.get("http://sonarr:8989/api/v3/tag").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(
             side_effect=httpx.TimeoutException("Request timed out")
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            sonarr_url="http://sonarr:8989",
+            sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
             tag_config=tag_config,
         )
@@ -1444,13 +1499,13 @@ class TestTagApplicationExceptionHandling:
         from filtarr.config import TagConfig
 
         # Mock series info endpoint
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
             )
         )
         # Mock episodes endpoint
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1466,7 +1521,7 @@ class TestTagApplicationExceptionHandling:
             )
         )
         # Mock release endpoint with 4K content
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1481,16 +1536,16 @@ class TestTagApplicationExceptionHandling:
             )
         )
         # Mock get_tags to return invalid data (missing required fields)
-        respx.get("http://sonarr:8989/api/v3/tag").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[{"invalid_field": "no id or label"}],
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            sonarr_url="http://sonarr:8989",
+            sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
             tag_config=tag_config,
         )
@@ -1701,13 +1756,13 @@ class TestCustomCallableMatcher:
         def remux_matcher(release: Release) -> bool:
             return "REMUX" in release.title.upper()
 
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1722,7 +1777,7 @@ class TestCustomCallableMatcher:
             )
         )
 
-        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
         result = await checker.check_movie(123, criteria=remux_matcher, apply_tags=False)
 
         assert result.result_type == ResultType.CUSTOM
@@ -1739,13 +1794,13 @@ class TestCustomCallableMatcher:
         def never_match(_release: Release) -> bool:
             return False
 
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1760,7 +1815,7 @@ class TestCustomCallableMatcher:
             )
         )
 
-        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
         result = await checker.check_movie(123, criteria=never_match, apply_tags=False)
 
         assert result.result_type == ResultType.CUSTOM
@@ -1777,14 +1832,14 @@ class TestCustomCallableMatcher:
             return "ATMOS" in release.title.upper()
 
         # Mock movie search
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[{"id": 456, "title": "Inception", "year": 2010}],
             )
         )
         # Mock releases
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "456"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "456"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1799,7 +1854,7 @@ class TestCustomCallableMatcher:
             )
         )
 
-        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
         result = await checker.check_movie_by_name(
             "Inception", criteria=atmos_matcher, apply_tags=False
         )
@@ -1819,13 +1874,13 @@ class TestCustomCallableMatcher:
             return "WEB-DL" in release.title.upper() or "WEBDL" in release.title.upper()
 
         # Mock series info
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
             )
         )
         # Mock episodes
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1841,7 +1896,7 @@ class TestCustomCallableMatcher:
             )
         )
         # Mock releases with WEB-DL
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1856,7 +1911,7 @@ class TestCustomCallableMatcher:
             )
         )
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         result = await checker.check_series(123, criteria=web_dl_matcher, apply_tags=False)
 
         assert result.result_type == ResultType.CUSTOM
@@ -1874,13 +1929,13 @@ class TestCustomCallableMatcher:
             return False
 
         # Mock series info
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
             )
         )
         # Mock episodes - multiple seasons to verify sampling
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1904,7 +1959,7 @@ class TestCustomCallableMatcher:
             )
         )
         # Mock releases for both seasons
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1918,7 +1973,7 @@ class TestCustomCallableMatcher:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "201"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "201"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1933,7 +1988,7 @@ class TestCustomCallableMatcher:
             )
         )
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         result = await checker.check_series(123, criteria=never_match, apply_tags=False)
 
         assert result.result_type == ResultType.CUSTOM
@@ -1956,13 +2011,13 @@ class TestCustomCallableMatcher:
             return True  # Would match anything, but there are no aired episodes
 
         # Mock series info
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Upcoming Series", "year": 2025, "seasons": []}
             )
         )
         # Mock episodes - all in future
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -1978,7 +2033,7 @@ class TestCustomCallableMatcher:
             )
         )
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         result = await checker.check_series(123, criteria=any_matcher, apply_tags=False)
 
         assert result.has_match is False
@@ -1997,14 +2052,14 @@ class TestCustomCallableMatcher:
             return "HDR" in release.title.upper()
 
         # Mock series info
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "HDR Series", "year": 2020, "seasons": [], "tags": []},
             )
         )
         # Mock episodes
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -2020,7 +2075,7 @@ class TestCustomCallableMatcher:
             )
         )
         # Mock releases with HDR
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -2035,19 +2090,19 @@ class TestCustomCallableMatcher:
             )
         )
         # Mock tag operations (custom callable falls back to 4K tag names)
-        respx.get("http://sonarr:8989/api/v3/tag").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(
             return_value=Response(200, json=[{"id": 1, "label": "4k-available"}])
         )
-        respx.put("http://sonarr:8989/api/v3/series/123").mock(
+        respx.put("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "HDR Series", "year": 2020, "seasons": [], "tags": [1]},
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            sonarr_url="http://sonarr:8989",
+            sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
             tag_config=tag_config,
         )
@@ -2073,20 +2128,20 @@ class TestCustomCallableMatcher:
             return "BLURAY" in title or "BLU-RAY" in title
 
         # Mock series search
-        respx.get("http://sonarr:8989/api/v3/series").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(
             return_value=Response(
                 200,
                 json=[{"id": 789, "title": "Game of Thrones", "year": 2011, "seasons": []}],
             )
         )
         # Mock series info
-        respx.get("http://sonarr:8989/api/v3/series/789").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/789").mock(
             return_value=Response(
                 200, json={"id": 789, "title": "Game of Thrones", "year": 2011, "seasons": []}
             )
         )
         # Mock episodes
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "789"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "789"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -2102,7 +2157,7 @@ class TestCustomCallableMatcher:
             )
         )
         # Mock releases with BluRay
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "1001"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "1001"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -2117,7 +2172,7 @@ class TestCustomCallableMatcher:
             )
         )
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         result = await checker.check_series_by_name(
             "Game of Thrones", criteria=blu_ray_matcher, apply_tags=False
         )
@@ -2151,16 +2206,16 @@ class TestTagCaching:
             )
 
         # Mock tag endpoint with callback to track calls
-        respx.get("http://radarr:7878/api/v3/tag").mock(side_effect=tag_response_callback)
+        respx.get("http://localhost:7878/api/v3/tag").mock(side_effect=tag_response_callback)
 
         # Mock movie info endpoints for two movies
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Movie 1", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/movie/456").mock(
+        respx.get("http://localhost:7878/api/v3/movie/456").mock(
             return_value=Response(
                 200,
                 json={"id": 456, "title": "Movie 2", "year": 2024, "tags": []},
@@ -2168,7 +2223,7 @@ class TestTagCaching:
         )
 
         # Mock release endpoints with 4K content
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -2182,7 +2237,7 @@ class TestTagCaching:
                 ],
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "456"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "456"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -2198,22 +2253,22 @@ class TestTagCaching:
         )
 
         # Mock update movie endpoint
-        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+        respx.put("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Movie 1", "year": 2024, "tags": [1]},
             )
         )
-        respx.put("http://radarr:7878/api/v3/movie/456").mock(
+        respx.put("http://localhost:7878/api/v3/movie/456").mock(
             return_value=Response(
                 200,
                 json={"id": 456, "title": "Movie 2", "year": 2024, "tags": [1]},
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -2255,22 +2310,22 @@ class TestTagCaching:
             )
 
         # Mock tag endpoint with callback to track calls
-        respx.get("http://sonarr:8989/api/v3/tag").mock(side_effect=tag_response_callback)
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(side_effect=tag_response_callback)
 
         # Mock series info endpoints for two series
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Series 1", "year": 2020, "seasons": []}
             )
         )
-        respx.get("http://sonarr:8989/api/v3/series/456").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/456").mock(
             return_value=Response(
                 200, json={"id": 456, "title": "Series 2", "year": 2021, "seasons": []}
             )
         )
 
         # Mock episodes endpoints
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -2285,7 +2340,7 @@ class TestTagCaching:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "456"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "456"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -2302,7 +2357,7 @@ class TestTagCaching:
         )
 
         # Mock release endpoints with 4K content
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -2316,7 +2371,7 @@ class TestTagCaching:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "201"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "201"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -2332,22 +2387,22 @@ class TestTagCaching:
         )
 
         # Mock update series endpoint
-        respx.put("http://sonarr:8989/api/v3/series/123").mock(
+        respx.put("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Series 1", "year": 2020, "seasons": [], "tags": [1]},
             )
         )
-        respx.put("http://sonarr:8989/api/v3/series/456").mock(
+        respx.put("http://127.0.0.1:8989/api/v3/series/456").mock(
             return_value=Response(
                 200,
                 json={"id": 456, "title": "Series 2", "year": 2021, "seasons": [], "tags": [1]},
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            sonarr_url="http://sonarr:8989",
+            sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
             tag_config=tag_config,
         )
@@ -2389,16 +2444,16 @@ class TestTagCaching:
             )
 
         # Mock tag endpoint with callback to track calls
-        respx.get("http://radarr:7878/api/v3/tag").mock(side_effect=tag_response_callback)
+        respx.get("http://localhost:7878/api/v3/tag").mock(side_effect=tag_response_callback)
 
         # Mock movie info endpoints
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Movie 1", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/movie/456").mock(
+        respx.get("http://localhost:7878/api/v3/movie/456").mock(
             return_value=Response(
                 200,
                 json={"id": 456, "title": "Movie 2", "year": 2024, "tags": []},
@@ -2406,7 +2461,7 @@ class TestTagCaching:
         )
 
         # Mock release endpoints
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -2420,7 +2475,7 @@ class TestTagCaching:
                 ],
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "456"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "456"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -2436,22 +2491,22 @@ class TestTagCaching:
         )
 
         # Mock update movie endpoint
-        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+        respx.put("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Movie 1", "year": 2024, "tags": [1]},
             )
         )
-        respx.put("http://radarr:7878/api/v3/movie/456").mock(
+        respx.put("http://localhost:7878/api/v3/movie/456").mock(
             return_value=Response(
                 200,
                 json={"id": 456, "title": "Movie 2", "year": 2024, "tags": [1]},
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -2487,17 +2542,17 @@ class TestTagCaching:
             return Response(200, json=[{"id": 10, "label": "4k-available"}])
 
         # Mock both tag endpoints
-        respx.get("http://radarr:7878/api/v3/tag").mock(side_effect=radarr_tag_callback)
-        respx.get("http://sonarr:8989/api/v3/tag").mock(side_effect=sonarr_tag_callback)
+        respx.get("http://localhost:7878/api/v3/tag").mock(side_effect=radarr_tag_callback)
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(side_effect=sonarr_tag_callback)
 
         # Mock movie endpoints
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -2511,19 +2566,19 @@ class TestTagCaching:
                 ],
             )
         )
-        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+        respx.put("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Test Movie", "year": 2024, "tags": [1]}
             )
         )
 
         # Mock series endpoints
-        respx.get("http://sonarr:8989/api/v3/series/456").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/456").mock(
             return_value=Response(
                 200, json={"id": 456, "title": "Test Series", "year": 2020, "seasons": []}
             )
         )
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "456"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "456"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -2538,7 +2593,7 @@ class TestTagCaching:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -2552,18 +2607,18 @@ class TestTagCaching:
                 ],
             )
         )
-        respx.put("http://sonarr:8989/api/v3/series/456").mock(
+        respx.put("http://127.0.0.1:8989/api/v3/series/456").mock(
             return_value=Response(
                 200,
                 json={"id": 456, "title": "Test Series", "year": 2020, "seasons": [], "tags": [10]},
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
-            sonarr_url="http://sonarr:8989",
+            sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
             tag_config=tag_config,
         )
@@ -2591,28 +2646,28 @@ class TestTagCaching:
             return Response(200, json=[])
 
         # Mock tag endpoint
-        respx.get("http://radarr:7878/api/v3/tag").mock(side_effect=tag_response_callback)
+        respx.get("http://localhost:7878/api/v3/tag").mock(side_effect=tag_response_callback)
 
         # Mock create tag endpoint
-        respx.post("http://radarr:7878/api/v3/tag").mock(
+        respx.post("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(201, json={"id": 1, "label": "4k-available"})
         )
 
         # Mock movie endpoints for two movies
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Movie 1", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/movie/456").mock(
+        respx.get("http://localhost:7878/api/v3/movie/456").mock(
             return_value=Response(
                 200,
                 json={"id": 456, "title": "Movie 2", "year": 2024, "tags": []},
             )
         )
 
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -2626,7 +2681,7 @@ class TestTagCaching:
                 ],
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "456"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "456"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -2641,20 +2696,20 @@ class TestTagCaching:
             )
         )
 
-        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+        respx.put("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Movie 1", "year": 2024, "tags": [1]}
             )
         )
-        respx.put("http://radarr:7878/api/v3/movie/456").mock(
+        respx.put("http://localhost:7878/api/v3/movie/456").mock(
             return_value=Response(
                 200, json={"id": 456, "title": "Movie 2", "year": 2024, "tags": [1]}
             )
         )
 
-        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        tag_config = TagConfig(_available="4k-available", _unavailable="4k-unavailable")
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -2674,20 +2729,20 @@ class TestTagCaching:
 
     def test_clear_tag_cache_on_new_instance(self) -> None:
         """New ReleaseChecker instance should have empty cache."""
-        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
 
-        # Cache should be None on new instance
-        assert checker._tag_cache is None
+        # Cache should be None on new instance (managed by tagger)
+        assert checker._tagger._tag_cache is None
 
     def test_clear_tag_cache_method(self) -> None:
         """clear_tag_cache should reset cache to None."""
-        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
 
-        # Manually set some cache data
-        checker._tag_cache = {"radarr": []}
+        # Manually set some cache data (on the tagger)
+        checker._tagger._tag_cache = {"radarr": []}
 
         # Clear the cache
         checker.clear_tag_cache()
 
         # Cache should be None
-        assert checker._tag_cache is None
+        assert checker._tagger._tag_cache is None

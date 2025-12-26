@@ -161,13 +161,13 @@ class TestCheckMovieWithCustomCallable:
         def size_matcher(release: Release) -> bool:
             return release.size > 10000
 
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Big Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -182,7 +182,7 @@ class TestCheckMovieWithCustomCallable:
             )
         )
 
-        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
         result = await checker.check_movie(123, criteria=size_matcher, apply_tags=False)
 
         assert result.result_type == ResultType.CUSTOM
@@ -201,13 +201,13 @@ class TestCheckMovieByNameWithCustomCallable:
             title = release.title.upper()
             return "DUAL" in title or "DUB" in title
 
-        respx.get("http://radarr:7878/api/v3/movie").mock(
+        respx.get("http://localhost:7878/api/v3/movie").mock(
             return_value=Response(
                 200,
                 json=[{"id": 456, "title": "Foreign Film", "year": 2023}],
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "456"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "456"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -222,7 +222,7 @@ class TestCheckMovieByNameWithCustomCallable:
             )
         )
 
-        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test")
         result = await checker.check_movie_by_name(
             "Foreign Film", criteria=dual_audio_matcher, apply_tags=False
         )
@@ -244,12 +244,12 @@ class TestCheckSeriesWithCustomCallable:
             title = release.title.upper()
             return "HEVC" in title or "X265" in title or "H.265" in title
 
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
             )
         )
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -264,7 +264,7 @@ class TestCheckSeriesWithCustomCallable:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -279,7 +279,7 @@ class TestCheckSeriesWithCustomCallable:
             )
         )
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         result = await checker.check_series(123, criteria=hevc_matcher, apply_tags=False)
 
         assert result.result_type == ResultType.CUSTOM
@@ -296,12 +296,12 @@ class TestCheckSeriesNoSeasonsToCheck:
         """Series with only future episodes should return has_match=False."""
         tomorrow = date.today() + timedelta(days=1)
 
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Future Series", "year": 2025, "seasons": []}
             )
         )
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -317,7 +317,7 @@ class TestCheckSeriesNoSeasonsToCheck:
             )
         )
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         result = await checker.check_series(123, apply_tags=False)
 
         assert result.has_match is False
@@ -328,16 +328,16 @@ class TestCheckSeriesNoSeasonsToCheck:
     @pytest.mark.asyncio
     async def test_check_series_no_episodes_at_all(self) -> None:
         """Series with no episodes returns has_match=False."""
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Empty Series", "year": 2024, "seasons": []}
             )
         )
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(200, json=[])
         )
 
-        checker = ReleaseChecker(sonarr_url="http://sonarr:8989", sonarr_api_key="test")
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
         result = await checker.check_series(123, apply_tags=False)
 
         assert result.has_match is False
@@ -351,13 +351,13 @@ class TestApplyMovieTagsErrorHandling:
     @pytest.mark.asyncio
     async def test_apply_movie_tags_http_500_error(self) -> None:
         """HTTP 500 error from tags API should be caught and recorded."""
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -371,13 +371,13 @@ class TestApplyMovieTagsErrorHandling:
                 ],
             )
         )
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(500, json={"error": "Internal Server Error"})
         )
 
         tag_config = TagConfig()
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -393,13 +393,13 @@ class TestApplyMovieTagsErrorHandling:
     @pytest.mark.asyncio
     async def test_apply_movie_tags_connect_error(self) -> None:
         """ConnectError should be caught and recorded in tag_error."""
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -413,13 +413,13 @@ class TestApplyMovieTagsErrorHandling:
                 ],
             )
         )
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             side_effect=httpx.ConnectError("Connection refused")
         )
 
         tag_config = TagConfig()
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -435,13 +435,13 @@ class TestApplyMovieTagsErrorHandling:
     @pytest.mark.asyncio
     async def test_apply_movie_tags_timeout_error(self) -> None:
         """TimeoutException should be caught and recorded in tag_error."""
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -455,13 +455,13 @@ class TestApplyMovieTagsErrorHandling:
                 ],
             )
         )
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             side_effect=httpx.TimeoutException("Request timed out")
         )
 
         tag_config = TagConfig()
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -477,13 +477,13 @@ class TestApplyMovieTagsErrorHandling:
     @pytest.mark.asyncio
     async def test_apply_movie_tags_validation_error(self) -> None:
         """ValidationError from pydantic should be caught and recorded."""
-        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+        respx.get("http://localhost:7878/api/v3/movie/123").mock(
             return_value=Response(
                 200,
                 json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
             )
         )
-        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -498,7 +498,7 @@ class TestApplyMovieTagsErrorHandling:
             )
         )
         # Return invalid data that will fail pydantic validation
-        respx.get("http://radarr:7878/api/v3/tag").mock(
+        respx.get("http://localhost:7878/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[{"invalid_field": "no id or label"}],
@@ -507,7 +507,7 @@ class TestApplyMovieTagsErrorHandling:
 
         tag_config = TagConfig()
         checker = ReleaseChecker(
-            radarr_url="http://radarr:7878",
+            radarr_url="http://localhost:7878",
             radarr_api_key="test",
             tag_config=tag_config,
         )
@@ -527,12 +527,12 @@ class TestApplySeriesTagsErrorHandling:
     @pytest.mark.asyncio
     async def test_apply_series_tags_http_500_error(self) -> None:
         """HTTP 500 error from series tags API should be caught."""
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
             )
         )
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -547,7 +547,7 @@ class TestApplySeriesTagsErrorHandling:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -561,13 +561,13 @@ class TestApplySeriesTagsErrorHandling:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/tag").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(
             return_value=Response(500, json={"error": "Internal Server Error"})
         )
 
         tag_config = TagConfig()
         checker = ReleaseChecker(
-            sonarr_url="http://sonarr:8989",
+            sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
             tag_config=tag_config,
         )
@@ -583,12 +583,12 @@ class TestApplySeriesTagsErrorHandling:
     @pytest.mark.asyncio
     async def test_apply_series_tags_connect_error(self) -> None:
         """ConnectError for series tags should be caught."""
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
             )
         )
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -603,7 +603,7 @@ class TestApplySeriesTagsErrorHandling:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -617,13 +617,13 @@ class TestApplySeriesTagsErrorHandling:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/tag").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(
             side_effect=httpx.ConnectError("Connection refused")
         )
 
         tag_config = TagConfig()
         checker = ReleaseChecker(
-            sonarr_url="http://sonarr:8989",
+            sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
             tag_config=tag_config,
         )
@@ -638,12 +638,12 @@ class TestApplySeriesTagsErrorHandling:
     @pytest.mark.asyncio
     async def test_apply_series_tags_timeout_error(self) -> None:
         """TimeoutException for series tags should be caught."""
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
             )
         )
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -658,7 +658,7 @@ class TestApplySeriesTagsErrorHandling:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -672,13 +672,13 @@ class TestApplySeriesTagsErrorHandling:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/tag").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(
             side_effect=httpx.TimeoutException("Request timed out")
         )
 
         tag_config = TagConfig()
         checker = ReleaseChecker(
-            sonarr_url="http://sonarr:8989",
+            sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
             tag_config=tag_config,
         )
@@ -693,12 +693,12 @@ class TestApplySeriesTagsErrorHandling:
     @pytest.mark.asyncio
     async def test_apply_series_tags_validation_error(self) -> None:
         """ValidationError for series tags should be caught."""
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
             )
         )
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -713,7 +713,7 @@ class TestApplySeriesTagsErrorHandling:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -727,7 +727,7 @@ class TestApplySeriesTagsErrorHandling:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/tag").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(
             return_value=Response(
                 200,
                 json=[{"invalid_field": "no id or label"}],
@@ -736,7 +736,7 @@ class TestApplySeriesTagsErrorHandling:
 
         tag_config = TagConfig()
         checker = ReleaseChecker(
-            sonarr_url="http://sonarr:8989",
+            sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
             tag_config=tag_config,
         )
@@ -757,12 +757,12 @@ class TestApplySeriesTagsNoAiredEpisodes:
         """Series with no aired episodes should apply unavailable tag."""
         tomorrow = date.today() + timedelta(days=1)
 
-        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200, json={"id": 123, "title": "Future Show", "year": 2025, "seasons": []}
             )
         )
-        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
             return_value=Response(
                 200,
                 json=[
@@ -777,11 +777,11 @@ class TestApplySeriesTagsNoAiredEpisodes:
                 ],
             )
         )
-        respx.get("http://sonarr:8989/api/v3/tag").mock(return_value=Response(200, json=[]))
-        respx.post("http://sonarr:8989/api/v3/tag").mock(
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.post("http://127.0.0.1:8989/api/v3/tag").mock(
             return_value=Response(201, json={"id": 1, "label": "4k-unavailable"})
         )
-        respx.put("http://sonarr:8989/api/v3/series/123").mock(
+        respx.put("http://127.0.0.1:8989/api/v3/series/123").mock(
             return_value=Response(
                 200,
                 json={
@@ -796,7 +796,7 @@ class TestApplySeriesTagsNoAiredEpisodes:
 
         tag_config = TagConfig()
         checker = ReleaseChecker(
-            sonarr_url="http://sonarr:8989",
+            sonarr_url="http://127.0.0.1:8989",
             sonarr_api_key="test",
             tag_config=tag_config,
         )
