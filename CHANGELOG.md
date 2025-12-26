@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0](https://github.com/dabigc/filtarr/compare/v1.1.4...v1.2.0) (2025-12-26)
+
+
+### Features
+
+* add multi-criteria support beyond 4K ([#42](https://github.com/dabigc/filtarr/issues/42)) ([f0e6532](https://github.com/dabigc/filtarr/commit/f0e65320da45cde91595cbabc419c14015c3ca0c))
+
 ## [1.1.4](https://github.com/dabigc/filtarr/compare/v1.1.3...v1.1.4) (2025-12-24)
 
 
