@@ -37,7 +37,7 @@ def _validate_url(url: str, allow_http_localhost: bool = True) -> str:
         is_localhost = parsed.hostname in ("localhost", "127.0.0.1", "::1")
         if not (allow_http_localhost and is_localhost):
             raise ConfigurationError(
-                "HTTP URLs are only allowed for localhost. " "Use HTTPS for remote servers."
+                "HTTP URLs are only allowed for localhost. Use HTTPS for remote servers."
             )
 
     return url.rstrip("/")
