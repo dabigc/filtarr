@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -25,6 +26,15 @@ if TYPE_CHECKING:
     from filtarr.state import StateManager
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BatchResult:
+    """Result from processing a batch of items."""
+
+    items_processed: int = 0
+    items_with_4k: int = 0
+    errors: list[str] = field(default_factory=list)
 
 
 class JobExecutor:
@@ -83,69 +93,55 @@ class JobExecutor:
 
             total_items = len(movies_to_check) + len(series_to_check)
             logger.info(
-                "Schedule %s: checking %d movies and %d series",
+                "Schedule %s: checking %d movies and %d series (concurrency=%d)",
                 schedule.name,
                 len(movies_to_check),
                 len(series_to_check),
+                schedule.concurrency,
             )
 
-            # Check movies
-            for movie in movies_to_check:
-                if schedule.batch_size > 0 and items_processed >= schedule.batch_size:
-                    logger.info(
-                        "Schedule %s: batch size limit (%d) reached",
-                        schedule.name,
-                        schedule.batch_size,
-                    )
-                    break
+            # Calculate remaining batch capacity
+            remaining_batch = schedule.batch_size if schedule.batch_size > 0 else float("inf")
 
-                try:
-                    result = await self._check_movie(movie.id, schedule)
-                    items_processed += 1
-                    if result and result.has_match:
-                        items_with_4k += 1
+            # Apply batch size limit to movies
+            movies_batch = movies_to_check[: int(min(len(movies_to_check), remaining_batch))]
+            if len(movies_batch) < len(movies_to_check):
+                logger.info(
+                    "Schedule %s: limiting movies to %d due to batch size",
+                    schedule.name,
+                    len(movies_batch),
+                )
 
-                    # Record in state
-                    if result and not schedule.dry_run and not schedule.no_tag:
-                        tag_applied = result.tag_result.tag_applied if result.tag_result else None
-                        self._state.record_check("movie", movie.id, result.has_match, tag_applied)
+            # Process movies concurrently
+            movie_result = await self._process_movies_batch(movies_batch, schedule)
+            items_processed += movie_result.items_processed
+            items_with_4k += movie_result.items_with_4k
+            errors.extend(movie_result.errors)
 
-                except Exception as e:
-                    error_msg = f"Error checking movie {movie.id} ({movie.title}): {e}"
-                    logger.error(error_msg)
-                    errors.append(error_msg)
+            # Update remaining batch capacity
+            remaining_batch -= movie_result.items_processed
 
-                if schedule.delay > 0:
-                    await asyncio.sleep(schedule.delay)
+            # Apply batch size limit to series
+            series_batch = series_to_check[: int(min(len(series_to_check), remaining_batch))]
+            if remaining_batch <= 0:
+                logger.info(
+                    "Schedule %s: batch size limit (%d) reached after movies",
+                    schedule.name,
+                    schedule.batch_size,
+                )
+            elif len(series_batch) < len(series_to_check):
+                logger.info(
+                    "Schedule %s: limiting series to %d due to batch size",
+                    schedule.name,
+                    len(series_batch),
+                )
 
-            # Check series
-            for series in series_to_check:
-                if schedule.batch_size > 0 and items_processed >= schedule.batch_size:
-                    logger.info(
-                        "Schedule %s: batch size limit (%d) reached",
-                        schedule.name,
-                        schedule.batch_size,
-                    )
-                    break
-
-                try:
-                    result = await self._check_series(series.id, schedule)
-                    items_processed += 1
-                    if result and result.has_match:
-                        items_with_4k += 1
-
-                    # Record in state
-                    if result and not schedule.dry_run and not schedule.no_tag:
-                        tag_applied = result.tag_result.tag_applied if result.tag_result else None
-                        self._state.record_check("series", series.id, result.has_match, tag_applied)
-
-                except Exception as e:
-                    error_msg = f"Error checking series {series.id} ({series.title}): {e}"
-                    logger.error(error_msg)
-                    errors.append(error_msg)
-
-                if schedule.delay > 0:
-                    await asyncio.sleep(schedule.delay)
+            # Process series concurrently
+            if series_batch:
+                series_result = await self._process_series_batch(series_batch, schedule)
+                items_processed += series_result.items_processed
+                items_with_4k += series_result.items_with_4k
+                errors.extend(series_result.errors)
 
             # Determine final status
             status = RunStatus.COMPLETED
@@ -194,6 +190,110 @@ class JobExecutor:
             items_with_4k=items_with_4k,
             errors=errors,
         )
+
+    async def _process_movies_batch(
+        self, movies: list[Movie], schedule: ScheduleDefinition
+    ) -> BatchResult:
+        """Process a batch of movies with concurrent execution.
+
+        Args:
+            movies: List of movies to check
+            schedule: Schedule definition
+
+        Returns:
+            BatchResult with aggregated results
+        """
+        if not movies:
+            return BatchResult()
+
+        semaphore = asyncio.Semaphore(schedule.concurrency)
+        result = BatchResult()
+        lock = asyncio.Lock()
+
+        async def check_with_limit(movie: Movie) -> None:
+            async with semaphore:
+                try:
+                    search_result = await self._check_movie(movie.id, schedule)
+                    async with lock:
+                        result.items_processed += 1
+                        if search_result and search_result.has_match:
+                            result.items_with_4k += 1
+
+                        # Record in state
+                        if search_result and not schedule.dry_run and not schedule.no_tag:
+                            tag_applied = (
+                                search_result.tag_result.tag_applied
+                                if search_result.tag_result
+                                else None
+                            )
+                            self._state.record_check(
+                                "movie", movie.id, search_result.has_match, tag_applied
+                            )
+
+                except Exception as e:
+                    error_msg = f"Error checking movie {movie.id} ({movie.title}): {e}"
+                    logger.error(error_msg)
+                    async with lock:
+                        result.errors.append(error_msg)
+
+                # Apply delay after each check (inside semaphore to rate limit)
+                if schedule.delay > 0:
+                    await asyncio.sleep(schedule.delay)
+
+        await asyncio.gather(*[check_with_limit(movie) for movie in movies])
+        return result
+
+    async def _process_series_batch(
+        self, series_list: list[Series], schedule: ScheduleDefinition
+    ) -> BatchResult:
+        """Process a batch of series with concurrent execution.
+
+        Args:
+            series_list: List of series to check
+            schedule: Schedule definition
+
+        Returns:
+            BatchResult with aggregated results
+        """
+        if not series_list:
+            return BatchResult()
+
+        semaphore = asyncio.Semaphore(schedule.concurrency)
+        result = BatchResult()
+        lock = asyncio.Lock()
+
+        async def check_with_limit(series: Series) -> None:
+            async with semaphore:
+                try:
+                    search_result = await self._check_series(series.id, schedule)
+                    async with lock:
+                        result.items_processed += 1
+                        if search_result and search_result.has_match:
+                            result.items_with_4k += 1
+
+                        # Record in state
+                        if search_result and not schedule.dry_run and not schedule.no_tag:
+                            tag_applied = (
+                                search_result.tag_result.tag_applied
+                                if search_result.tag_result
+                                else None
+                            )
+                            self._state.record_check(
+                                "series", series.id, search_result.has_match, tag_applied
+                            )
+
+                except Exception as e:
+                    error_msg = f"Error checking series {series.id} ({series.title}): {e}"
+                    logger.error(error_msg)
+                    async with lock:
+                        result.errors.append(error_msg)
+
+                # Apply delay after each check (inside semaphore to rate limit)
+                if schedule.delay > 0:
+                    await asyncio.sleep(schedule.delay)
+
+        await asyncio.gather(*[check_with_limit(series) for series in series_list])
+        return result
 
     async def _get_movies_to_check(self, schedule: ScheduleDefinition) -> list[Movie]:
         """Get list of movies to check based on schedule settings.

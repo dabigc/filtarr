@@ -621,3 +621,527 @@ class TestExecutorSeriesStrategy:
 
         assert result.items_processed == 1
         assert result.status == RunStatus.COMPLETED
+
+
+class TestExecutorConcurrentBatchProcessing:
+    """Tests for concurrent batch processing in executor."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_execute_with_concurrency_processes_all_items(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Concurrent execution should process all items successfully."""
+        # Mock 4 movies
+        respx.get("http://radarr:7878/api/v3/movie").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": i, "title": f"Movie {i}", "year": 2024, "tags": []} for i in range(1, 5)
+                ],
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+
+        for movie_id in range(1, 5):
+            respx.get(f"http://radarr:7878/api/v3/movie/{movie_id}").mock(
+                return_value=Response(
+                    200,
+                    json={"id": movie_id, "title": f"Movie {movie_id}", "year": 2024, "tags": []},
+                )
+            )
+            respx.get("http://radarr:7878/api/v3/release", params={"movieId": str(movie_id)}).mock(
+                return_value=Response(200, json=[])
+            )
+            respx.put(f"http://radarr:7878/api/v3/movie/{movie_id}").mock(
+                return_value=Response(
+                    200,
+                    json={"id": movie_id, "title": f"Movie {movie_id}", "year": 2024, "tags": [1]},
+                )
+            )
+
+        respx.post("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-unavailable"})
+        )
+
+        schedule = ScheduleDefinition(
+            name="test-concurrent",
+            target=ScheduleTarget.MOVIES,
+            trigger=IntervalTrigger(hours=6),
+            concurrency=2,  # Process 2 at a time
+            delay=0,
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+        result = await executor.execute(schedule)
+
+        assert result.items_processed == 4
+        assert result.status == RunStatus.COMPLETED
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_execute_concurrency_limits_parallel_requests(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Concurrency setting should limit the number of parallel requests."""
+        import asyncio
+
+        # Track concurrent executions
+        max_concurrent = 0
+        current_concurrent = 0
+        concurrent_lock = asyncio.Lock()
+
+        async def mock_check_movie_effect(*_args: object, **_kwargs: object) -> Response:
+            nonlocal max_concurrent, current_concurrent
+            async with concurrent_lock:
+                current_concurrent += 1
+                if current_concurrent > max_concurrent:
+                    max_concurrent = current_concurrent
+
+            await asyncio.sleep(0.05)  # Simulate some work
+
+            async with concurrent_lock:
+                current_concurrent -= 1
+
+            return Response(200, json=[])
+
+        # Mock 5 movies
+        respx.get("http://radarr:7878/api/v3/movie").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": i, "title": f"Movie {i}", "year": 2024, "tags": []} for i in range(1, 6)
+                ],
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+
+        for movie_id in range(1, 6):
+            respx.get(f"http://radarr:7878/api/v3/movie/{movie_id}").mock(
+                return_value=Response(
+                    200,
+                    json={"id": movie_id, "title": f"Movie {movie_id}", "year": 2024, "tags": []},
+                )
+            )
+            # Use side_effect to track concurrency
+            respx.get("http://radarr:7878/api/v3/release", params={"movieId": str(movie_id)}).mock(
+                side_effect=mock_check_movie_effect
+            )
+            respx.put(f"http://radarr:7878/api/v3/movie/{movie_id}").mock(
+                return_value=Response(
+                    200,
+                    json={"id": movie_id, "title": f"Movie {movie_id}", "year": 2024, "tags": [1]},
+                )
+            )
+
+        respx.post("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-unavailable"})
+        )
+
+        schedule = ScheduleDefinition(
+            name="test-concurrency-limit",
+            target=ScheduleTarget.MOVIES,
+            trigger=IntervalTrigger(hours=6),
+            concurrency=2,  # Limit to 2 concurrent
+            delay=0,
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+        result = await executor.execute(schedule)
+
+        assert result.items_processed == 5
+        assert result.status == RunStatus.COMPLETED
+        # Max concurrent should not exceed the concurrency limit
+        assert max_concurrent <= 2
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_execute_default_concurrency_is_sequential(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Default concurrency of 1 should process items sequentially."""
+        # Mock 2 movies
+        respx.get("http://radarr:7878/api/v3/movie").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": 1, "title": "Movie 1", "year": 2024, "tags": []},
+                    {"id": 2, "title": "Movie 2", "year": 2024, "tags": []},
+                ],
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+
+        for movie_id in [1, 2]:
+            respx.get(f"http://radarr:7878/api/v3/movie/{movie_id}").mock(
+                return_value=Response(
+                    200,
+                    json={"id": movie_id, "title": f"Movie {movie_id}", "year": 2024, "tags": []},
+                )
+            )
+            respx.get("http://radarr:7878/api/v3/release", params={"movieId": str(movie_id)}).mock(
+                return_value=Response(200, json=[])
+            )
+            respx.put(f"http://radarr:7878/api/v3/movie/{movie_id}").mock(
+                return_value=Response(
+                    200,
+                    json={"id": movie_id, "title": f"Movie {movie_id}", "year": 2024, "tags": [1]},
+                )
+            )
+
+        respx.post("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-unavailable"})
+        )
+
+        # Default concurrency is 1 (sequential)
+        schedule = ScheduleDefinition(
+            name="test-sequential",
+            target=ScheduleTarget.MOVIES,
+            trigger=IntervalTrigger(hours=6),
+            delay=0,
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+        result = await executor.execute(schedule)
+
+        assert result.items_processed == 2
+        assert result.status == RunStatus.COMPLETED
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_execute_concurrent_with_delay(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Concurrent execution should respect delay setting."""
+        # Mock 3 movies
+        respx.get("http://radarr:7878/api/v3/movie").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": i, "title": f"Movie {i}", "year": 2024, "tags": []} for i in range(1, 4)
+                ],
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+
+        for movie_id in range(1, 4):
+            respx.get(f"http://radarr:7878/api/v3/movie/{movie_id}").mock(
+                return_value=Response(
+                    200,
+                    json={"id": movie_id, "title": f"Movie {movie_id}", "year": 2024, "tags": []},
+                )
+            )
+            respx.get("http://radarr:7878/api/v3/release", params={"movieId": str(movie_id)}).mock(
+                return_value=Response(200, json=[])
+            )
+            respx.put(f"http://radarr:7878/api/v3/movie/{movie_id}").mock(
+                return_value=Response(
+                    200,
+                    json={"id": movie_id, "title": f"Movie {movie_id}", "year": 2024, "tags": [1]},
+                )
+            )
+
+        respx.post("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-unavailable"})
+        )
+
+        schedule = ScheduleDefinition(
+            name="test-concurrent-delay",
+            target=ScheduleTarget.MOVIES,
+            trigger=IntervalTrigger(hours=6),
+            concurrency=2,
+            delay=0.1,  # 100ms delay
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            result = await executor.execute(schedule)
+
+            # Each movie should trigger a delay (3 movies = 3 delays)
+            assert mock_sleep.call_count == 3
+            mock_sleep.assert_called_with(0.1)
+
+        assert result.items_processed == 3
+        assert result.status == RunStatus.COMPLETED
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_execute_concurrent_handles_errors_gracefully(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Concurrent execution should continue even if some items fail."""
+        # Mock 3 movies
+        respx.get("http://radarr:7878/api/v3/movie").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": i, "title": f"Movie {i}", "year": 2024, "tags": []} for i in range(1, 4)
+                ],
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+
+        # Movie 1 fails
+        respx.get("http://radarr:7878/api/v3/movie/1").mock(
+            return_value=Response(500, json={"error": "Server error"})
+        )
+
+        # Movie 2 and 3 succeed
+        for movie_id in [2, 3]:
+            respx.get(f"http://radarr:7878/api/v3/movie/{movie_id}").mock(
+                return_value=Response(
+                    200,
+                    json={"id": movie_id, "title": f"Movie {movie_id}", "year": 2024, "tags": []},
+                )
+            )
+            respx.get("http://radarr:7878/api/v3/release", params={"movieId": str(movie_id)}).mock(
+                return_value=Response(
+                    200,
+                    json=[
+                        {
+                            "guid": f"rel-{movie_id}",
+                            "title": f"Movie.{movie_id}.2160p.BluRay",
+                            "indexer": "Test",
+                            "size": 5000,
+                            "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                        }
+                    ],
+                )
+            )
+            respx.put(f"http://radarr:7878/api/v3/movie/{movie_id}").mock(
+                return_value=Response(
+                    200,
+                    json={"id": movie_id, "title": f"Movie {movie_id}", "year": 2024, "tags": [1]},
+                )
+            )
+
+        respx.post("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-available"})
+        )
+
+        schedule = ScheduleDefinition(
+            name="test-concurrent-errors",
+            target=ScheduleTarget.MOVIES,
+            trigger=IntervalTrigger(hours=6),
+            concurrency=3,  # Process all at once
+            delay=0,
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+        result = await executor.execute(schedule)
+
+        # 2 processed, 1 error
+        assert result.items_processed == 2
+        assert result.items_with_4k == 2
+        assert len(result.errors) == 1
+        assert "Error checking movie 1" in result.errors[0]
+        assert result.status == RunStatus.COMPLETED
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_execute_concurrent_series_processing(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Concurrent execution should work for series as well."""
+        # Mock 3 series
+        respx.get("http://sonarr:8989/api/v3/series").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": i, "title": f"Series {i}", "year": 2024, "seasons": [], "tags": []}
+                    for i in range(1, 4)
+                ],
+            )
+        )
+        respx.get("http://sonarr:8989/api/v3/tag").mock(return_value=Response(200, json=[]))
+
+        for series_id in range(1, 4):
+            respx.get(f"http://sonarr:8989/api/v3/series/{series_id}").mock(
+                return_value=Response(
+                    200,
+                    json={
+                        "id": series_id,
+                        "title": f"Series {series_id}",
+                        "year": 2024,
+                        "seasons": [],
+                        "tags": [],
+                    },
+                )
+            )
+            respx.get(
+                "http://sonarr:8989/api/v3/episode", params={"seriesId": str(series_id)}
+            ).mock(
+                return_value=Response(
+                    200,
+                    json=[
+                        {
+                            "id": 100 + series_id,
+                            "seriesId": series_id,
+                            "seasonNumber": 1,
+                            "episodeNumber": 1,
+                            "airDate": "2024-01-01",
+                            "monitored": True,
+                        }
+                    ],
+                )
+            )
+            respx.get(
+                "http://sonarr:8989/api/v3/release", params={"episodeId": str(100 + series_id)}
+            ).mock(
+                return_value=Response(
+                    200,
+                    json=[
+                        {
+                            "guid": f"rel-{series_id}",
+                            "title": f"Series.{series_id}.S01E01.2160p",
+                            "indexer": "Test",
+                            "size": 3000,
+                            "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                        }
+                    ],
+                )
+            )
+            respx.put(f"http://sonarr:8989/api/v3/series/{series_id}").mock(
+                return_value=Response(
+                    200,
+                    json={
+                        "id": series_id,
+                        "title": f"Series {series_id}",
+                        "year": 2024,
+                        "seasons": [],
+                        "tags": [1],
+                    },
+                )
+            )
+
+        respx.post("http://sonarr:8989/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-available"})
+        )
+
+        schedule = ScheduleDefinition(
+            name="test-concurrent-series",
+            target=ScheduleTarget.SERIES,
+            trigger=IntervalTrigger(hours=6),
+            concurrency=3,  # Process all at once
+            delay=0,
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+        result = await executor.execute(schedule)
+
+        assert result.items_processed == 3
+        assert result.items_with_4k == 3
+        assert result.status == RunStatus.COMPLETED
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_execute_concurrent_batch_size_limit(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Batch size limit should work correctly with concurrent processing."""
+        # Mock 5 movies
+        respx.get("http://radarr:7878/api/v3/movie").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": i, "title": f"Movie {i}", "year": 2024, "tags": []} for i in range(1, 6)
+                ],
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+
+        # Only first 3 movies should be processed due to batch_size=3
+        for movie_id in range(1, 4):
+            respx.get(f"http://radarr:7878/api/v3/movie/{movie_id}").mock(
+                return_value=Response(
+                    200,
+                    json={"id": movie_id, "title": f"Movie {movie_id}", "year": 2024, "tags": []},
+                )
+            )
+            respx.get("http://radarr:7878/api/v3/release", params={"movieId": str(movie_id)}).mock(
+                return_value=Response(200, json=[])
+            )
+            respx.put(f"http://radarr:7878/api/v3/movie/{movie_id}").mock(
+                return_value=Response(
+                    200,
+                    json={"id": movie_id, "title": f"Movie {movie_id}", "year": 2024, "tags": [1]},
+                )
+            )
+
+        respx.post("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-unavailable"})
+        )
+
+        schedule = ScheduleDefinition(
+            name="test-concurrent-batch",
+            target=ScheduleTarget.MOVIES,
+            trigger=IntervalTrigger(hours=6),
+            concurrency=5,  # High concurrency
+            batch_size=3,  # But only 3 items
+            delay=0,
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+        result = await executor.execute(schedule)
+
+        # Should only process 3 items due to batch_size limit
+        assert result.items_processed == 3
+        assert result.status == RunStatus.COMPLETED
+
+
+class TestScheduleDefinitionConcurrency:
+    """Tests for concurrency field in ScheduleDefinition model."""
+
+    def test_concurrency_default_value(self) -> None:
+        """Default concurrency should be 1 (sequential)."""
+        schedule = ScheduleDefinition(
+            name="test-default",
+            target=ScheduleTarget.MOVIES,
+            trigger=IntervalTrigger(hours=6),
+        )
+        assert schedule.concurrency == 1
+
+    def test_concurrency_custom_value(self) -> None:
+        """Custom concurrency value should be accepted."""
+        schedule = ScheduleDefinition(
+            name="test-custom",
+            target=ScheduleTarget.MOVIES,
+            trigger=IntervalTrigger(hours=6),
+            concurrency=10,
+        )
+        assert schedule.concurrency == 10
+
+    def test_concurrency_max_value(self) -> None:
+        """Max concurrency of 50 should be accepted."""
+        schedule = ScheduleDefinition(
+            name="test-max",
+            target=ScheduleTarget.MOVIES,
+            trigger=IntervalTrigger(hours=6),
+            concurrency=50,
+        )
+        assert schedule.concurrency == 50
+
+    def test_concurrency_above_max_raises_error(self) -> None:
+        """Concurrency above 50 should raise validation error."""
+        import pydantic
+
+        with pytest.raises(pydantic.ValidationError):
+            ScheduleDefinition(
+                name="test-over-max",
+                target=ScheduleTarget.MOVIES,
+                trigger=IntervalTrigger(hours=6),
+                concurrency=51,
+            )
+
+    def test_concurrency_below_min_raises_error(self) -> None:
+        """Concurrency below 1 should raise validation error."""
+        import pydantic
+
+        with pytest.raises(pydantic.ValidationError):
+            ScheduleDefinition(
+                name="test-under-min",
+                target=ScheduleTarget.MOVIES,
+                trigger=IntervalTrigger(hours=6),
+                concurrency=0,
+            )

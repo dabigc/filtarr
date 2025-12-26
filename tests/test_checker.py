@@ -2,6 +2,7 @@
 
 from datetime import date, timedelta
 
+import httpx
 import pytest
 import respx
 from httpx import Response
@@ -2124,3 +2125,569 @@ class TestCustomCallableMatcher:
         assert result.result_type == ResultType.CUSTOM
         assert result.has_match is True
         assert result.item_name == "Game of Thrones"
+
+
+class TestTagCaching:
+    """Tests for tag caching behavior in ReleaseChecker."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_radarr_tags_cached_across_multiple_movies(self) -> None:
+        """Should only call get_tags once when processing multiple movies."""
+        from filtarr.config import TagConfig
+
+        # Track how many times the tag endpoint is called
+        tag_call_count = 0
+
+        def tag_response_callback(_request: httpx.Request) -> Response:
+            nonlocal tag_call_count
+            tag_call_count += 1
+            return Response(
+                200,
+                json=[
+                    {"id": 1, "label": "4k-available"},
+                    {"id": 2, "label": "4k-unavailable"},
+                ],
+            )
+
+        # Mock tag endpoint with callback to track calls
+        respx.get("http://radarr:7878/api/v3/tag").mock(side_effect=tag_response_callback)
+
+        # Mock movie info endpoints for two movies
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Movie 1", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/movie/456").mock(
+            return_value=Response(
+                200,
+                json={"id": 456, "title": "Movie 2", "year": 2024, "tags": []},
+            )
+        )
+
+        # Mock release endpoints with 4K content
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie1.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "456"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel2",
+                        "title": "Movie2.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+
+        # Mock update movie endpoint
+        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Movie 1", "year": 2024, "tags": [1]},
+            )
+        )
+        respx.put("http://radarr:7878/api/v3/movie/456").mock(
+            return_value=Response(
+                200,
+                json={"id": 456, "title": "Movie 2", "year": 2024, "tags": [1]},
+            )
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = ReleaseChecker(
+            radarr_url="http://radarr:7878",
+            radarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        # Process two movies - tags should be cached after first call
+        result1 = await checker.check_movie(123, apply_tags=True, dry_run=False)
+        result2 = await checker.check_movie(456, apply_tags=True, dry_run=False)
+
+        # Both should succeed
+        assert result1.has_match is True
+        assert result1.tag_result is not None
+        assert result1.tag_result.tag_applied == "4k-available"
+
+        assert result2.has_match is True
+        assert result2.tag_result is not None
+        assert result2.tag_result.tag_applied == "4k-available"
+
+        # Key assertion: get_tags should only be called ONCE
+        assert tag_call_count == 1
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_sonarr_tags_cached_across_multiple_series(self) -> None:
+        """Should only call get_tags once when processing multiple series."""
+        from filtarr.config import TagConfig
+
+        # Track how many times the tag endpoint is called
+        tag_call_count = 0
+
+        def tag_response_callback(_request: httpx.Request) -> Response:
+            nonlocal tag_call_count
+            tag_call_count += 1
+            return Response(
+                200,
+                json=[
+                    {"id": 1, "label": "4k-available"},
+                    {"id": 2, "label": "4k-unavailable"},
+                ],
+            )
+
+        # Mock tag endpoint with callback to track calls
+        respx.get("http://sonarr:8989/api/v3/tag").mock(side_effect=tag_response_callback)
+
+        # Mock series info endpoints for two series
+        respx.get("http://sonarr:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200, json={"id": 123, "title": "Series 1", "year": 2020, "seasons": []}
+            )
+        )
+        respx.get("http://sonarr:8989/api/v3/series/456").mock(
+            return_value=Response(
+                200, json={"id": 456, "title": "Series 2", "year": 2021, "seasons": []}
+            )
+        )
+
+        # Mock episodes endpoints
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 101,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-01",
+                        "monitored": True,
+                    },
+                ],
+            )
+        )
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "456"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 201,
+                        "seriesId": 456,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2021-01-01",
+                        "monitored": True,
+                    },
+                ],
+            )
+        )
+
+        # Mock release endpoints with 4K content
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-101",
+                        "title": "Series1.S01E01.2160p.WEB-DL",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "201"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-201",
+                        "title": "Series2.S01E01.2160p.WEB-DL",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+
+        # Mock update series endpoint
+        respx.put("http://sonarr:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Series 1", "year": 2020, "seasons": [], "tags": [1]},
+            )
+        )
+        respx.put("http://sonarr:8989/api/v3/series/456").mock(
+            return_value=Response(
+                200,
+                json={"id": 456, "title": "Series 2", "year": 2021, "seasons": [], "tags": [1]},
+            )
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = ReleaseChecker(
+            sonarr_url="http://sonarr:8989",
+            sonarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        # Process two series - tags should be cached after first call
+        result1 = await checker.check_series(123, apply_tags=True, dry_run=False)
+        result2 = await checker.check_series(456, apply_tags=True, dry_run=False)
+
+        # Both should succeed
+        assert result1.has_match is True
+        assert result1.tag_result is not None
+        assert result1.tag_result.tag_applied == "4k-available"
+
+        assert result2.has_match is True
+        assert result2.tag_result is not None
+        assert result2.tag_result.tag_applied == "4k-available"
+
+        # Key assertion: get_tags should only be called ONCE
+        assert tag_call_count == 1
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_clear_tag_cache_resets_cache(self) -> None:
+        """clear_tag_cache should force refetch of tags on next call."""
+        from filtarr.config import TagConfig
+
+        # Track how many times the tag endpoint is called
+        tag_call_count = 0
+
+        def tag_response_callback(_request: httpx.Request) -> Response:
+            nonlocal tag_call_count
+            tag_call_count += 1
+            return Response(
+                200,
+                json=[
+                    {"id": 1, "label": "4k-available"},
+                    {"id": 2, "label": "4k-unavailable"},
+                ],
+            )
+
+        # Mock tag endpoint with callback to track calls
+        respx.get("http://radarr:7878/api/v3/tag").mock(side_effect=tag_response_callback)
+
+        # Mock movie info endpoints
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Movie 1", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/movie/456").mock(
+            return_value=Response(
+                200,
+                json={"id": 456, "title": "Movie 2", "year": 2024, "tags": []},
+            )
+        )
+
+        # Mock release endpoints
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie1.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "456"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel2",
+                        "title": "Movie2.2160p.BluRay",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+
+        # Mock update movie endpoint
+        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Movie 1", "year": 2024, "tags": [1]},
+            )
+        )
+        respx.put("http://radarr:7878/api/v3/movie/456").mock(
+            return_value=Response(
+                200,
+                json={"id": 456, "title": "Movie 2", "year": 2024, "tags": [1]},
+            )
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = ReleaseChecker(
+            radarr_url="http://radarr:7878",
+            radarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        # First movie call - should populate cache
+        await checker.check_movie(123, apply_tags=True, dry_run=False)
+        assert tag_call_count == 1
+
+        # Clear the cache
+        checker.clear_tag_cache()
+
+        # Second movie call - should refetch since cache was cleared
+        await checker.check_movie(456, apply_tags=True, dry_run=False)
+        assert tag_call_count == 2
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_radarr_and_sonarr_caches_are_separate(self) -> None:
+        """Radarr and Sonarr should have separate tag caches."""
+        from filtarr.config import TagConfig
+
+        radarr_tag_call_count = 0
+        sonarr_tag_call_count = 0
+
+        def radarr_tag_callback(_request: httpx.Request) -> Response:
+            nonlocal radarr_tag_call_count
+            radarr_tag_call_count += 1
+            return Response(200, json=[{"id": 1, "label": "4k-available"}])
+
+        def sonarr_tag_callback(_request: httpx.Request) -> Response:
+            nonlocal sonarr_tag_call_count
+            sonarr_tag_call_count += 1
+            return Response(200, json=[{"id": 10, "label": "4k-available"}])
+
+        # Mock both tag endpoints
+        respx.get("http://radarr:7878/api/v3/tag").mock(side_effect=radarr_tag_callback)
+        respx.get("http://sonarr:8989/api/v3/tag").mock(side_effect=sonarr_tag_callback)
+
+        # Mock movie endpoints
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Test Movie", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie.2160p",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200, json={"id": 123, "title": "Test Movie", "year": 2024, "tags": [1]}
+            )
+        )
+
+        # Mock series endpoints
+        respx.get("http://sonarr:8989/api/v3/series/456").mock(
+            return_value=Response(
+                200, json={"id": 456, "title": "Test Series", "year": 2020, "seasons": []}
+            )
+        )
+        respx.get("http://sonarr:8989/api/v3/episode", params={"seriesId": "456"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 101,
+                        "seriesId": 456,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-01",
+                        "monitored": True,
+                    },
+                ],
+            )
+        )
+        respx.get("http://sonarr:8989/api/v3/release", params={"episodeId": "101"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-101",
+                        "title": "Series.S01E01.2160p",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        respx.put("http://sonarr:8989/api/v3/series/456").mock(
+            return_value=Response(
+                200,
+                json={"id": 456, "title": "Test Series", "year": 2020, "seasons": [], "tags": [10]},
+            )
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = ReleaseChecker(
+            radarr_url="http://radarr:7878",
+            radarr_api_key="test",
+            sonarr_url="http://sonarr:8989",
+            sonarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        # Check a movie and a series
+        await checker.check_movie(123, apply_tags=True, dry_run=False)
+        await checker.check_series(456, apply_tags=True, dry_run=False)
+
+        # Both endpoints should be called once (separate caches)
+        assert radarr_tag_call_count == 1
+        assert sonarr_tag_call_count == 1
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_cache_updated_when_tag_created(self) -> None:
+        """When a new tag is created, it should be added to the cache."""
+        from filtarr.config import TagConfig
+
+        tag_call_count = 0
+
+        def tag_response_callback(_request: httpx.Request) -> Response:
+            nonlocal tag_call_count
+            tag_call_count += 1
+            # Return empty tags on first call (tag doesn't exist yet)
+            return Response(200, json=[])
+
+        # Mock tag endpoint
+        respx.get("http://radarr:7878/api/v3/tag").mock(side_effect=tag_response_callback)
+
+        # Mock create tag endpoint
+        respx.post("http://radarr:7878/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-available"})
+        )
+
+        # Mock movie endpoints for two movies
+        respx.get("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200,
+                json={"id": 123, "title": "Movie 1", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/movie/456").mock(
+            return_value=Response(
+                200,
+                json={"id": 456, "title": "Movie 2", "year": 2024, "tags": []},
+            )
+        )
+
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel1",
+                        "title": "Movie1.2160p",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+        respx.get("http://radarr:7878/api/v3/release", params={"movieId": "456"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel2",
+                        "title": "Movie2.2160p",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+
+        respx.put("http://radarr:7878/api/v3/movie/123").mock(
+            return_value=Response(
+                200, json={"id": 123, "title": "Movie 1", "year": 2024, "tags": [1]}
+            )
+        )
+        respx.put("http://radarr:7878/api/v3/movie/456").mock(
+            return_value=Response(
+                200, json={"id": 456, "title": "Movie 2", "year": 2024, "tags": [1]}
+            )
+        )
+
+        tag_config = TagConfig(available="4k-available", unavailable="4k-unavailable")
+        checker = ReleaseChecker(
+            radarr_url="http://radarr:7878",
+            radarr_api_key="test",
+            tag_config=tag_config,
+        )
+
+        # First movie: tag doesn't exist, gets created
+        result1 = await checker.check_movie(123, apply_tags=True, dry_run=False)
+        assert result1.tag_result is not None
+        assert result1.tag_result.tag_created is True
+
+        # Second movie: should use cached tag (no new tag creation)
+        result2 = await checker.check_movie(456, apply_tags=True, dry_run=False)
+        assert result2.tag_result is not None
+        assert result2.tag_result.tag_created is False  # Tag was found in cache
+
+        # Tags should only be fetched once
+        assert tag_call_count == 1
+
+    def test_clear_tag_cache_on_new_instance(self) -> None:
+        """New ReleaseChecker instance should have empty cache."""
+        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+
+        # Cache should be None on new instance
+        assert checker._tag_cache is None
+
+    def test_clear_tag_cache_method(self) -> None:
+        """clear_tag_cache should reset cache to None."""
+        checker = ReleaseChecker(radarr_url="http://radarr:7878", radarr_api_key="test")
+
+        # Manually set some cache data
+        checker._tag_cache = {"radarr": []}
+
+        # Clear the cache
+        checker.clear_tag_cache()
+
+        # Cache should be None
+        assert checker._tag_cache is None
