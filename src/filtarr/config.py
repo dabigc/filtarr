@@ -15,6 +15,28 @@ class ConfigurationError(Exception):
     """Raised when configuration is invalid or missing."""
 
 
+def _get_config_base_path() -> Path:
+    """Get the base path for configuration files.
+
+    Uses /config if it exists (Docker container), otherwise ~/.config/filtarr.
+    Can be overridden with FILTARR_CONFIG_DIR environment variable.
+
+    Returns:
+        Path to the configuration base directory
+    """
+    env_path = os.environ.get("FILTARR_CONFIG_DIR")
+    if env_path:
+        return Path(env_path)
+
+    # Check for Docker bind-mount directory
+    docker_config = Path("/config")
+    if docker_config.is_dir():
+        return docker_config
+
+    # Default to user config directory
+    return Path.home() / ".config" / "filtarr"
+
+
 def _validate_url(url: str, allow_http_localhost: bool = True) -> str:
     """Validate and normalize URL, enforcing HTTPS by default.
 
@@ -226,7 +248,7 @@ class TagConfig:
 
 def _default_state_path() -> Path:
     """Get the default state file path."""
-    return Path.home() / ".config" / "filtarr" / "state.json"
+    return _get_config_base_path() / "state.json"
 
 
 @dataclass
@@ -627,7 +649,13 @@ class Config:
 
         Configuration precedence (highest to lowest):
         1. Environment variables
-        2. Config file (~/.config/filtarr/config.toml)
+        2. Config file (FILTARR_CONFIG_FILE or auto-detected path)
+
+        Config file location (in order of precedence):
+        1. FILTARR_CONFIG_FILE environment variable (exact path)
+        2. FILTARR_CONFIG_DIR environment variable + config.toml
+        3. /config/config.toml (if /config directory exists - Docker)
+        4. ~/.config/filtarr/config.toml (default)
 
         Environment variables:
         - FILTARR_RADARR_URL
@@ -636,6 +664,8 @@ class Config:
         - FILTARR_SONARR_API_KEY
         - FILTARR_TIMEOUT (request timeout in seconds)
         - FILTARR_LOG_LEVEL (logging level)
+        - FILTARR_CONFIG_DIR (base directory for config/state files)
+        - FILTARR_CONFIG_FILE (exact path to config file)
 
         Returns:
             Config instance with loaded values
@@ -645,8 +675,14 @@ class Config:
         """
         config = cls()
 
+        # Determine config file path
+        config_file_env = os.environ.get("FILTARR_CONFIG_FILE")
+        if config_file_env:
+            config_file = Path(config_file_env)
+        else:
+            config_file = _get_config_base_path() / "config.toml"
+
         # Load from config file first (lower precedence)
-        config_file = Path.home() / ".config" / "filtarr" / "config.toml"
         if config_file.exists():
             config = cls._load_from_file(config_file)
 
@@ -749,7 +785,7 @@ class Config:
             raise ConfigurationError(
                 "Radarr is not configured. Set FILTARR_RADARR_URL and "
                 "FILTARR_RADARR_API_KEY environment variables, or create "
-                "~/.config/filtarr/config.toml"
+                "a config.toml file"
             )
         return self.radarr
 
@@ -766,7 +802,7 @@ class Config:
             raise ConfigurationError(
                 "Sonarr is not configured. Set FILTARR_SONARR_URL and "
                 "FILTARR_SONARR_API_KEY environment variables, or create "
-                "~/.config/filtarr/config.toml"
+                "a config.toml file"
             )
         return self.sonarr
 

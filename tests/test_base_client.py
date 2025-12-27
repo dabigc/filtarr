@@ -1,5 +1,7 @@
 """Tests for BaseArrClient retry and caching functionality."""
 
+import logging
+
 import pytest
 import respx
 from httpx import ConnectError, ConnectTimeout, ReadTimeout, Response
@@ -337,3 +339,43 @@ class TestParseRelease:
         release = BaseArrClient._parse_release(item)
 
         assert release.is_4k() is True
+
+
+class TestTimingLogging:
+    """Tests for request timing logging functionality."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_logs_warning_on_failed_request(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Should log warning with timing when request fails."""
+        route = respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"})
+        route.side_effect = ConnectError("Connection refused")
+
+        with caplog.at_level(logging.WARNING, logger="filtarr.clients.base"):
+            async with RadarrClient(
+                "http://localhost:7878", "test-api-key", max_retries=1
+            ) as client:
+                with pytest.raises(ConnectError):
+                    await client.get_movie_releases(123)
+
+        # Check that warning was logged with timing info
+        assert any("failed after" in record.message for record in caplog.records)
+        assert any("/api/v3/release" in record.message for record in caplog.records)
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_successful_request_does_not_log_at_default_level(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Should not log warning for fast successful requests."""
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(200, json=[])
+        )
+
+        with caplog.at_level(logging.WARNING, logger="filtarr.clients.base"):
+            async with RadarrClient("http://localhost:7878", "test-api-key") as client:
+                await client.get_movie_releases(123)
+
+        # Fast requests should not trigger warning logs
+        warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert not any("Slow request" in r.message for r in warning_records)

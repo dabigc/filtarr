@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -16,8 +17,11 @@ from filtarr.tagger import ReleaseTagger, TagResult
 class MockTaggableClient:
     """Mock implementation of TaggableClient for testing."""
 
-    def __init__(self, tags: list[Tag] | None = None) -> None:
+    def __init__(
+        self, tags: list[Tag] | None = None, item_tags: dict[int, list[int]] | None = None
+    ) -> None:
         self._tags = tags or []
+        self._item_tags = item_tags or {}
         self.get_tags = AsyncMock(return_value=self._tags)
         self.create_tag = AsyncMock(side_effect=self._create_tag)
         self.add_tag_to_item = AsyncMock()
@@ -31,6 +35,14 @@ class MockTaggableClient:
         self._tags.append(tag)
         return tag
 
+    async def get_movie_raw(self, movie_id: int) -> dict[str, Any]:
+        """Get raw movie data including tags."""
+        return {"id": movie_id, "tags": self._item_tags.get(movie_id, [])}
+
+    async def get_series_raw(self, series_id: int) -> dict[str, Any]:
+        """Get raw series data including tags."""
+        return {"id": series_id, "tags": self._item_tags.get(series_id, [])}
+
 
 class TestTagResult:
     """Tests for TagResult dataclass."""
@@ -41,6 +53,7 @@ class TestTagResult:
         assert result.tag_applied is None
         assert result.tag_removed is None
         assert result.tag_created is False
+        assert result.tag_already_present is False
         assert result.tag_error is None
         assert result.dry_run is False
 
@@ -50,12 +63,23 @@ class TestTagResult:
             tag_applied="4k-available",
             tag_removed="4k-unavailable",
             tag_created=True,
+            tag_already_present=False,
             dry_run=False,
         )
         assert result.tag_applied == "4k-available"
         assert result.tag_removed == "4k-unavailable"
         assert result.tag_created is True
+        assert result.tag_already_present is False
         assert result.dry_run is False
+
+    def test_tag_already_present_field(self) -> None:
+        """Should track when tag was already present."""
+        result = TagResult(
+            tag_applied="4k-available",
+            tag_already_present=True,
+        )
+        assert result.tag_applied == "4k-available"
+        assert result.tag_already_present is True
 
 
 class TestReleaseTagger:
@@ -110,6 +134,7 @@ class TestApplyTags:
         assert result.tag_applied == "4k-available"
         assert result.tag_removed == "4k-unavailable"
         assert result.tag_created is False
+        assert result.tag_already_present is False
         assert result.tag_error is None
         client.add_tag_to_item.assert_called_once_with(123, 1)
         client.remove_tag_from_item.assert_called_once_with(123, 2)
@@ -136,6 +161,7 @@ class TestApplyTags:
         assert result.tag_applied == "4k-unavailable"
         assert result.tag_removed == "4k-available"
         assert result.tag_created is False
+        assert result.tag_already_present is False
         client.add_tag_to_item.assert_called_once_with(123, 2)
         client.remove_tag_from_item.assert_called_once_with(123, 1)
 
@@ -155,6 +181,7 @@ class TestApplyTags:
 
         assert result.tag_applied == "4k-available"
         assert result.tag_created is True
+        assert result.tag_already_present is False
         client.create_tag.assert_called_once_with("4k-available")
         client.add_tag_to_item.assert_called_once()
 
@@ -308,6 +335,58 @@ class TestApplyTags:
 
         # get_tags should only be called once due to caching
         assert client.get_tags.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_apply_tags_tag_already_present_on_item(self) -> None:
+        """Should detect when tag is already present on item."""
+        # Create client where movie 123 already has tag 1
+        client = MockTaggableClient(
+            tags=[
+                Tag(id=1, label="4k-available"),
+                Tag(id=2, label="4k-unavailable"),
+            ],
+            item_tags={123: [1]},  # Movie 123 already has tag 1
+        )
+        tagger = ReleaseTagger(TagConfig())
+
+        result = await tagger.apply_tags(
+            client=client,
+            item_id=123,
+            item_type="movie",
+            has_match=True,
+            criteria=SearchCriteria.FOUR_K,
+        )
+
+        assert result.tag_applied == "4k-available"
+        assert result.tag_already_present is True
+        # Should NOT call add_tag_to_item since tag is already present
+        client.add_tag_to_item.assert_not_called()
+        # Should still remove the opposite tag if present
+        client.remove_tag_from_item.assert_called_once_with(123, 2)
+
+    @pytest.mark.asyncio
+    async def test_apply_tags_series_tag_already_present(self) -> None:
+        """Should detect when tag is already present on series."""
+        # Create client where series 456 already has tag 1
+        client = MockTaggableClient(
+            tags=[
+                Tag(id=1, label="4k-available"),
+            ],
+            item_tags={456: [1]},  # Series 456 already has tag 1
+        )
+        tagger = ReleaseTagger(TagConfig())
+
+        result = await tagger.apply_tags(
+            client=client,
+            item_id=456,
+            item_type="series",
+            has_match=True,
+            criteria=SearchCriteria.FOUR_K,
+        )
+
+        assert result.tag_applied == "4k-available"
+        assert result.tag_already_present is True
+        client.add_tag_to_item.assert_not_called()
 
 
 class TestApplyTagsErrorHandling:

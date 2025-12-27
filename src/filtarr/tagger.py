@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import httpx
 from pydantic import ValidationError
@@ -32,6 +32,7 @@ class TagResult:
     tag_applied: str | None = None
     tag_removed: str | None = None
     tag_created: bool = False
+    tag_already_present: bool = False
     tag_error: str | None = None
     dry_run: bool = False
 
@@ -97,6 +98,31 @@ class ReleaseTagger:
         """
         self._tag_cache = None
 
+    async def _get_item_tag_ids(
+        self, client: Any, item_id: int, item_type: Literal["movie", "series"]
+    ) -> list[int]:
+        """Get the current tag IDs for an item.
+
+        Args:
+            client: A client that may have get_movie_raw or get_series_raw methods
+            item_id: The item ID
+            item_type: Type of item ("movie" or "series")
+
+        Returns:
+            List of tag IDs currently on the item
+        """
+        # Use duck typing to get raw item data
+        # Works with RadarrClient, SonarrClient, and mock clients
+        if item_type == "movie" and hasattr(client, "get_movie_raw"):
+            item_data = await client.get_movie_raw(item_id)
+            tags = item_data.get("tags", [])
+            return cast("list[int]", tags)
+        elif item_type == "series" and hasattr(client, "get_series_raw"):
+            item_data = await client.get_series_raw(item_id)
+            tags = item_data.get("tags", [])
+            return cast("list[int]", tags)
+        return []
+
     async def apply_tags(
         self,
         client: TaggableClient,
@@ -157,8 +183,13 @@ class ReleaseTagger:
 
             result.tag_applied = tag_to_apply
 
-            # Apply the tag using the protocol method
-            await client.add_tag_to_item(item_id, tag.id)
+            # Check if the item already has this tag
+            item_tag_ids = await self._get_item_tag_ids(client, item_id, item_type)
+            if tag.id in item_tag_ids:
+                result.tag_already_present = True
+            else:
+                # Apply the tag using the protocol method
+                await client.add_tag_to_item(item_id, tag.id)
 
             # Remove the opposite tag if it exists
             if tag_to_remove.lower() in existing_labels:
