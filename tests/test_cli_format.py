@@ -1,9 +1,10 @@
 """Tests for CLI formatting functions."""
 
-from filtarr.checker import SearchResult, TagResult
+from filtarr.checker import SearchResult
 from filtarr.cli import format_result_table
 from filtarr.criteria import ResultType
 from filtarr.models.common import Quality, Release
+from filtarr.tagger import TagResult
 
 
 class TestFormatResultTable:
