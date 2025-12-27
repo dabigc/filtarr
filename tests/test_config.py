@@ -1907,3 +1907,126 @@ ttl_hours = 24
             config = Config.load()
 
         assert config.state.ttl_hours == 72
+
+
+class TestConfigDirectoryDetection:
+    """Tests for configuration directory detection including Docker paths."""
+
+    def test_docker_config_path_detection_via_get_config_base_path(self, tmp_path: Path) -> None:
+        """Should use _get_config_base_path for Docker config directory detection."""
+        # Create a fake config directory to simulate Docker environment
+        docker_config_dir = tmp_path / "docker_config"
+        docker_config_dir.mkdir(parents=True)
+        config_file = docker_config_dir / "config.toml"
+        config_file.write_text("""
+[radarr]
+url = "http://localhost:7878"
+api_key = "docker-key"
+""")
+
+        # Mock the _get_config_base_path function to return our test directory
+        with (
+            patch("filtarr.config._get_config_base_path", return_value=docker_config_dir),
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            config = Config.load()
+
+        assert config.radarr is not None
+        assert config.radarr.api_key == "docker-key"
+
+    def test_filtarr_config_dir_env_var_override(self, tmp_path: Path) -> None:
+        """FILTARR_CONFIG_DIR should override default config directory."""
+        custom_config_dir = tmp_path / "custom_config"
+        custom_config_dir.mkdir(parents=True)
+        config_file = custom_config_dir / "config.toml"
+        config_file.write_text("""
+[radarr]
+url = "http://localhost:7878"
+api_key = "custom-config-dir-key"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path / "wrong_home"),
+            patch.dict(
+                os.environ,
+                {"FILTARR_CONFIG_DIR": str(custom_config_dir)},
+                clear=True,
+            ),
+        ):
+            config = Config.load()
+
+        assert config.radarr is not None
+        assert config.radarr.api_key == "custom-config-dir-key"
+
+    def test_filtarr_config_dir_takes_priority_via_env(self, tmp_path: Path) -> None:
+        """FILTARR_CONFIG_DIR env var takes priority over all other config paths."""
+        # Create a home config
+        home_config_dir = tmp_path / ".config" / "filtarr"
+        home_config_dir.mkdir(parents=True)
+        home_config_file = home_config_dir / "config.toml"
+        home_config_file.write_text("""
+[radarr]
+url = "http://localhost:7878"
+api_key = "home-key"
+""")
+
+        # Create custom config dir
+        custom_config_dir = tmp_path / "custom_config"
+        custom_config_dir.mkdir(parents=True)
+        custom_config_file = custom_config_dir / "config.toml"
+        custom_config_file.write_text("""
+[radarr]
+url = "http://localhost:7878"
+api_key = "custom-key"
+""")
+
+        # FILTARR_CONFIG_DIR should win over home config
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_CONFIG_DIR": str(custom_config_dir)},
+                clear=True,
+            ),
+        ):
+            config = Config.load()
+
+        assert config.radarr is not None
+        assert config.radarr.api_key == "custom-key"
+
+    def test_filtarr_config_dir_with_nonexistent_path(self, tmp_path: Path) -> None:
+        """FILTARR_CONFIG_DIR pointing to nonexistent path should fallback gracefully."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_CONFIG_DIR": "/nonexistent/config/path"},
+                clear=True,
+            ),
+        ):
+            # Should not raise, just use defaults
+            config = Config.load()
+
+        # Should have no Radarr/Sonarr configured since no config file exists
+        assert config.radarr is None
+        assert config.sonarr is None
+
+    def test_default_home_config_path_used(self, tmp_path: Path) -> None:
+        """Default ~/.config/filtarr path should be used when no overrides."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[radarr]
+url = "http://localhost:7878"
+api_key = "home-config-key"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            config = Config.load()
+
+        assert config.radarr is not None
+        assert config.radarr.api_key == "home-config-key"

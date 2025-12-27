@@ -1070,10 +1070,10 @@ class TestTTLCaching:
 
             # Verify log message about using cached result
             assert any(
-                "Using cached result" in record.message and "Test Movie" in record.message
+                "Skipped - recently checked" in record.message and "Test Movie" in record.message
                 for record in caplog.records
             )
-            assert any("result=available" in record.message for record in caplog.records)
+            assert any("4K available" in record.message for record in caplog.records)
         finally:
             filtarr.webhook._state_manager = original_state_manager
 
@@ -1106,6 +1106,8 @@ class TestTTLCaching:
                 mock_result.releases = []
                 mock_result.tag_result = MagicMock()
                 mock_result.tag_result.tag_applied = "4k-available"
+                mock_result.tag_result.tag_already_present = False
+                mock_result.tag_result.dry_run = False
                 mock_checker.check_movie = AsyncMock(return_value=mock_result)
                 mock_checker_class.return_value = mock_checker
 
@@ -1143,6 +1145,8 @@ class TestTTLCaching:
                 mock_result.releases = []
                 mock_result.tag_result = MagicMock()
                 mock_result.tag_result.tag_applied = None
+                mock_result.tag_result.tag_already_present = False
+                mock_result.tag_result.dry_run = False
                 mock_checker.check_movie = AsyncMock(return_value=mock_result)
                 mock_checker_class.return_value = mock_checker
 
@@ -1190,10 +1194,10 @@ class TestTTLCaching:
 
             # Verify log message about using cached result
             assert any(
-                "Using cached result" in record.message and "Breaking Bad" in record.message
+                "Skipped - recently checked" in record.message and "Breaking Bad" in record.message
                 for record in caplog.records
             )
-            assert any("result=unavailable" in record.message for record in caplog.records)
+            assert any("4K not available" in record.message for record in caplog.records)
         finally:
             filtarr.webhook._state_manager = original_state_manager
 
@@ -1226,6 +1230,8 @@ class TestTTLCaching:
                 mock_result.releases = []
                 mock_result.tag_result = MagicMock()
                 mock_result.tag_result.tag_applied = "4k-available"
+                mock_result.tag_result.tag_already_present = False
+                mock_result.tag_result.dry_run = False
                 mock_checker.check_series = AsyncMock(return_value=mock_result)
                 mock_checker_class.return_value = mock_checker
 
@@ -1263,6 +1269,8 @@ class TestTTLCaching:
                 mock_result.releases = []
                 mock_result.tag_result = MagicMock()
                 mock_result.tag_result.tag_applied = None
+                mock_result.tag_result.tag_already_present = False
+                mock_result.tag_result.dry_run = False
                 mock_checker.check_series = AsyncMock(return_value=mock_result)
                 mock_checker_class.return_value = mock_checker
 
@@ -1310,6 +1318,8 @@ class TestStateRecording:
                 mock_result.releases = [MagicMock()]
                 mock_result.tag_result = MagicMock()
                 mock_result.tag_result.tag_applied = "4k-available"
+                mock_result.tag_result.tag_already_present = False
+                mock_result.tag_result.dry_run = False
                 mock_checker.check_movie = AsyncMock(return_value=mock_result)
                 mock_checker_class.return_value = mock_checker
 
@@ -1327,7 +1337,7 @@ class TestStateRecording:
                 assert any(
                     "Check complete" in record.message
                     and "available" in record.message
-                    and "tag=4k-available" in record.message
+                    and "4k-available" in record.message
                     for record in caplog.records
                 )
         finally:
@@ -1366,6 +1376,8 @@ class TestStateRecording:
                 mock_result.releases = [MagicMock(), MagicMock()]
                 mock_result.tag_result = MagicMock()
                 mock_result.tag_result.tag_applied = "4k-unavailable"
+                mock_result.tag_result.tag_already_present = False
+                mock_result.tag_result.dry_run = False
                 mock_checker.check_series = AsyncMock(return_value=mock_result)
                 mock_checker_class.return_value = mock_checker
 
@@ -1383,7 +1395,7 @@ class TestStateRecording:
                 assert any(
                     "Check complete" in record.message
                     and "unavailable" in record.message
-                    and "tag=4k-unavailable" in record.message
+                    and "4k-unavailable" in record.message
                     for record in caplog.records
                 )
         finally:
@@ -1831,3 +1843,81 @@ class TestSchedulerLifecycle:
 
         finally:
             filtarr.webhook._scheduler_manager = original_scheduler
+
+
+class TestFormatCheckOutcome:
+    """Tests for the _format_check_outcome helper function."""
+
+    def test_format_with_match_and_tag_applied(self) -> None:
+        """Should format correctly when 4K available and tag was applied."""
+        from filtarr.tagger import TagResult
+
+        tag_result = TagResult(tag_applied="4k-available")
+        result = filtarr.webhook._format_check_outcome(True, tag_result)
+        assert result == "4K available, tag applied (4k-available)"
+
+    def test_format_with_match_and_tag_already_present(self) -> None:
+        """Should format correctly when 4K available and tag was already present."""
+        from filtarr.tagger import TagResult
+
+        tag_result = TagResult(tag_applied="4k-available", tag_already_present=True)
+        result = filtarr.webhook._format_check_outcome(True, tag_result)
+        assert result == "4K available, tag already present (4k-available)"
+
+    def test_format_with_match_and_dry_run(self) -> None:
+        """Should format correctly when 4K available and in dry-run mode."""
+        from filtarr.tagger import TagResult
+
+        tag_result = TagResult(tag_applied="4k-available", dry_run=True)
+        result = filtarr.webhook._format_check_outcome(True, tag_result)
+        assert result == "4K available (dry-run, would apply: 4k-available)"
+
+    def test_format_with_match_and_no_tag_result(self) -> None:
+        """Should format correctly when 4K available but no tag result."""
+        result = filtarr.webhook._format_check_outcome(True, None)
+        assert result == "4K available"
+
+    def test_format_with_match_and_tagging_disabled(self) -> None:
+        """Should format correctly when 4K available but tagging disabled."""
+        from filtarr.tagger import TagResult
+
+        tag_result = TagResult(tag_applied=None)
+        result = filtarr.webhook._format_check_outcome(True, tag_result)
+        assert result == "4K available (tagging disabled)"
+
+    def test_format_no_match_and_tag_applied(self) -> None:
+        """Should format correctly when 4K not available and tag was applied."""
+        from filtarr.tagger import TagResult
+
+        tag_result = TagResult(tag_applied="4k-unavailable")
+        result = filtarr.webhook._format_check_outcome(False, tag_result)
+        assert result == "4K not available, tag applied (4k-unavailable)"
+
+    def test_format_no_match_and_tag_already_present(self) -> None:
+        """Should format correctly when 4K not available and tag was already present."""
+        from filtarr.tagger import TagResult
+
+        tag_result = TagResult(tag_applied="4k-unavailable", tag_already_present=True)
+        result = filtarr.webhook._format_check_outcome(False, tag_result)
+        assert result == "4K not available, tag already present (4k-unavailable)"
+
+    def test_format_no_match_and_dry_run(self) -> None:
+        """Should format correctly when 4K not available and in dry-run mode."""
+        from filtarr.tagger import TagResult
+
+        tag_result = TagResult(tag_applied="4k-unavailable", dry_run=True)
+        result = filtarr.webhook._format_check_outcome(False, tag_result)
+        assert result == "4K not available (dry-run, would apply: 4k-unavailable)"
+
+    def test_format_no_match_and_no_tag_result(self) -> None:
+        """Should format correctly when 4K not available and no tag result."""
+        result = filtarr.webhook._format_check_outcome(False, None)
+        assert result == "4K not available"
+
+    def test_format_no_match_and_tagging_disabled(self) -> None:
+        """Should format correctly when 4K not available but tagging disabled."""
+        from filtarr.tagger import TagResult
+
+        tag_result = TagResult(tag_applied=None)
+        result = filtarr.webhook._format_check_outcome(False, tag_result)
+        assert result == "4K not available (tagging disabled)"

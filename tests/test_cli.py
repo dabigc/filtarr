@@ -6,6 +6,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 from rich.console import Console
 from typer.testing import CliRunner
 
@@ -13,14 +14,17 @@ from filtarr.checker import SamplingStrategy, SearchResult
 from filtarr.cli import (
     OutputFormat,
     _format_cached_time,
+    _is_transient_error,
     _parse_batch_file,
     _print_cached_result,
     app,
     format_result_json,
     format_result_simple,
+    print_result,
 )
-from filtarr.config import Config, RadarrConfig, SonarrConfig
+from filtarr.config import Config, ConfigurationError, RadarrConfig, SonarrConfig
 from filtarr.state import CheckRecord
+from filtarr.tagger import TagResult
 from tests.test_utils import create_asyncio_run_mock
 
 runner = CliRunner()
@@ -62,6 +66,65 @@ class TestOutputFormatters:
         assert data["seasons_checked"] == [1, 2]
         assert data["strategy_used"] == "recent"
 
+    def test_format_result_json_with_tag_result(self) -> None:
+        """Should include tag information in JSON when tag_result is present (L88-94)."""
+        result = SearchResult(
+            item_id=123,
+            item_type="movie",
+            has_match=True,
+            releases=[],
+            tag_result=TagResult(
+                tag_applied="4k-available",
+                tag_removed="4k-unavailable",
+                tag_created=True,
+                tag_error=None,
+                dry_run=False,
+            ),
+        )
+
+        json_str = format_result_json(result)
+        data = json.loads(json_str)
+
+        assert "tag" in data
+        assert data["tag"]["applied"] == "4k-available"
+        assert data["tag"]["removed"] == "4k-unavailable"
+        assert data["tag"]["created"] is True
+        assert data["tag"]["error"] is None
+        assert data["tag"]["dry_run"] is False
+
+    def test_format_result_json_with_tag_error(self) -> None:
+        """Should include tag error in JSON output."""
+        result = SearchResult(
+            item_id=123,
+            item_type="movie",
+            has_match=True,
+            releases=[],
+            tag_result=TagResult(tag_error="Connection refused"),
+        )
+
+        json_str = format_result_json(result)
+        data = json.loads(json_str)
+
+        assert "tag" in data
+        assert data["tag"]["error"] == "Connection refused"
+        assert data["tag"]["applied"] is None
+
+    def test_format_result_json_with_dry_run(self) -> None:
+        """Should indicate dry_run in JSON output."""
+        result = SearchResult(
+            item_id=123,
+            item_type="movie",
+            has_match=True,
+            releases=[],
+            tag_result=TagResult(tag_applied="4k-available", dry_run=True),
+        )
+
+        json_str = format_result_json(result)
+        data = json.loads(json_str)
+
+        assert "tag" in data
+        assert data["tag"]["dry_run"] is True
+
     def test_format_result_simple_with_4k(self) -> None:
         """Should format as '<type>:<id>: 4K available'."""
         result = SearchResult(item_id=456, item_type="series", has_match=True)
@@ -71,6 +134,172 @@ class TestOutputFormatters:
         """Should format as '<type>:<id>: No 4K'."""
         result = SearchResult(item_id=789, item_type="movie", has_match=False)
         assert format_result_simple(result) == "movie:789: No 4K"
+
+    def test_format_result_simple_with_item_name(self) -> None:
+        """Should include item name when available (L165)."""
+        result = SearchResult(
+            item_id=123,
+            item_type="movie",
+            item_name="The Matrix",
+            has_match=True,
+        )
+        assert format_result_simple(result) == "The Matrix (123): 4K available"
+
+    def test_format_result_simple_with_dry_run_tag(self) -> None:
+        """Should show 'would tag' for dry_run mode (L158-159)."""
+        result = SearchResult(
+            item_id=123,
+            item_type="movie",
+            has_match=True,
+            tag_result=TagResult(tag_applied="4k-available", dry_run=True),
+        )
+        output = format_result_simple(result)
+        assert "[would tag: 4k-available]" in output
+        assert "4K available" in output
+
+    def test_format_result_simple_with_tag_error(self) -> None:
+        """Should show tag error message (L160-161)."""
+        result = SearchResult(
+            item_id=123,
+            item_type="movie",
+            has_match=True,
+            tag_result=TagResult(tag_error="Connection refused"),
+        )
+        output = format_result_simple(result)
+        assert "[tag error: Connection refused]" in output
+        assert "4K available" in output
+
+    def test_format_result_simple_with_tag_applied(self) -> None:
+        """Should show tagged message when tag is applied (L162-163)."""
+        result = SearchResult(
+            item_id=123,
+            item_type="movie",
+            has_match=True,
+            tag_result=TagResult(tag_applied="4k-available"),
+        )
+        output = format_result_simple(result)
+        assert "[tagged: 4k-available]" in output
+        assert "4K available" in output
+
+    def test_format_result_simple_with_item_name_and_tag(self) -> None:
+        """Should include both item name and tag info (L165 + tag_info)."""
+        result = SearchResult(
+            item_id=123,
+            item_type="movie",
+            item_name="The Matrix",
+            has_match=True,
+            tag_result=TagResult(tag_applied="4k-available"),
+        )
+        output = format_result_simple(result)
+        assert output == "The Matrix (123): 4K available [tagged: 4k-available]"
+
+
+class TestPrintResult:
+    """Tests for print_result function (L171-174)."""
+
+    def test_print_result_json_format(self) -> None:
+        """Should use JSON format when OutputFormat.JSON is specified (L171-172)."""
+        result = SearchResult(
+            item_id=123,
+            item_type="movie",
+            has_match=True,
+            releases=[],
+        )
+
+        output = StringIO()
+        test_console = Console(file=output, force_terminal=False)
+
+        with patch("filtarr.cli.console", test_console):
+            print_result(result, OutputFormat.JSON)
+
+        output_str = output.getvalue()
+        # Should be valid JSON
+        data = json.loads(output_str)
+        assert data["item_id"] == 123
+        assert data["has_match"] is True
+
+    def test_print_result_table_format(self) -> None:
+        """Should use TABLE format when OutputFormat.TABLE is specified (L173-174)."""
+        result = SearchResult(
+            item_id=123,
+            item_type="movie",
+            has_match=True,
+            releases=[],
+        )
+
+        output = StringIO()
+        test_console = Console(file=output, force_terminal=False)
+
+        with patch("filtarr.cli.console", test_console):
+            print_result(result, OutputFormat.TABLE)
+
+        output_str = output.getvalue()
+        # Table output should contain the release check title
+        assert "Release Check" in output_str
+        assert "Movie 123" in output_str
+
+    def test_print_result_simple_format(self) -> None:
+        """Should use SIMPLE format when OutputFormat.SIMPLE is specified."""
+        result = SearchResult(
+            item_id=123,
+            item_type="movie",
+            has_match=True,
+        )
+
+        output = StringIO()
+        test_console = Console(file=output, force_terminal=False)
+
+        with patch("filtarr.cli.console", test_console):
+            print_result(result, OutputFormat.SIMPLE)
+
+        output_str = output.getvalue()
+        assert "movie:123: 4K available" in output_str
+
+
+class TestGetChecker:
+    """Tests for get_checker function (L190-191)."""
+
+    def test_get_checker_with_radarr(self) -> None:
+        """Should extract Radarr config when need_radarr=True (L190-191)."""
+        from filtarr.cli import get_checker
+
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="test-key"))
+
+        checker = get_checker(mock_config, need_radarr=True)
+
+        # Verify the checker was created with Radarr config as a tuple (url, api_key)
+        assert checker._radarr_config is not None
+        assert checker._radarr_config[0] == "http://localhost:7878"
+        assert checker._radarr_config[1] == "test-key"
+
+    def test_get_checker_with_sonarr(self) -> None:
+        """Should extract Sonarr config when need_sonarr=True."""
+        from filtarr.cli import get_checker
+
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="sonarr-key"))
+
+        checker = get_checker(mock_config, need_sonarr=True)
+
+        # Verify the checker was created with Sonarr config as a tuple (url, api_key)
+        assert checker._sonarr_config is not None
+        assert checker._sonarr_config[0] == "http://localhost:8989"
+        assert checker._sonarr_config[1] == "sonarr-key"
+
+    def test_get_checker_with_both(self) -> None:
+        """Should extract both Radarr and Sonarr configs when both are needed."""
+        from filtarr.cli import get_checker
+
+        mock_config = Config(
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="radarr-key"),
+            sonarr=SonarrConfig(url="http://localhost:8989", api_key="sonarr-key"),
+        )
+
+        checker = get_checker(mock_config, need_radarr=True, need_sonarr=True)
+
+        assert checker._radarr_config is not None
+        assert checker._radarr_config[0] == "http://localhost:7878"
+        assert checker._sonarr_config is not None
+        assert checker._sonarr_config[0] == "http://localhost:8989"
 
 
 class TestCheckMovieCommand:
@@ -181,6 +410,62 @@ class TestCheckSeriesCommand:
             result = runner.invoke(app, ["check", "series", "456", "--strategy", "invalid"])
 
         assert result.exit_code == 2
+
+    def test_check_series_records_state_with_tags(self) -> None:
+        """Should record check in state file when apply_tags=True (L520-525)."""
+        mock_result = SearchResult(
+            item_id=456,
+            item_type="series",
+            has_match=True,
+            strategy_used=SamplingStrategy.RECENT,
+            tag_result=TagResult(tag_applied="4k-available"),
+        )
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
+        mock_state_manager = _create_mock_state_manager()
+        mock_state_manager.get_cached_result.return_value = None
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+            patch("filtarr.cli.asyncio.run", create_asyncio_run_mock(mock_result)),
+        ):
+            result = runner.invoke(app, ["check", "series", "456", "--format", "simple"])
+
+        assert result.exit_code == 0
+        # Should have recorded the check
+        mock_state_manager.record_check.assert_called_once_with("series", 456, True, "4k-available")
+
+    def test_check_series_configuration_error(self) -> None:
+        """Should exit 2 and show error for ConfigurationError (L531-533)."""
+        mock_config = Config()  # No Sonarr configured
+
+        with patch("filtarr.cli.Config.load", return_value=mock_config):
+            result = runner.invoke(app, ["check", "series", "456", "--format", "simple"])
+
+        assert result.exit_code == 2
+        assert "Configuration error" in result.output
+
+    def test_check_series_general_exception(self) -> None:
+        """Should exit 2 and show error for general exceptions (L534-536)."""
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
+        mock_state_manager = _create_mock_state_manager()
+        mock_state_manager.get_cached_result.return_value = None
+
+        def mock_run_raises(coro: object) -> None:
+            if hasattr(coro, "close"):
+                coro.close()
+            raise RuntimeError("Unexpected server error")
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+            patch("filtarr.cli.asyncio.run", side_effect=mock_run_raises),
+        ):
+            result = runner.invoke(app, ["check", "series", "456", "--format", "simple"])
+
+        assert result.exit_code == 2
+        assert "Error" in result.output
+        assert "Unexpected server error" in result.output
 
 
 class TestBatchCommand:
@@ -1396,8 +1681,6 @@ class TestTTLStateRecording:
 
     def test_check_movie_records_check_when_tagging_enabled(self) -> None:
         """Should record check in state when tagging is enabled and tag_result exists."""
-        from filtarr.checker import TagResult
-
         mock_result = SearchResult(
             item_id=123,
             item_type="movie",
@@ -1585,3 +1868,94 @@ class TestServeLogLevelValidation:
         # The command will either succeed or fail for other reasons (like missing deps)
         # but not due to log level validation
         assert "Invalid log level" not in result.output
+
+
+class TestIsTransientError:
+    """Tests for _is_transient_error function."""
+
+    def test_http_5xx_errors_are_transient(self) -> None:
+        """Should classify 5xx HTTP errors as transient."""
+        mock_response = MagicMock()
+        mock_request = MagicMock()
+
+        # Test 500 Internal Server Error
+        mock_response.status_code = 500
+        error = httpx.HTTPStatusError("Server error", request=mock_request, response=mock_response)
+        assert _is_transient_error(error) is True
+
+        # Test 502 Bad Gateway
+        mock_response.status_code = 502
+        error = httpx.HTTPStatusError("Bad Gateway", request=mock_request, response=mock_response)
+        assert _is_transient_error(error) is True
+
+        # Test 503 Service Unavailable
+        mock_response.status_code = 503
+        error = httpx.HTTPStatusError(
+            "Service Unavailable", request=mock_request, response=mock_response
+        )
+        assert _is_transient_error(error) is True
+
+        # Test 504 Gateway Timeout
+        mock_response.status_code = 504
+        error = httpx.HTTPStatusError(
+            "Gateway Timeout", request=mock_request, response=mock_response
+        )
+        assert _is_transient_error(error) is True
+
+    def test_http_429_rate_limit_is_transient(self) -> None:
+        """Should classify 429 Too Many Requests as transient."""
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        mock_request = MagicMock()
+        error = httpx.HTTPStatusError(
+            "Too Many Requests", request=mock_request, response=mock_response
+        )
+        assert _is_transient_error(error) is True
+
+    def test_http_4xx_errors_are_not_transient(self) -> None:
+        """Should classify 4xx HTTP errors (except 429) as permanent."""
+        mock_response = MagicMock()
+        mock_request = MagicMock()
+
+        # Test 400 Bad Request
+        mock_response.status_code = 400
+        error = httpx.HTTPStatusError("Bad Request", request=mock_request, response=mock_response)
+        assert _is_transient_error(error) is False
+
+        # Test 401 Unauthorized
+        mock_response.status_code = 401
+        error = httpx.HTTPStatusError("Unauthorized", request=mock_request, response=mock_response)
+        assert _is_transient_error(error) is False
+
+        # Test 403 Forbidden
+        mock_response.status_code = 403
+        error = httpx.HTTPStatusError("Forbidden", request=mock_request, response=mock_response)
+        assert _is_transient_error(error) is False
+
+        # Test 404 Not Found
+        mock_response.status_code = 404
+        error = httpx.HTTPStatusError("Not Found", request=mock_request, response=mock_response)
+        assert _is_transient_error(error) is False
+
+    def test_connect_error_is_transient(self) -> None:
+        """Should classify ConnectError as transient."""
+        error = httpx.ConnectError("Connection refused")
+        assert _is_transient_error(error) is True
+
+    def test_timeout_exception_is_transient(self) -> None:
+        """Should classify TimeoutException as transient."""
+        error = httpx.TimeoutException("Request timed out")
+        assert _is_transient_error(error) is True
+
+    def test_configuration_error_is_not_transient(self) -> None:
+        """Should classify ConfigurationError as permanent (not transient)."""
+        error = ConfigurationError("Radarr not configured")
+        assert _is_transient_error(error) is False
+
+    def test_unknown_error_is_transient(self) -> None:
+        """Should classify unknown errors as transient (safer for retry)."""
+        error1 = RuntimeError("Unknown error")
+        assert _is_transient_error(error1) is True
+
+        error2 = ValueError("Some value error")
+        assert _is_transient_error(error2) is True

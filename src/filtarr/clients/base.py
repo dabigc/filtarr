@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import time
 from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
 
 import httpx
@@ -242,6 +243,8 @@ class BaseArrClient:
             httpx.HTTPStatusError: On non-retryable HTTP errors
             tenacity.RetryError: After all retries exhausted
         """
+        # Track timing for performance diagnostics
+        start_time = time.monotonic()
 
         @retry(
             stop=stop_after_attempt(self.max_retries),
@@ -274,7 +277,27 @@ class BaseArrClient:
 
             return response.json()
 
-        return await _do_request()
+        try:
+            result = await _do_request()
+            elapsed = time.monotonic() - start_time
+            # Log slow requests (>5s) for performance diagnostics
+            if elapsed > 5.0:
+                logger.warning(
+                    "Slow request (%.2fs) to %s - may indicate proxy timeout risk",
+                    elapsed,
+                    endpoint,
+                )
+            elif elapsed > 2.0:
+                logger.debug("Request to %s took %.2fs", endpoint, elapsed)
+            return result
+        except Exception:
+            elapsed = time.monotonic() - start_time
+            logger.warning(
+                "Request to %s failed after %.2fs",
+                endpoint,
+                elapsed,
+            )
+            raise
 
     def _log_retry(self, retry_state: Any) -> None:
         """Log retry attempts.

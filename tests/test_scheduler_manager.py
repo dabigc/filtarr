@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,7 +17,7 @@ from filtarr.scheduler import (
     ScheduleRunRecord,
     ScheduleTarget,
 )
-from filtarr.scheduler.manager import SchedulerManager
+from filtarr.scheduler.manager import SchedulerManager, _to_float, _to_int
 from filtarr.state import StateManager
 
 if TYPE_CHECKING:
@@ -65,6 +65,384 @@ def config_with_schedule() -> Config:
             ],
         ),
     )
+
+
+# ============================================================================
+# Tests for helper functions (_to_int, _to_float)
+# ============================================================================
+
+
+class TestHelperFunctions:
+    """Tests for helper functions _to_int and _to_float."""
+
+    def test_to_int_with_valid_string(self) -> None:
+        """Test _to_int with a valid string number."""
+        assert _to_int("42") == 42
+
+    def test_to_int_with_invalid_string_returns_default(self) -> None:
+        """Test _to_int with an invalid string returns the default value."""
+        assert _to_int("not_a_number", 42) == 42
+
+    def test_to_int_with_empty_string_returns_default(self) -> None:
+        """Test _to_int with an empty string returns the default value."""
+        assert _to_int("", 99) == 99
+
+    def test_to_int_with_float_string_returns_default(self) -> None:
+        """Test _to_int with a float string returns the default value."""
+        # "3.14" cannot be converted to int directly
+        assert _to_int("3.14", 10) == 10
+
+    def test_to_int_with_list_returns_default(self) -> None:
+        """Test _to_int with a list returns the default value."""
+        # Lists are not SupportsInt and not strings, so they fall through to the final return
+        assert _to_int([1, 2, 3], 77) == 77
+
+    def test_to_int_with_dict_returns_default(self) -> None:
+        """Test _to_int with a dict returns the default value."""
+        # Dicts are not SupportsInt and not strings, so they fall through to the final return
+        assert _to_int({"key": "value"}, 88) == 88
+
+    def test_to_int_with_object_returns_default(self) -> None:
+        """Test _to_int with a custom object without __int__ returns the default value."""
+
+        class NoIntMethod:
+            pass
+
+        assert _to_int(NoIntMethod(), 55) == 55
+
+    def test_to_float_with_valid_string(self) -> None:
+        """Test _to_float with a valid string number."""
+        assert _to_float("3.14") == 3.14
+
+    def test_to_float_with_invalid_string_returns_default(self) -> None:
+        """Test _to_float with an invalid string returns the default value."""
+        assert _to_float("not_a_float", 3.14) == 3.14
+
+    def test_to_float_with_empty_string_returns_default(self) -> None:
+        """Test _to_float with an empty string returns the default value."""
+        assert _to_float("", 1.5) == 1.5
+
+    def test_to_float_with_special_chars_returns_default(self) -> None:
+        """Test _to_float with special characters returns the default value."""
+        assert _to_float("abc!@#", 2.5) == 2.5
+
+    def test_to_float_with_list_returns_default(self) -> None:
+        """Test _to_float with a list returns the default value."""
+        # Lists are not SupportsFloat and not strings, so they fall through to the final return
+        assert _to_float([1.0, 2.0], 7.7) == 7.7
+
+    def test_to_float_with_dict_returns_default(self) -> None:
+        """Test _to_float with a dict returns the default value."""
+        # Dicts are not SupportsFloat and not strings, so they fall through to the final return
+        assert _to_float({"key": 1.5}, 8.8) == 8.8
+
+    def test_to_float_with_object_returns_default(self) -> None:
+        """Test _to_float with a custom object without __float__ returns the default value."""
+
+        class NoFloatMethod:
+            pass
+
+        assert _to_float(NoFloatMethod(), 5.5) == 5.5
+
+
+# ============================================================================
+# Tests for get_all_schedules() with malformed data
+# ============================================================================
+
+
+class TestGetAllSchedulesMalformedData:
+    """Tests for get_all_schedules() handling of malformed schedule data."""
+
+    def test_config_schedule_with_non_dict_trigger_is_skipped(
+        self, mock_state_manager: StateManager
+    ) -> None:
+        """Test that config schedules with non-dict trigger data are skipped."""
+        config = Config(
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
+            scheduler=SchedulerConfig(
+                enabled=True,
+                schedules=[
+                    {
+                        "name": "valid-schedule",
+                        "target": "movies",
+                        "trigger": {"type": "interval", "hours": 6},
+                    },
+                    {
+                        "name": "invalid-trigger-string",
+                        "target": "movies",
+                        "trigger": "not-a-dict",  # Invalid: string instead of dict
+                    },
+                    {
+                        "name": "invalid-trigger-list",
+                        "target": "movies",
+                        "trigger": ["interval", 6],  # Invalid: list instead of dict
+                    },
+                    {
+                        "name": "invalid-trigger-none",
+                        "target": "movies",
+                        "trigger": None,  # Invalid: None instead of dict
+                    },
+                ],
+            ),
+        )
+
+        manager = SchedulerManager(config, mock_state_manager)
+        schedules = manager.get_all_schedules()
+
+        # Only the valid schedule should be returned
+        assert len(schedules) == 1
+        assert schedules[0].name == "valid-schedule"
+
+    def test_config_schedule_with_invalid_trigger_type_logs_error(
+        self, mock_state_manager: StateManager
+    ) -> None:
+        """Test that config schedules with invalid trigger type log an error and continue."""
+        config = Config(
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
+            scheduler=SchedulerConfig(
+                enabled=True,
+                schedules=[
+                    {
+                        "name": "invalid-trigger-type",
+                        "target": "movies",
+                        "trigger": {"type": "unknown_trigger_type"},  # Invalid type
+                    },
+                    {
+                        "name": "valid-schedule",
+                        "target": "movies",
+                        "trigger": {"type": "interval", "hours": 6},
+                    },
+                ],
+            ),
+        )
+
+        manager = SchedulerManager(config, mock_state_manager)
+
+        with patch("filtarr.scheduler.manager.logger") as mock_logger:
+            schedules = manager.get_all_schedules()
+
+            # Should log error for invalid trigger type
+            mock_logger.error.assert_called()
+            error_call = mock_logger.error.call_args
+            assert "Failed to parse config schedule" in error_call[0][0]
+            assert "invalid-trigger-type" in str(error_call)
+
+        # Valid schedule should still be returned
+        assert len(schedules) == 1
+        assert schedules[0].name == "valid-schedule"
+
+    def test_dynamic_schedule_with_non_dict_trigger_is_skipped(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Test that dynamic schedules with non-dict trigger data are skipped."""
+        # Add dynamic schedules with malformed trigger data directly to state
+        mock_state_manager.add_dynamic_schedule(
+            {
+                "name": "valid-dynamic",
+                "target": "movies",
+                "trigger": {"type": "interval", "hours": 12},
+            }
+        )
+        mock_state_manager.add_dynamic_schedule(
+            {
+                "name": "invalid-dynamic-string-trigger",
+                "target": "movies",
+                "trigger": "not-a-dict",  # Invalid: string instead of dict
+            }
+        )
+        mock_state_manager.add_dynamic_schedule(
+            {
+                "name": "invalid-dynamic-list-trigger",
+                "target": "series",
+                "trigger": [1, 2, 3],  # Invalid: list instead of dict
+            }
+        )
+        mock_state_manager.add_dynamic_schedule(
+            {
+                "name": "invalid-dynamic-int-trigger",
+                "target": "both",
+                "trigger": 12345,  # Invalid: int instead of dict
+            }
+        )
+
+        manager = SchedulerManager(mock_config, mock_state_manager)
+        schedules = manager.get_all_schedules()
+
+        # Only the valid dynamic schedule should be returned
+        assert len(schedules) == 1
+        assert schedules[0].name == "valid-dynamic"
+        assert schedules[0].source == "dynamic"
+
+    def test_dynamic_schedule_with_invalid_trigger_type_logs_error(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Test that dynamic schedules with invalid trigger type log an error and continue."""
+        mock_state_manager.add_dynamic_schedule(
+            {
+                "name": "invalid-type-dynamic",
+                "target": "movies",
+                "trigger": {"type": "foobar_invalid"},  # Invalid trigger type
+            }
+        )
+        mock_state_manager.add_dynamic_schedule(
+            {
+                "name": "valid-dynamic",
+                "target": "movies",
+                "trigger": {"type": "interval", "hours": 6},
+            }
+        )
+
+        manager = SchedulerManager(mock_config, mock_state_manager)
+
+        with patch("filtarr.scheduler.manager.logger") as mock_logger:
+            schedules = manager.get_all_schedules()
+
+            # Should log error for invalid trigger type
+            mock_logger.error.assert_called()
+            error_call = mock_logger.error.call_args
+            assert "Failed to parse dynamic schedule" in error_call[0][0]
+            assert "invalid-type-dynamic" in str(error_call)
+
+        # Valid schedule should still be returned
+        assert len(schedules) == 1
+        assert schedules[0].name == "valid-dynamic"
+
+    def test_config_schedule_missing_trigger_field_uses_empty_dict(
+        self, mock_state_manager: StateManager
+    ) -> None:
+        """Test that config schedule with missing trigger field gets empty dict and fails."""
+        config = Config(
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
+            scheduler=SchedulerConfig(
+                enabled=True,
+                schedules=[
+                    {
+                        "name": "no-trigger",
+                        "target": "movies",
+                        # No "trigger" key at all
+                    },
+                    {
+                        "name": "valid-schedule",
+                        "target": "movies",
+                        "trigger": {"type": "interval", "hours": 6},
+                    },
+                ],
+            ),
+        )
+
+        manager = SchedulerManager(config, mock_state_manager)
+
+        with patch("filtarr.scheduler.manager.logger") as mock_logger:
+            schedules = manager.get_all_schedules()
+
+            # Missing trigger causes parse_trigger to fail (empty dict has no 'type')
+            # Should log error for missing trigger
+            mock_logger.error.assert_called()
+
+        # Only valid schedule should be returned
+        assert len(schedules) == 1
+        assert schedules[0].name == "valid-schedule"
+
+    def test_dynamic_schedule_missing_trigger_field_uses_empty_dict(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Test that dynamic schedule with missing trigger field gets empty dict and fails."""
+        mock_state_manager.add_dynamic_schedule(
+            {
+                "name": "no-trigger-dynamic",
+                "target": "movies",
+                # No "trigger" key at all
+            }
+        )
+        mock_state_manager.add_dynamic_schedule(
+            {
+                "name": "valid-dynamic",
+                "target": "movies",
+                "trigger": {"type": "interval", "hours": 6},
+            }
+        )
+
+        manager = SchedulerManager(mock_config, mock_state_manager)
+
+        with patch("filtarr.scheduler.manager.logger") as mock_logger:
+            schedules = manager.get_all_schedules()
+
+            # Missing trigger causes parse_trigger to fail
+            mock_logger.error.assert_called()
+
+        # Only valid schedule should be returned
+        assert len(schedules) == 1
+        assert schedules[0].name == "valid-dynamic"
+
+    def test_config_schedule_exception_during_schedule_definition_creation(
+        self, mock_state_manager: StateManager
+    ) -> None:
+        """Test that exceptions during ScheduleDefinition creation are caught and logged."""
+        config = Config(
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
+            scheduler=SchedulerConfig(
+                enabled=True,
+                schedules=[
+                    {
+                        "name": "schedule-with-bad-name!!!",  # Invalid chars in name
+                        "target": "movies",
+                        "trigger": {"type": "interval", "hours": 6},
+                    },
+                    {
+                        "name": "valid-schedule",
+                        "target": "movies",
+                        "trigger": {"type": "interval", "hours": 6},
+                    },
+                ],
+            ),
+        )
+
+        manager = SchedulerManager(config, mock_state_manager)
+
+        with patch("filtarr.scheduler.manager.logger") as mock_logger:
+            schedules = manager.get_all_schedules()
+
+            # Should log error for invalid schedule name
+            mock_logger.error.assert_called()
+            error_call = mock_logger.error.call_args
+            assert "Failed to parse config schedule" in error_call[0][0]
+
+        # Only valid schedule should be returned
+        assert len(schedules) == 1
+        assert schedules[0].name == "valid-schedule"
+
+    def test_dynamic_schedule_exception_during_schedule_definition_creation(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Test that exceptions during dynamic ScheduleDefinition creation are caught."""
+        mock_state_manager.add_dynamic_schedule(
+            {
+                "name": "bad-name-chars@#$",  # Invalid chars in name
+                "target": "movies",
+                "trigger": {"type": "interval", "hours": 6},
+            }
+        )
+        mock_state_manager.add_dynamic_schedule(
+            {
+                "name": "valid-dynamic",
+                "target": "movies",
+                "trigger": {"type": "interval", "hours": 6},
+            }
+        )
+
+        manager = SchedulerManager(mock_config, mock_state_manager)
+
+        with patch("filtarr.scheduler.manager.logger") as mock_logger:
+            schedules = manager.get_all_schedules()
+
+            # Should log error for invalid schedule name
+            mock_logger.error.assert_called()
+            error_call = mock_logger.error.call_args
+            assert "Failed to parse dynamic schedule" in error_call[0][0]
+
+        # Only valid schedule should be returned
+        assert len(schedules) == 1
+        assert schedules[0].name == "valid-dynamic"
 
 
 # ============================================================================
@@ -191,11 +569,11 @@ class TestSchedulerManagerStart:
 
         def mock_import(
             name: str,
-            globals: dict | None = None,
-            locals: dict | None = None,
-            fromlist: tuple = (),
+            globals: dict[str, Any] | None = None,
+            locals: dict[str, Any] | None = None,
+            fromlist: tuple[str, ...] = (),
             level: int = 0,
-        ) -> object:
+        ) -> Any:
             if name == "apscheduler" or name.startswith("apscheduler."):
                 raise ImportError("No module named 'apscheduler'")
             return original_import(name, globals, locals, fromlist, level)

@@ -11,9 +11,10 @@ from enum import Enum
 from pathlib import Path  # noqa: TC003 - needed at runtime for typer
 from typing import TYPE_CHECKING, Annotated, Literal
 
+import httpx
 import typer
 from rich.console import Console
-from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, TimeRemainingColumn
+from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
 from filtarr import __version__
@@ -890,6 +891,33 @@ def _build_item_list(
     return all_items
 
 
+def _is_transient_error(error: Exception) -> bool:
+    """Check if an error is transient and should be retried on next batch run.
+
+    Transient errors (server issues, network problems) should NOT mark items
+    as processed, allowing them to be retried. Permanent errors (client errors,
+    config issues) should mark items as processed since retrying won't help.
+
+    Args:
+        error: The exception to classify
+
+    Returns:
+        True if the error is transient (don't mark as processed),
+        False if permanent (mark as processed)
+    """
+    if isinstance(error, httpx.HTTPStatusError):
+        status_code = error.response.status_code
+        # 5xx errors are server-side, transient; 429 is rate limiting (transient)
+        # 4xx errors (except 429) are client-side, permanent
+        return status_code >= 500 or status_code == 429
+    if isinstance(error, (httpx.ConnectError, httpx.TimeoutException)):
+        # Network errors are transient
+        return True
+    # Config errors are permanent - won't be fixed by retry
+    # Unknown errors - default to transient (safer, allows retry)
+    return not isinstance(error, ConfigurationError)
+
+
 async def _process_single_item(
     ctx: BatchContext,
     item_type: str,
@@ -919,12 +947,20 @@ async def _process_single_item(
 
     except ConfigurationError as e:
         ctx.error_console.print(f"[red]Config error for {item_type}:{item_name}:[/red] {e}")
+        # Config errors are permanent - mark as processed (retry won't help)
         if batch_progress and item_id > 0:
             ctx.state_manager.update_batch_progress(item_id)
+    except httpx.HTTPStatusError as e:
+        ctx.error_console.print(f"[red]Error checking {item_type}:{item_name}:[/red] {e}")
+        # Only mark as processed if NOT a transient error (allows retry for 5xx, 429)
+        if not _is_transient_error(e) and batch_progress and item_id > 0:
+            ctx.state_manager.update_batch_progress(item_id)
+    except (httpx.ConnectError, httpx.TimeoutException) as e:
+        ctx.error_console.print(f"[red]Network error for {item_type}:{item_name}:[/red] {e}")
+        # Network errors are transient - don't mark as processed (allows retry)
     except Exception as e:
         ctx.error_console.print(f"[red]Error checking {item_type}:{item_name}:[/red] {e}")
-        if batch_progress and item_id > 0:
-            ctx.state_manager.update_batch_progress(item_id)
+        # Unknown errors - don't mark as processed (safer default, allows retry)
 
     return True
 
@@ -970,11 +1006,13 @@ async def _run_batch_checks(
             batch_progress = ctx.state_manager.start_batch(batch_id, batch_type, len(all_items))
 
     # Process items with progress bar
+    # Use TimeElapsedColumn instead of TimeRemainingColumn to avoid erratic ETA
+    # calculations when errors/retries cause highly variable processing times
     with Progress(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         TaskProgressColumn(),
-        TimeRemainingColumn(),
+        TimeElapsedColumn(),
         console=ctx.console,
         disable=len(all_items) < 3,
     ) as progress:
