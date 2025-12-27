@@ -6,6 +6,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 from rich.console import Console
 from typer.testing import CliRunner
 
@@ -13,13 +14,14 @@ from filtarr.checker import SamplingStrategy, SearchResult
 from filtarr.cli import (
     OutputFormat,
     _format_cached_time,
+    _is_transient_error,
     _parse_batch_file,
     _print_cached_result,
     app,
     format_result_json,
     format_result_simple,
 )
-from filtarr.config import Config, RadarrConfig, SonarrConfig
+from filtarr.config import Config, ConfigurationError, RadarrConfig, SonarrConfig
 from filtarr.state import CheckRecord
 from tests.test_utils import create_asyncio_run_mock
 
@@ -1585,3 +1587,94 @@ class TestServeLogLevelValidation:
         # The command will either succeed or fail for other reasons (like missing deps)
         # but not due to log level validation
         assert "Invalid log level" not in result.output
+
+
+class TestIsTransientError:
+    """Tests for _is_transient_error function."""
+
+    def test_http_5xx_errors_are_transient(self) -> None:
+        """Should classify 5xx HTTP errors as transient."""
+        mock_response = MagicMock()
+        mock_request = MagicMock()
+
+        # Test 500 Internal Server Error
+        mock_response.status_code = 500
+        error = httpx.HTTPStatusError("Server error", request=mock_request, response=mock_response)
+        assert _is_transient_error(error) is True
+
+        # Test 502 Bad Gateway
+        mock_response.status_code = 502
+        error = httpx.HTTPStatusError("Bad Gateway", request=mock_request, response=mock_response)
+        assert _is_transient_error(error) is True
+
+        # Test 503 Service Unavailable
+        mock_response.status_code = 503
+        error = httpx.HTTPStatusError(
+            "Service Unavailable", request=mock_request, response=mock_response
+        )
+        assert _is_transient_error(error) is True
+
+        # Test 504 Gateway Timeout
+        mock_response.status_code = 504
+        error = httpx.HTTPStatusError(
+            "Gateway Timeout", request=mock_request, response=mock_response
+        )
+        assert _is_transient_error(error) is True
+
+    def test_http_429_rate_limit_is_transient(self) -> None:
+        """Should classify 429 Too Many Requests as transient."""
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        mock_request = MagicMock()
+        error = httpx.HTTPStatusError(
+            "Too Many Requests", request=mock_request, response=mock_response
+        )
+        assert _is_transient_error(error) is True
+
+    def test_http_4xx_errors_are_not_transient(self) -> None:
+        """Should classify 4xx HTTP errors (except 429) as permanent."""
+        mock_response = MagicMock()
+        mock_request = MagicMock()
+
+        # Test 400 Bad Request
+        mock_response.status_code = 400
+        error = httpx.HTTPStatusError("Bad Request", request=mock_request, response=mock_response)
+        assert _is_transient_error(error) is False
+
+        # Test 401 Unauthorized
+        mock_response.status_code = 401
+        error = httpx.HTTPStatusError("Unauthorized", request=mock_request, response=mock_response)
+        assert _is_transient_error(error) is False
+
+        # Test 403 Forbidden
+        mock_response.status_code = 403
+        error = httpx.HTTPStatusError("Forbidden", request=mock_request, response=mock_response)
+        assert _is_transient_error(error) is False
+
+        # Test 404 Not Found
+        mock_response.status_code = 404
+        error = httpx.HTTPStatusError("Not Found", request=mock_request, response=mock_response)
+        assert _is_transient_error(error) is False
+
+    def test_connect_error_is_transient(self) -> None:
+        """Should classify ConnectError as transient."""
+        error = httpx.ConnectError("Connection refused")
+        assert _is_transient_error(error) is True
+
+    def test_timeout_exception_is_transient(self) -> None:
+        """Should classify TimeoutException as transient."""
+        error = httpx.TimeoutException("Request timed out")
+        assert _is_transient_error(error) is True
+
+    def test_configuration_error_is_not_transient(self) -> None:
+        """Should classify ConfigurationError as permanent (not transient)."""
+        error = ConfigurationError("Radarr not configured")
+        assert _is_transient_error(error) is False
+
+    def test_unknown_error_is_transient(self) -> None:
+        """Should classify unknown errors as transient (safer for retry)."""
+        error = RuntimeError("Unknown error")
+        assert _is_transient_error(error) is True
+
+        error = ValueError("Some value error")
+        assert _is_transient_error(error) is True

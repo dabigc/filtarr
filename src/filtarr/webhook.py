@@ -21,6 +21,7 @@ from filtarr.models.webhook import (
 if TYPE_CHECKING:
     from filtarr.scheduler import SchedulerManager
     from filtarr.state import StateManager
+    from filtarr.tagger import TagResult
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ def _validate_api_key(api_key: str | None, config: Config) -> str | None:
 
 def _format_check_outcome(
     has_match: bool,
-    tag_result: Any | None,
+    tag_result: TagResult | None,
 ) -> str:
     """Format the check outcome for logging.
 

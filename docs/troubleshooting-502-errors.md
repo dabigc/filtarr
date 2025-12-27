@@ -192,11 +192,13 @@ level = "INFO"  # Set to "DEBUG" for timing diagnostics
 
 ## Recovery After 502 Errors
 
-filtarr automatically handles 502 errors correctly:
+filtarr automatically handles 502 errors safely:
 
 1. **Items are NOT marked as processed** - They will be retried on the next batch run
 2. **Batch progress is preserved** - Use `--resume` (default) to continue where you left off
-3. **Exponential backoff** - Retries use increasing delays to avoid overwhelming the server
+3. **Safe to re-run** - 502 errors stop that item for the current run, but it will be picked up again the next time you run the batch
+
+Note: Exponential backoff is used only for retrying certain network errors (connection or read timeouts). HTTP 502 errors are not automatically retried within a single run.
 
 If you've fixed the underlying issue, just run the batch again:
 

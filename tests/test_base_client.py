@@ -1,6 +1,8 @@
 """Tests for BaseArrClient retry and caching functionality."""
 
 import logging
+import time
+from unittest.mock import patch
 
 import pytest
 import respx
@@ -379,3 +381,35 @@ class TestTimingLogging:
         # Fast requests should not trigger warning logs
         warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
         assert not any("Slow request" in r.message for r in warning_records)
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_slow_request_logs_timing_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Should log warning for requests taking longer than 5 seconds."""
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(200, json=[])
+        )
+
+        # Mock time.monotonic to simulate 6 seconds elapsed
+        call_count = 0
+
+        def mock_monotonic() -> float:
+            nonlocal call_count
+            call_count += 1
+            # First call returns 0, second call returns 6.0 (simulating 6 seconds)
+            if call_count == 1:
+                return 0.0
+            return 6.0
+
+        with (
+            caplog.at_level(logging.WARNING, logger="filtarr.clients.base"),
+            patch.object(time, "monotonic", mock_monotonic),
+        ):
+            async with RadarrClient("http://localhost:7878", "test-api-key") as client:
+                await client.get_movie_releases(123)
+
+        # Should have logged slow request warning
+        warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert any("Slow request" in r.message for r in warning_records)
+        assert any("6.00s" in r.message for r in warning_records)
+        assert any("/api/v3/release" in r.message for r in warning_records)

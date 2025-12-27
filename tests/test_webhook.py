@@ -1843,3 +1843,81 @@ class TestSchedulerLifecycle:
 
         finally:
             filtarr.webhook._scheduler_manager = original_scheduler
+
+
+class TestFormatCheckOutcome:
+    """Tests for the _format_check_outcome helper function."""
+
+    def test_format_with_match_and_tag_applied(self) -> None:
+        """Should format correctly when 4K available and tag was applied."""
+        from filtarr.tagger import TagResult
+
+        tag_result = TagResult(tag_applied="4k-available")
+        result = filtarr.webhook._format_check_outcome(True, tag_result)
+        assert result == "4K available, tag applied (4k-available)"
+
+    def test_format_with_match_and_tag_already_present(self) -> None:
+        """Should format correctly when 4K available and tag was already present."""
+        from filtarr.tagger import TagResult
+
+        tag_result = TagResult(tag_applied="4k-available", tag_already_present=True)
+        result = filtarr.webhook._format_check_outcome(True, tag_result)
+        assert result == "4K available, tag already present (4k-available)"
+
+    def test_format_with_match_and_dry_run(self) -> None:
+        """Should format correctly when 4K available and in dry-run mode."""
+        from filtarr.tagger import TagResult
+
+        tag_result = TagResult(tag_applied="4k-available", dry_run=True)
+        result = filtarr.webhook._format_check_outcome(True, tag_result)
+        assert result == "4K available (dry-run, would apply: 4k-available)"
+
+    def test_format_with_match_and_no_tag_result(self) -> None:
+        """Should format correctly when 4K available but no tag result."""
+        result = filtarr.webhook._format_check_outcome(True, None)
+        assert result == "4K available"
+
+    def test_format_with_match_and_tagging_disabled(self) -> None:
+        """Should format correctly when 4K available but tagging disabled."""
+        from filtarr.tagger import TagResult
+
+        tag_result = TagResult(tag_applied=None)
+        result = filtarr.webhook._format_check_outcome(True, tag_result)
+        assert result == "4K available (tagging disabled)"
+
+    def test_format_no_match_and_tag_applied(self) -> None:
+        """Should format correctly when 4K not available and tag was applied."""
+        from filtarr.tagger import TagResult
+
+        tag_result = TagResult(tag_applied="4k-unavailable")
+        result = filtarr.webhook._format_check_outcome(False, tag_result)
+        assert result == "4K not available, tag applied (4k-unavailable)"
+
+    def test_format_no_match_and_tag_already_present(self) -> None:
+        """Should format correctly when 4K not available and tag was already present."""
+        from filtarr.tagger import TagResult
+
+        tag_result = TagResult(tag_applied="4k-unavailable", tag_already_present=True)
+        result = filtarr.webhook._format_check_outcome(False, tag_result)
+        assert result == "4K not available, tag already present (4k-unavailable)"
+
+    def test_format_no_match_and_dry_run(self) -> None:
+        """Should format correctly when 4K not available and in dry-run mode."""
+        from filtarr.tagger import TagResult
+
+        tag_result = TagResult(tag_applied="4k-unavailable", dry_run=True)
+        result = filtarr.webhook._format_check_outcome(False, tag_result)
+        assert result == "4K not available (dry-run, would apply: 4k-unavailable)"
+
+    def test_format_no_match_and_no_tag_result(self) -> None:
+        """Should format correctly when 4K not available and no tag result."""
+        result = filtarr.webhook._format_check_outcome(False, None)
+        assert result == "4K not available"
+
+    def test_format_no_match_and_tagging_disabled(self) -> None:
+        """Should format correctly when 4K not available but tagging disabled."""
+        from filtarr.tagger import TagResult
+
+        tag_result = TagResult(tag_applied=None)
+        result = filtarr.webhook._format_check_outcome(False, tag_result)
+        assert result == "4K not available (tagging disabled)"

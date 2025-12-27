@@ -184,12 +184,18 @@ class ReleaseTagger:
             result.tag_applied = tag_to_apply
 
             # Check if the item already has this tag
-            item_tag_ids = await self._get_item_tag_ids(client, item_id, item_type)
-            if tag.id in item_tag_ids:
-                result.tag_already_present = True
-            else:
-                # Apply the tag using the protocol method
+            # Skip redundant API call if we just created the tag - the item can't possibly have it
+            if result.tag_created:
+                # Tag was just created, so item definitely doesn't have it yet
                 await client.add_tag_to_item(item_id, tag.id)
+            else:
+                # Tag already existed, check if item has it
+                item_tag_ids = await self._get_item_tag_ids(client, item_id, item_type)
+                if tag.id in item_tag_ids:
+                    result.tag_already_present = True
+                else:
+                    # Apply the tag using the protocol method
+                    await client.add_tag_to_item(item_id, tag.id)
 
             # Remove the opposite tag if it exists
             if tag_to_remove.lower() in existing_labels:
