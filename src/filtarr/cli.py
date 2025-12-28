@@ -23,6 +23,7 @@ from filtarr.clients.radarr import RadarrClient
 from filtarr.clients.sonarr import SonarrClient
 from filtarr.config import VALID_LOG_LEVELS, Config, ConfigurationError
 from filtarr.criteria import MOVIE_ONLY_CRITERIA, SearchCriteria
+from filtarr.logging import configure_logging
 from filtarr.state import BatchProgress, CheckRecord, StateManager
 
 # Map CLI criteria names to SearchCriteria enum values
@@ -57,6 +58,49 @@ app.add_typer(schedule_app, name="schedule")
 
 console = Console()
 error_console = Console(stderr=True)
+
+
+@app.callback()
+def main(
+    ctx: typer.Context,
+    log_level: Annotated[
+        str | None,
+        typer.Option(
+            "--log-level",
+            "-l",
+            help="Logging level (debug, info, warning, error, critical).",
+        ),
+    ] = None,
+) -> None:
+    """filtarr - Check release availability for movies and TV shows via Radarr/Sonarr."""
+    import os
+
+    # Priority: CLI > env var > config.toml > default
+    if log_level:
+        effective_level = log_level
+    elif os.environ.get("FILTARR_LOG_LEVEL"):
+        effective_level = os.environ["FILTARR_LOG_LEVEL"]
+    else:
+        try:
+            config = Config.load()
+            effective_level = config.logging.level
+        except ConfigurationError:
+            effective_level = "INFO"
+
+    # Validate
+    if effective_level.upper() not in VALID_LOG_LEVELS:
+        error_console.print(
+            f"[red]Invalid log level: {effective_level}[/red]\n"
+            f"Valid options: {', '.join(sorted(VALID_LOG_LEVELS))}"
+        )
+        raise typer.Exit(1)
+
+    # Configure logging
+    configure_logging(level=effective_level)
+
+    # Store in context for commands that need it (e.g., serve for uvicorn)
+    ctx.ensure_object(dict)
+    ctx.obj["log_level"] = effective_level.upper()
 
 
 class OutputFormat(str, Enum):
