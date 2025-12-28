@@ -100,3 +100,32 @@ class TestLogLevelPriority:
         assert result.exit_code == 0
         call_args = str(mock_configure.call_args)
         assert "warning" in call_args.lower()
+
+
+class TestServeUsesGlobalLogLevel:
+    """Tests that serve command uses global log level from context."""
+
+    @patch("filtarr.webhook.run_server")
+    @patch("filtarr.cli.Config.load")
+    @patch("filtarr.cli.configure_logging")
+    def test_serve_uses_context_log_level(
+        self,
+        _mock_configure: patch,
+        mock_config_load: patch,
+        mock_run_server: patch,
+    ) -> None:
+        """Serve should get log level from context, not its own flag."""
+        from filtarr.config import Config, RadarrConfig, WebhookConfig
+
+        mock_config = Config(
+            radarr=RadarrConfig(url="http://localhost:7878", api_key="test"),
+            webhook=WebhookConfig(host="127.0.0.1", port=8080),
+        )
+        mock_config_load.return_value = mock_config
+
+        # Use global flag, not serve-specific flag
+        runner.invoke(app, ["--log-level", "debug", "serve"])
+
+        assert mock_run_server.called
+        call_kwargs = mock_run_server.call_args.kwargs
+        assert call_kwargs.get("log_level") == "DEBUG"

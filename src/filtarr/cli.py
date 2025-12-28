@@ -1732,6 +1732,7 @@ def version() -> None:
 
 @app.command()
 def serve(
+    ctx: typer.Context,
     host: Annotated[
         str | None,
         typer.Option(
@@ -1746,14 +1747,6 @@ def serve(
             "--port",
             "-p",
             help="Port to listen on.",
-        ),
-    ] = None,
-    log_level: Annotated[
-        str | None,
-        typer.Option(
-            "--log-level",
-            "-l",
-            help="Logging level (debug, info, warning, error). Overrides config/env.",
         ),
     ] = None,
     scheduler: Annotated[
@@ -1782,7 +1775,7 @@ def serve(
 
     Example:
         filtarr serve --port 8080
-        filtarr serve --host 0.0.0.0 --port 9000 --log-level debug
+        filtarr --log-level debug serve --host 0.0.0.0 --port 9000
         filtarr serve --no-scheduler  # Webhooks only, no scheduled batches
     """
     try:
@@ -1801,16 +1794,8 @@ def serve(
     server_port = port or config.webhook.port
     scheduler_enabled = scheduler and config.scheduler.enabled
 
-    # Validate CLI log level if provided
-    if log_level and log_level.upper() not in VALID_LOG_LEVELS:
-        error_console.print(
-            f"[red]Invalid log level: {log_level}[/red]\n"
-            f"Valid options: {', '.join(sorted(VALID_LOG_LEVELS))}"
-        )
-        raise typer.Exit(1)
-
-    # Priority: CLI flag > config (which includes env var > config file > default)
-    effective_log_level = log_level or config.logging.level
+    # Get log level from global context (set by app callback)
+    effective_log_level = ctx.obj.get("log_level", "INFO") if ctx.obj else "INFO"
 
     console.print(
         f"[bold green]filtarr v{__version__} - Starting webhook server on {server_host}:{server_port}[/bold green]"

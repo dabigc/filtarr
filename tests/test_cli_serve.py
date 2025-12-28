@@ -175,12 +175,16 @@ class TestServeCommand:
         # Should show endpoint info
         assert "radarr" in result.output.lower() or "webhook" in result.output.lower()
 
+    @patch("filtarr.cli.configure_logging")
     @patch("filtarr.webhook.run_server")
     @patch("filtarr.cli.Config.load")
-    def test_serve_with_log_level(
-        self, mock_config_load: MagicMock, mock_run_server: MagicMock
+    def test_serve_with_global_log_level(
+        self,
+        mock_config_load: MagicMock,
+        mock_run_server: MagicMock,
+        _mock_configure: MagicMock,
     ) -> None:
-        """Should pass log level to server."""
+        """Should pass global log level to server."""
         from filtarr.config import Config, RadarrConfig, WebhookConfig
 
         mock_config = Config(
@@ -189,8 +193,8 @@ class TestServeCommand:
         )
         mock_config_load.return_value = mock_config
 
-        runner.invoke(app, ["serve", "--log-level", "debug"])
+        runner.invoke(app, ["--log-level", "debug", "serve"])
 
         assert mock_run_server.called
         call_kwargs = mock_run_server.call_args.kwargs
-        assert call_kwargs.get("log_level") == "debug"
+        assert call_kwargs.get("log_level") == "DEBUG"
