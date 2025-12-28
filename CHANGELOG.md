@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0](https://github.com/dabigc/filtarr/compare/v1.4.0...v2.0.0) (2025-12-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* `filtarr serve --log-level debug` is now `filtarr --log-level debug serve`
+
+### Features
+
+* add global --log-level flag to CLI ([#61](https://github.com/dabigc/filtarr/issues/61)) ([0f5ce9d](https://github.com/dabigc/filtarr/commit/0f5ce9d31a6a7dd47473d143b41b1fc8eb4a7773))
+
 ## [1.4.0](https://github.com/dabigc/filtarr/compare/v1.3.1...v1.4.0) (2025-12-27)
 
 
