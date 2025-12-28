@@ -274,6 +274,9 @@ class StateConfig:
 # Valid log level names (case-insensitive)
 VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 
+# Valid output format values
+VALID_OUTPUT_FORMATS = frozenset({"text", "json"})
+
 
 @dataclass
 class LoggingConfig:
@@ -281,18 +284,28 @@ class LoggingConfig:
 
     Attributes:
         level: Log level name (DEBUG, INFO, WARNING, ERROR, CRITICAL).
-            Default is INFO.
+        timestamps: Whether to show timestamps in output. Default True.
+        output_format: Output format ('text' or 'json'). Default 'text'.
     """
 
     level: str = "INFO"
+    timestamps: bool = True
+    output_format: str = "text"
 
     def __post_init__(self) -> None:
-        """Validate log level after initialization."""
+        """Validate log level and output format after initialization."""
         self.level = self.level.upper()
         if self.level not in VALID_LOG_LEVELS:
             raise ConfigurationError(
                 f"Invalid log level: {self.level}. "
                 f"Valid options: {', '.join(sorted(VALID_LOG_LEVELS))}"
+            )
+
+        self.output_format = self.output_format.lower()
+        if self.output_format not in VALID_OUTPUT_FORMATS:
+            raise ConfigurationError(
+                f"Invalid output format: {self.output_format}. "
+                f"Valid options: {', '.join(sorted(VALID_OUTPUT_FORMATS))}"
             )
 
 
@@ -611,6 +624,8 @@ def _parse_logging_from_dict(data: dict[str, Any]) -> LoggingConfig:
     defaults = LoggingConfig()
     return LoggingConfig(
         level=logging_data.get("level", defaults.level),
+        timestamps=logging_data.get("timestamps", defaults.timestamps),
+        output_format=logging_data.get("output_format", defaults.output_format),
     )
 
 
@@ -624,10 +639,23 @@ def _parse_logging_from_env(base: LoggingConfig) -> LoggingConfig:
         LoggingConfig instance with environment overrides
     """
     log_level = os.environ.get("FILTARR_LOG_LEVEL")
-    if log_level is None:
+    timestamps_str = os.environ.get("FILTARR_LOG_TIMESTAMPS")
+    output_format = os.environ.get("FILTARR_LOG_OUTPUT_FORMAT")
+
+    # Return base if no env vars set
+    if log_level is None and timestamps_str is None and output_format is None:
         return base
 
-    return LoggingConfig(level=log_level)
+    # Parse timestamps from env var
+    timestamps = base.timestamps
+    if timestamps_str is not None:
+        timestamps = timestamps_str.lower() in ("true", "1", "yes")
+
+    return LoggingConfig(
+        level=log_level if log_level is not None else base.level,
+        timestamps=timestamps,
+        output_format=output_format if output_format is not None else base.output_format,
+    )
 
 
 @dataclass
