@@ -37,9 +37,13 @@ services:
       # Optional: Request timeout (seconds)
       - FILTARR_TIMEOUT=${FILTARR_TIMEOUT:-120}
     volumes:
-      # Persist state and configuration
+      # Option 1: Named volume (recommended for simplicity)
       - filtarr_config:/config
-      # Optional: Mount custom config file
+      # Option 2: Bind mount (uncomment and remove named volume above)
+      # IMPORTANT: Directory must be owned by UID 1000 (the filtarr user)
+      #   mkdir -p ./filtarr && chown 1000:1000 ./filtarr
+      # - ./filtarr:/config
+      # Optional: Mount custom config file (read-only)
       # - ./config.toml:/config/config.toml:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]

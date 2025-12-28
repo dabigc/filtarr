@@ -1836,16 +1836,12 @@ class TestTTLForceFlag:
 
 
 class TestServeLogLevelValidation:
-    """Tests for serve command log level validation."""
+    """Tests for serve command log level validation via global flag."""
 
     def test_serve_invalid_log_level_exits_with_error(self) -> None:
         """Should exit with error when an invalid log level is provided."""
-        mock_config = Config(
-            radarr=RadarrConfig(url="http://localhost:7878", api_key="key"),
-        )
-
-        with patch("filtarr.cli.Config.load", return_value=mock_config):
-            result = runner.invoke(app, ["serve", "--log-level", "INVALID"])
+        # Global flag is validated before command runs
+        result = runner.invoke(app, ["--log-level", "INVALID", "serve"])
 
         assert result.exit_code == 1
         assert "Invalid log level: INVALID" in result.output
@@ -1861,8 +1857,9 @@ class TestServeLogLevelValidation:
         with (
             patch("filtarr.cli.Config.load", return_value=mock_config),
             patch("filtarr.webhook.run_server"),
+            patch("filtarr.cli.configure_logging"),
         ):
-            result = runner.invoke(app, ["serve", "--log-level", "debug"])
+            result = runner.invoke(app, ["--log-level", "debug", "serve"])
 
         # Should not exit with error (log level is valid)
         # The command will either succeed or fail for other reasons (like missing deps)

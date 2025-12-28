@@ -281,7 +281,7 @@ Tags are created automatically if they don't exist. Use `--no-tag` to disable ta
 
 Batch operations track progress and can resume after interruption:
 
-- Progress is saved to `~/.config/filtarr/state.json`
+- Progress is saved to `~/.config/filtarr/state.json` (or `/config/state.json` in Docker)
 - Use `--resume` (default) to continue where you left off
 - Use `--no-resume` to start fresh
 - Items are marked with check timestamps to avoid re-checking recently scanned items
@@ -479,6 +479,48 @@ services:
 ```
 
 > **Note:** The `env_file: .env` directive is required. Docker Compose does not automatically load `.env` files for variable substitution in the compose file.
+
+#### Using Bind Mounts
+
+If you prefer bind mounts over named volumes for easier access to config files:
+
+```yaml
+services:
+  filtarr:
+    image: ghcr.io/dabigc/filtarr:latest
+    volumes:
+      - ./filtarr:/config  # Must be owned by UID 1000
+```
+
+**Important:** The container runs as user `filtarr` (UID 1000). The bind mount directory must be writable by this user:
+
+```bash
+# Create the directory with correct ownership
+mkdir -p ./filtarr
+chown 1000:1000 ./filtarr
+```
+
+#### Troubleshooting
+
+**Permission denied errors on `/config/state.json`:**
+
+This occurs when the `/config` directory is not writable by the container user (UID 1000).
+
+For bind mounts:
+```bash
+# Fix ownership of an existing directory
+chown -R 1000:1000 ./filtarr
+```
+
+For named volumes (first-time setup issues):
+```bash
+# Fix permissions inside the container
+docker exec -u root filtarr chown -R filtarr:filtarr /config
+
+# Or recreate the volume
+docker compose down -v
+docker compose up -d
+```
 
 #### Building Locally
 
@@ -759,6 +801,7 @@ create_if_missing = true                       # Create tags if they don't exist
 recheck_days = 30                              # Days before rechecking tagged items
 
 # State file location (optional)
+# Default: ~/.config/filtarr/state.json (or /config/state.json in Docker)
 [state]
 path = "~/.config/filtarr/state.json"
 ```
