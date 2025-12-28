@@ -23,3 +23,11 @@ class TestGlobalLogLevel:
         call_args = mock_configure.call_args
         # Check level was passed (either positional or keyword)
         assert "debug" in str(call_args).lower() or logging.DEBUG in str(call_args)
+
+    @patch("filtarr.cli.configure_logging")
+    def test_global_log_level_short_flag(self, mock_configure: patch) -> None:
+        """Short -l flag should work as alias for --log-level."""
+        result = runner.invoke(app, ["-l", "warning", "version"])
+
+        assert result.exit_code == 0
+        mock_configure.assert_called_once()
