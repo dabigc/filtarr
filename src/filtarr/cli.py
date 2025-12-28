@@ -24,6 +24,7 @@ from filtarr.clients.sonarr import SonarrClient
 from filtarr.config import VALID_LOG_LEVELS, Config, ConfigurationError
 from filtarr.criteria import MOVIE_ONLY_CRITERIA, SearchCriteria
 from filtarr.logging import configure_logging
+from filtarr.output import OutputFormatter
 from filtarr.state import BatchProgress, CheckRecord, StateManager
 
 # Map CLI criteria names to SearchCriteria enum values
@@ -636,6 +637,9 @@ class BatchContext:
     processed_this_run: int = 0
     batch_limit_reached: bool = False
 
+    # Output formatting for error/warning collection
+    formatter: OutputFormatter = field(default_factory=OutputFormatter)
+
 
 def _parse_batch_file(file: Path, error_console: Console) -> tuple[list[tuple[str, str]], set[str]]:
     """Parse items from a batch file.
@@ -978,6 +982,26 @@ def _is_transient_error(error: Exception) -> bool:
     return not isinstance(error, ConfigurationError)
 
 
+def _format_error_message(error: Exception) -> str:
+    """Format an error message for display and collection.
+
+    Args:
+        error: The exception to format
+
+    Returns:
+        A concise error message string
+    """
+    if isinstance(error, httpx.HTTPStatusError):
+        return f"HTTP {error.response.status_code}"
+    if isinstance(error, httpx.ConnectError):
+        return "Connection failed"
+    if isinstance(error, httpx.TimeoutException):
+        return "Request timed out"
+    if isinstance(error, ConfigurationError):
+        return str(error)
+    return str(error)
+
+
 async def _process_single_item(
     ctx: BatchContext,
     item_type: str,
@@ -990,6 +1014,11 @@ async def _process_single_item(
     Returns:
         True if processing should continue, False if batch limit reached
     """
+    # Create display name for error messages
+    display_name = (
+        item_name if item_name and not item_name.startswith("ID:") else f"{item_type}:{item_id}"
+    )
+
     try:
         result = await _process_batch_item(ctx, item_type, item_id, item_name)
 
@@ -1006,20 +1035,28 @@ async def _process_single_item(
                 return False
 
     except ConfigurationError as e:
+        error_msg = _format_error_message(e)
         ctx.error_console.print(f"[red]Config error for {item_type}:{item_name}:[/red] {e}")
+        ctx.formatter.add_error(display_name, error_msg)
         # Config errors are permanent - mark as processed (retry won't help)
         if batch_progress and item_id > 0:
             ctx.state_manager.update_batch_progress(item_id)
     except httpx.HTTPStatusError as e:
+        error_msg = _format_error_message(e)
         ctx.error_console.print(f"[red]Error checking {item_type}:{item_name}:[/red] {e}")
+        ctx.formatter.add_error(display_name, error_msg)
         # Only mark as processed if NOT a transient error (allows retry for 5xx, 429)
         if not _is_transient_error(e) and batch_progress and item_id > 0:
             ctx.state_manager.update_batch_progress(item_id)
     except (httpx.ConnectError, httpx.TimeoutException) as e:
+        error_msg = _format_error_message(e)
         ctx.error_console.print(f"[red]Network error for {item_type}:{item_name}:[/red] {e}")
+        ctx.formatter.add_error(display_name, error_msg)
         # Network errors are transient - don't mark as processed (allows retry)
     except Exception as e:
+        error_msg = _format_error_message(e)
         ctx.error_console.print(f"[red]Error checking {item_type}:{item_name}:[/red] {e}")
+        ctx.formatter.add_error(display_name, error_msg)
         # Unknown errors - don't mark as processed (safer default, allows retry)
 
     return True
@@ -1189,7 +1226,7 @@ def _prepare_file_items(
 
 
 def _print_batch_summary(ctx: BatchContext) -> None:
-    """Print batch summary."""
+    """Print batch summary including any collected errors."""
     console.print()
     display_criteria = _format_result_type(ctx.search_criteria.value)
     summary_parts = [
@@ -1200,6 +1237,18 @@ def _print_batch_summary(ctx: BatchContext) -> None:
     if ctx.batch_limit_reached:
         summary_parts.append(f"batch limit ({ctx.batch_size}) reached - run again to continue")
     console.print(f"[bold]Summary:[/bold] {', '.join(summary_parts)}")
+
+    # Print warnings and errors summary from formatter
+    summary_lines = ctx.formatter.format_summary()
+    for line in summary_lines:
+        if line.startswith("Warnings"):
+            console.print(f"[yellow]{line}[/yellow]")
+        elif line.startswith("Errors"):
+            console.print(f"[red]{line}[/red]")
+        elif line.startswith("  -"):
+            console.print(f"[dim]{line}[/dim]")
+        else:
+            console.print(line)
 
 
 @check_app.command("batch")
