@@ -1,7 +1,7 @@
 """Tests for CLI global logging configuration."""
 
 import logging
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
@@ -14,7 +14,7 @@ class TestGlobalLogLevel:
     """Tests for global --log-level flag."""
 
     @patch("filtarr.cli.configure_logging")
-    def test_global_log_level_flag_configures_logging(self, mock_configure: patch) -> None:
+    def test_global_log_level_flag_configures_logging(self, mock_configure: MagicMock) -> None:
         """Global --log-level flag should configure logging before command runs."""
         result = runner.invoke(app, ["--log-level", "debug", "version"])
 
@@ -22,10 +22,10 @@ class TestGlobalLogLevel:
         mock_configure.assert_called_once()
         call_args = mock_configure.call_args
         # Check level was passed (either positional or keyword)
-        assert "debug" in str(call_args).lower() or logging.DEBUG in str(call_args)
+        assert "debug" in str(call_args).lower() or str(logging.DEBUG) in str(call_args)
 
     @patch("filtarr.cli.configure_logging")
-    def test_global_log_level_short_flag(self, mock_configure: patch) -> None:
+    def test_global_log_level_short_flag(self, mock_configure: MagicMock) -> None:
         """Short -l flag should work as alias for --log-level."""
         result = runner.invoke(app, ["-l", "warning", "version"])
 
@@ -40,7 +40,7 @@ class TestGlobalLogLevel:
         assert "invalid" in result.output.lower() or "verbose" in result.output.lower()
 
     @patch("filtarr.cli.configure_logging")
-    def test_global_log_level_case_insensitive(self, mock_configure: patch) -> None:
+    def test_global_log_level_case_insensitive(self, mock_configure: MagicMock) -> None:
         """Log level should be case insensitive."""
         result = runner.invoke(app, ["--log-level", "DEBUG", "version"])
 
@@ -53,7 +53,7 @@ class TestLogLevelPriority:
 
     @patch("filtarr.cli.configure_logging")
     @patch.dict("os.environ", {"FILTARR_LOG_LEVEL": "warning"})
-    def test_cli_overrides_env_var(self, mock_configure: patch) -> None:
+    def test_cli_overrides_env_var(self, mock_configure: MagicMock) -> None:
         """CLI flag should override environment variable."""
         result = runner.invoke(app, ["--log-level", "debug", "version"])
 
@@ -66,7 +66,9 @@ class TestLogLevelPriority:
     @patch("filtarr.cli.configure_logging")
     @patch("filtarr.cli.Config.load")
     @patch.dict("os.environ", {"FILTARR_LOG_LEVEL": "error"}, clear=False)
-    def test_env_overrides_config(self, mock_config_load: patch, mock_configure: patch) -> None:
+    def test_env_overrides_config(
+        self, mock_config_load: MagicMock, mock_configure: MagicMock
+    ) -> None:
         """Environment variable should override config file."""
         from filtarr.config import Config, LoggingConfig
 
@@ -83,7 +85,9 @@ class TestLogLevelPriority:
     @patch("filtarr.cli.configure_logging")
     @patch("filtarr.cli.Config.load")
     @patch.dict("os.environ", {}, clear=True)
-    def test_config_overrides_default(self, mock_config_load: patch, mock_configure: patch) -> None:
+    def test_config_overrides_default(
+        self, mock_config_load: MagicMock, mock_configure: MagicMock
+    ) -> None:
         """Config file should override default when no CLI or env."""
         import os
 
@@ -110,9 +114,9 @@ class TestServeUsesGlobalLogLevel:
     @patch("filtarr.cli.configure_logging")
     def test_serve_uses_context_log_level(
         self,
-        _mock_configure: patch,
-        mock_config_load: patch,
-        mock_run_server: patch,
+        _mock_configure: MagicMock,
+        mock_config_load: MagicMock,
+        mock_run_server: MagicMock,
     ) -> None:
         """Serve should get log level from context, not its own flag."""
         from filtarr.config import Config, RadarrConfig, WebhookConfig
