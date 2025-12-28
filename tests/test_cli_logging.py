@@ -31,3 +31,10 @@ class TestGlobalLogLevel:
 
         assert result.exit_code == 0
         mock_configure.assert_called_once()
+
+    def test_global_log_level_invalid_exits_with_error(self) -> None:
+        """Invalid log level should exit with error."""
+        result = runner.invoke(app, ["--log-level", "verbose", "version"])
+
+        assert result.exit_code == 1
+        assert "invalid" in result.output.lower() or "verbose" in result.output.lower()
