@@ -1065,6 +1065,12 @@ async def _run_batch_checks(
             batch_id = str(uuid.uuid4())[:8]
             batch_progress = ctx.state_manager.start_batch(batch_id, batch_type, len(all_items))
 
+    # Calculate progress bar total: use batch_size if set, otherwise total items
+    # This makes the progress bar show "3/5" instead of "3/100" when batch_size=5
+    progress_total = len(all_items)
+    if ctx.batch_size > 0:
+        progress_total = min(ctx.batch_size, len(all_items))
+
     # Process items with progress bar
     # Use TimeElapsedColumn instead of TimeRemainingColumn to avoid erratic ETA
     # calculations when errors/retries cause highly variable processing times
@@ -1074,9 +1080,9 @@ async def _run_batch_checks(
         TaskProgressColumn(),
         TimeElapsedColumn(),
         console=ctx.console,
-        disable=len(all_items) < 3,
+        disable=progress_total < 3,
     ) as progress:
-        task = progress.add_task("Checking items...", total=len(all_items))
+        task = progress.add_task("Checking items...", total=progress_total)
 
         for item_type, item_id, item_name in all_items:
             # Skip if already processed (resume mode)

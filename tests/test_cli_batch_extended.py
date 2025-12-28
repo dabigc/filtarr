@@ -1707,3 +1707,206 @@ class TestRunBatchChecksNewProgress:
 
         # Should NOT have started a new batch
         mock_state_manager.start_batch.assert_not_called()
+
+
+class TestBatchProgressBarShowsBatchSize:
+    """Tests for progress bar showing batch size instead of total items."""
+
+    @pytest.mark.asyncio
+    async def test_progress_bar_total_is_batch_size_when_set(
+        self,
+        mock_config: Config,
+        real_console: Console,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """When batch_size is set, progress bar total should be min(batch_size, total_items)."""
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=5,  # Batch size of 5
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=real_console,
+            error_console=real_console,
+        )
+
+        # Create 100 mock movies (more than batch size)
+        mock_movies = []
+        for i in range(1, 101):
+            m = MagicMock()
+            m.id = i
+            m.title = f"Movie {i}"
+            mock_movies.append(m)
+
+        new_progress = BatchProgress(batch_id="new-batch", item_type="movie", total_items=100)
+        mock_state_manager.start_batch.return_value = new_progress
+
+        # Track how many items are actually processed
+        processed_count = 0
+
+        async def mock_process_single(*_args: Any, **_kwargs: Any) -> bool:
+            nonlocal processed_count
+            processed_count += 1
+            # Simulate successful processing
+            ctx.processed_this_run += 1
+            ctx.results.append(
+                SearchResult(item_id=processed_count, item_type="movie", has_match=True)
+            )
+            # Return False when batch limit reached
+            if ctx.batch_size > 0 and ctx.processed_this_run >= ctx.batch_size:
+                ctx.batch_limit_reached = True
+                return False
+            return True
+
+        with (
+            patch("filtarr.cli._fetch_movies_to_check", return_value=(mock_movies, set())),
+            patch("filtarr.cli._process_single_item", side_effect=mock_process_single),
+        ):
+            await _run_batch_checks(
+                ctx,
+                all_movies=True,
+                all_series=False,
+                skip_tagged=False,
+                file_items=[],
+                batch_type="movie",
+                existing_progress=None,
+            )
+
+        # Should have only processed batch_size items (5), not all 100
+        assert processed_count == 5
+        assert ctx.batch_limit_reached is True
+        assert len(ctx.results) == 5
+
+    @pytest.mark.asyncio
+    async def test_progress_bar_total_is_all_items_when_batch_size_zero(
+        self,
+        mock_config: Config,
+        real_console: Console,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """When batch_size is 0 (unlimited), progress bar total should be total items."""
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=0,  # Unlimited
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=real_console,
+            error_console=real_console,
+        )
+
+        # Create 10 mock movies
+        mock_movies = []
+        for i in range(1, 11):
+            m = MagicMock()
+            m.id = i
+            m.title = f"Movie {i}"
+            mock_movies.append(m)
+
+        new_progress = BatchProgress(batch_id="new-batch", item_type="movie", total_items=10)
+        mock_state_manager.start_batch.return_value = new_progress
+
+        processed_count = 0
+
+        async def mock_process_single(*_args: Any, **_kwargs: Any) -> bool:
+            nonlocal processed_count
+            processed_count += 1
+            ctx.results.append(
+                SearchResult(item_id=processed_count, item_type="movie", has_match=True)
+            )
+            return True
+
+        with (
+            patch("filtarr.cli._fetch_movies_to_check", return_value=(mock_movies, set())),
+            patch("filtarr.cli._process_single_item", side_effect=mock_process_single),
+        ):
+            await _run_batch_checks(
+                ctx,
+                all_movies=True,
+                all_series=False,
+                skip_tagged=False,
+                file_items=[],
+                batch_type="movie",
+                existing_progress=None,
+            )
+
+        # Should have processed all 10 items
+        assert processed_count == 10
+        assert ctx.batch_limit_reached is False
+        assert len(ctx.results) == 10
+
+    @pytest.mark.asyncio
+    async def test_progress_bar_total_uses_items_count_when_less_than_batch_size(
+        self,
+        mock_config: Config,
+        real_console: Console,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """When total items < batch_size, progress bar total should be total items."""
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=100,  # Batch size larger than items
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=real_console,
+            error_console=real_console,
+        )
+
+        # Create only 3 mock movies (less than batch size of 100)
+        mock_movies = []
+        for i in range(1, 4):
+            m = MagicMock()
+            m.id = i
+            m.title = f"Movie {i}"
+            mock_movies.append(m)
+
+        new_progress = BatchProgress(batch_id="new-batch", item_type="movie", total_items=3)
+        mock_state_manager.start_batch.return_value = new_progress
+
+        processed_count = 0
+
+        async def mock_process_single(*_args: Any, **_kwargs: Any) -> bool:
+            nonlocal processed_count
+            processed_count += 1
+            ctx.results.append(
+                SearchResult(item_id=processed_count, item_type="movie", has_match=True)
+            )
+            return True
+
+        with (
+            patch("filtarr.cli._fetch_movies_to_check", return_value=(mock_movies, set())),
+            patch("filtarr.cli._process_single_item", side_effect=mock_process_single),
+        ):
+            await _run_batch_checks(
+                ctx,
+                all_movies=True,
+                all_series=False,
+                skip_tagged=False,
+                file_items=[],
+                batch_type="movie",
+                existing_progress=None,
+            )
+
+        # Should have processed all 3 items (less than batch_size of 100)
+        assert processed_count == 3
+        assert ctx.batch_limit_reached is False
+        assert len(ctx.results) == 3
