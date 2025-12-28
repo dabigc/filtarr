@@ -38,3 +38,11 @@ class TestGlobalLogLevel:
 
         assert result.exit_code == 1
         assert "invalid" in result.output.lower() or "verbose" in result.output.lower()
+
+    @patch("filtarr.cli.configure_logging")
+    def test_global_log_level_case_insensitive(self, mock_configure: patch) -> None:
+        """Log level should be case insensitive."""
+        result = runner.invoke(app, ["--log-level", "DEBUG", "version"])
+
+        assert result.exit_code == 0
+        mock_configure.assert_called_once()
