@@ -474,3 +474,46 @@ class TestLoggingIntegration:
 
         # Cleanup
         logger.removeHandler(handler)
+
+
+class TestThirdPartyLoggerSuppression:
+    """Tests for third-party logger suppression at different log levels."""
+
+    def test_third_party_loggers_suppressed_at_info(self) -> None:
+        """Third-party loggers should be WARNING+ at INFO level."""
+        # Reset logging state
+        root = logging.getLogger()
+        for handler in root.handlers[:]:
+            root.removeHandler(handler)
+
+        # Reset third-party loggers to NOTSET before test
+        third_party_loggers = ["httpx", "uvicorn", "uvicorn.access", "uvicorn.error"]
+        for logger_name in third_party_loggers:
+            logging.getLogger(logger_name).setLevel(logging.NOTSET)
+
+        configure_logging(level="INFO")
+
+        # Check that httpx and uvicorn loggers are set to WARNING
+        assert logging.getLogger("httpx").level == logging.WARNING
+        assert logging.getLogger("uvicorn").level == logging.WARNING
+        assert logging.getLogger("uvicorn.access").level == logging.WARNING
+        assert logging.getLogger("uvicorn.error").level == logging.WARNING
+
+    def test_third_party_loggers_verbose_at_debug(self) -> None:
+        """Third-party loggers should be DEBUG at DEBUG level."""
+        # Reset logging state
+        root = logging.getLogger()
+        for handler in root.handlers[:]:
+            root.removeHandler(handler)
+
+        # Reset third-party loggers to NOTSET before test
+        third_party_loggers = ["httpx", "uvicorn", "uvicorn.access", "uvicorn.error"]
+        for logger_name in third_party_loggers:
+            logging.getLogger(logger_name).setLevel(logging.NOTSET)
+
+        configure_logging(level="DEBUG")
+
+        # At DEBUG, third-party loggers inherit from root (DEBUG)
+        httpx_logger = logging.getLogger("httpx")
+        # Level 0 means NOTSET (inherits from parent)
+        assert httpx_logger.level in (logging.NOTSET, logging.DEBUG)
