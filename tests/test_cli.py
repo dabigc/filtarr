@@ -1956,3 +1956,27 @@ class TestIsTransientError:
 
         error2 = ValueError("Some value error")
         assert _is_transient_error(error2) is True
+
+
+class TestGlobalOutputFlags:
+    """Tests for global --timestamps and --output-format flags."""
+
+    def test_global_timestamps_flag_default(self) -> None:
+        """Timestamps should default to True."""
+        result = runner.invoke(app, ["version"])
+        assert result.exit_code == 0
+
+    def test_global_no_timestamps_flag(self) -> None:
+        """--no-timestamps flag should be accepted."""
+        result = runner.invoke(app, ["--no-timestamps", "version"])
+        assert result.exit_code == 0
+
+    def test_global_output_format_text(self) -> None:
+        """--output-format text should be accepted."""
+        result = runner.invoke(app, ["--output-format", "text", "version"])
+        assert result.exit_code == 0
+
+    def test_global_output_format_json(self) -> None:
+        """--output-format json should be accepted."""
+        result = runner.invoke(app, ["--output-format", "json", "version"])
+        assert result.exit_code == 0

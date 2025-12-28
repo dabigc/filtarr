@@ -71,6 +71,20 @@ def main(
             help="Logging level (debug, info, warning, error, critical).",
         ),
     ] = None,
+    timestamps: Annotated[
+        bool,
+        typer.Option(
+            "--timestamps/--no-timestamps",
+            help="Show timestamps in output (default: enabled).",
+        ),
+    ] = True,
+    output_format: Annotated[
+        str | None,
+        typer.Option(
+            "--output-format",
+            help="Output format: text or json (default: text).",
+        ),
+    ] = None,
 ) -> None:
     """filtarr - Check release availability for movies and TV shows via Radarr/Sonarr."""
     import os
@@ -98,9 +112,11 @@ def main(
     # Configure logging
     configure_logging(level=effective_level)
 
-    # Store in context for commands that need it (e.g., serve for uvicorn)
+    # Store in context for commands that need it
     ctx.ensure_object(dict)
     ctx.obj["log_level"] = effective_level.upper()
+    ctx.obj["timestamps"] = timestamps
+    ctx.obj["output_format"] = output_format or "text"
 
 
 class OutputFormat(str, Enum):
