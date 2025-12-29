@@ -55,6 +55,21 @@ def _validate_api_key(api_key: str | None, config: Config) -> str | None:
     return None
 
 
+def _format_network_error(error: httpx.ConnectError | httpx.TimeoutException) -> str:
+    """Format a network error for clean logging.
+
+    Args:
+        error: The network error (connect or timeout).
+
+    Returns:
+        A concise error description.
+    """
+    if isinstance(error, httpx.TimeoutException):
+        return "connection timed out"
+    # ConnectError - extract just the core message
+    return "connection failed"
+
+
 def _format_check_outcome(
     has_match: bool,
     tag_result: TagResult | None,
@@ -147,9 +162,9 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
             e.response.reason_phrase,
         )
     except (httpx.ConnectError, httpx.TimeoutException) as e:
-        logger.error("Webhook error: %s - network error: %s", movie_title, e)
-    except ValidationError as e:
-        logger.error("Webhook error: %s - validation error: %s", movie_title, e)
+        logger.error("Webhook error: %s - %s", movie_title, _format_network_error(e))
+    except ValidationError:
+        logger.error("Webhook error: %s - invalid response data", movie_title)
     except Exception:
         # Catch-all for unexpected errors - use exception() for full traceback
         logger.exception("Webhook error: %s - unexpected error", movie_title)
@@ -212,9 +227,9 @@ async def _process_series_check(series_id: int, series_title: str, config: Confi
             e.response.reason_phrase,
         )
     except (httpx.ConnectError, httpx.TimeoutException) as e:
-        logger.error("Webhook error: %s - network error: %s", series_title, e)
-    except ValidationError as e:
-        logger.error("Webhook error: %s - validation error: %s", series_title, e)
+        logger.error("Webhook error: %s - %s", series_title, _format_network_error(e))
+    except ValidationError:
+        logger.error("Webhook error: %s - invalid response data", series_title)
     except Exception:
         # Catch-all for unexpected errors - use exception() for full traceback
         logger.exception("Webhook error: %s - unexpected error", series_title)

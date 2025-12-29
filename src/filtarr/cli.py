@@ -629,6 +629,7 @@ class BatchContext:
     output_format: OutputFormat
     console: Console
     error_console: Console
+    timestamps: bool = True
 
     # Counters (mutable)
     results: list[SearchResult] = field(default_factory=list)
@@ -637,8 +638,12 @@ class BatchContext:
     processed_this_run: int = 0
     batch_limit_reached: bool = False
 
-    # Output formatting for error/warning collection
+    # Output formatting for error/warning collection (initialized in __post_init__)
     formatter: OutputFormatter = field(default_factory=OutputFormatter)
+
+    def __post_init__(self) -> None:
+        """Initialize formatter with timestamps setting."""
+        self.formatter = OutputFormatter(timestamps=self.timestamps)
 
 
 def _parse_batch_file(file: Path, error_console: Console) -> tuple[list[tuple[str, str]], set[str]]:
@@ -1036,26 +1041,26 @@ async def _process_single_item(
 
     except ConfigurationError as e:
         error_msg = _format_error_message(e)
-        ctx.error_console.print(f"[red]Config error for {item_type}:{item_name}:[/red] {e}")
+        ctx.error_console.print(f"[red]Config error for {display_name}:[/red] {error_msg}")
         ctx.formatter.add_error(display_name, error_msg)
         # Config errors are permanent - mark as processed (retry won't help)
         if batch_progress and item_id > 0:
             ctx.state_manager.update_batch_progress(item_id)
     except httpx.HTTPStatusError as e:
         error_msg = _format_error_message(e)
-        ctx.error_console.print(f"[red]Error checking {item_type}:{item_name}:[/red] {e}")
+        ctx.error_console.print(f"[red]Error checking {display_name}:[/red] {error_msg}")
         ctx.formatter.add_error(display_name, error_msg)
         # Only mark as processed if NOT a transient error (allows retry for 5xx, 429)
         if not _is_transient_error(e) and batch_progress and item_id > 0:
             ctx.state_manager.update_batch_progress(item_id)
     except (httpx.ConnectError, httpx.TimeoutException) as e:
         error_msg = _format_error_message(e)
-        ctx.error_console.print(f"[red]Network error for {item_type}:{item_name}:[/red] {e}")
+        ctx.error_console.print(f"[red]Network error for {display_name}:[/red] {error_msg}")
         ctx.formatter.add_error(display_name, error_msg)
         # Network errors are transient - don't mark as processed (allows retry)
     except Exception as e:
         error_msg = _format_error_message(e)
-        ctx.error_console.print(f"[red]Error checking {item_type}:{item_name}:[/red] {e}")
+        ctx.error_console.print(f"[red]Error checking {display_name}:[/red] {error_msg}")
         ctx.formatter.add_error(display_name, error_msg)
         # Unknown errors - don't mark as processed (safer default, allows retry)
 
@@ -1253,6 +1258,7 @@ def _print_batch_summary(ctx: BatchContext) -> None:
 
 @check_app.command("batch")
 def check_batch(
+    typer_ctx: typer.Context,
     file: Annotated[
         Path | None, typer.Option("--file", "-f", help="File with items to check (one per line)")
     ] = None,
@@ -1361,6 +1367,9 @@ def check_batch(
         file, include_rechecks, state_manager, config.tags.recheck_days
     )
 
+    # Get timestamps flag from global context (defaults to True if not set)
+    timestamps = typer_ctx.obj.get("timestamps", True) if typer_ctx.obj else True
+
     # Create batch context
     ctx = BatchContext(
         config=config,
@@ -1376,6 +1385,7 @@ def check_batch(
         output_format=format,
         console=console,
         error_console=error_console,
+        timestamps=timestamps,
     )
 
     # Run batch checks

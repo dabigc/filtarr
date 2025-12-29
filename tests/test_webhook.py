@@ -2052,10 +2052,65 @@ class TestWebhookLogFormat:
 
                 await filtarr.webhook._process_movie_check(123, "Test Movie", full_config)
 
-                # Verify error log format: "Webhook error: Movie Title - error"
+                # Verify error log format: "Webhook error: Movie Title - connection failed"
                 assert any(
-                    "Webhook error: Test Movie - network error" in record.getMessage()
+                    "Webhook error: Test Movie - connection failed" in record.getMessage()
                     for record in caplog.records
                 )
         finally:
             filtarr.webhook._state_manager = original_state_manager
+
+    @pytest.mark.asyncio
+    async def test_webhook_timeout_error_log_format(
+        self, full_config: Config, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Webhook timeout error logs should use clean format."""
+        import logging
+
+        # Reset state manager to None to ensure ReleaseChecker is called
+        original_state_manager = filtarr.webhook._state_manager
+
+        try:
+            filtarr.webhook._state_manager = None
+
+            with (
+                patch("filtarr.webhook.ReleaseChecker") as mock_checker_class,
+                caplog.at_level(logging.ERROR),
+            ):
+                mock_checker = MagicMock()
+                mock_checker.check_movie = AsyncMock(
+                    side_effect=httpx.ReadTimeout("Read timed out")
+                )
+                mock_checker_class.return_value = mock_checker
+
+                await filtarr.webhook._process_movie_check(123, "Test Movie", full_config)
+
+                # Verify error log format: "Webhook error: Movie Title - connection timed out"
+                assert any(
+                    "Webhook error: Test Movie - connection timed out" in record.getMessage()
+                    for record in caplog.records
+                )
+        finally:
+            filtarr.webhook._state_manager = original_state_manager
+
+
+class TestFormatNetworkError:
+    """Tests for _format_network_error helper function."""
+
+    def test_format_connect_error(self) -> None:
+        """ConnectError should return 'connection failed'."""
+        error = httpx.ConnectError("Connection refused")
+        result = filtarr.webhook._format_network_error(error)
+        assert result == "connection failed"
+
+    def test_format_timeout_error(self) -> None:
+        """TimeoutException should return 'connection timed out'."""
+        error = httpx.ReadTimeout("Read timed out")
+        result = filtarr.webhook._format_network_error(error)
+        assert result == "connection timed out"
+
+    def test_format_connect_timeout(self) -> None:
+        """ConnectTimeout should return 'connection timed out'."""
+        error = httpx.ConnectTimeout("Connect timed out")
+        result = filtarr.webhook._format_network_error(error)
+        assert result == "connection timed out"
