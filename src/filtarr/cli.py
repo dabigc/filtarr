@@ -1455,14 +1455,17 @@ def _get_scheduler_manager() -> SchedulerManager:
 
 @schedule_app.command("list")
 def schedule_list(
+    typer_ctx: typer.Context,
     enabled_only: Annotated[
         bool, typer.Option("--enabled-only", help="Show only enabled schedules")
     ] = False,
     output_format: Annotated[
-        OutputFormat, typer.Option("--format", "-f", help="Output format")
-    ] = OutputFormat.TABLE,
+        OutputFormat | None, typer.Option("--format", "-f", help="Output format")
+    ] = None,
 ) -> None:
     """List all configured schedules."""
+    effective_format = _get_effective_format(typer_ctx, output_format, OutputFormat.TABLE)
+
     from filtarr.scheduler import format_trigger_description, get_next_run_time
 
     manager = _get_scheduler_manager()
@@ -1475,7 +1478,7 @@ def schedule_list(
         console.print("[dim]No schedules configured[/dim]")
         raise typer.Exit(0)
 
-    if output_format == OutputFormat.JSON:
+    if effective_format == OutputFormat.JSON:
         data = [s.model_dump(mode="json") for s in schedules]
         console.print(json.dumps(data, indent=2, default=str))
     else:
