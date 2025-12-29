@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 @dataclass
@@ -30,7 +30,7 @@ class OutputFormatter:
             Formatted message, optionally prefixed with timestamp.
         """
         if self.timestamps:
-            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
             return f"[{ts}] {message}"
         return message
 
