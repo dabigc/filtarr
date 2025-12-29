@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json as json_module
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -29,6 +30,23 @@ logger = logging.getLogger(__name__)
 _scheduler_manager: SchedulerManager | None = None
 # Global reference to state manager for TTL checks
 _state_manager: StateManager | None = None
+# Global reference to output format for JSON mode
+_output_format: str = "text"
+
+
+def _output_json_event(event_type: str, **data: object) -> None:
+    """Output a JSON event line to stdout.
+
+    Args:
+        event_type: Type of event (e.g., 'webhook_received', 'check_complete').
+        **data: Event data to include.
+    """
+    event = {
+        "event": event_type,
+        "timestamp": datetime.now(UTC).isoformat(),
+        **data,
+    }
+    print(json_module.dumps(event), flush=True)
 
 
 def _validate_api_key(api_key: str | None, config: Config) -> str | None:
@@ -107,7 +125,10 @@ def _format_check_outcome(
 
 async def _process_movie_check(movie_id: int, movie_title: str, config: Config) -> None:
     """Background task to check 4K availability for a movie."""
-    logger.info("Webhook: Radarr check - %s", movie_title)
+    if _output_format == "json":
+        _output_json_event("webhook_received", source="radarr", title=movie_title)
+    else:
+        logger.info("Webhook: Radarr check - %s", movie_title)
 
     try:
         # Check TTL cache first
@@ -142,7 +163,21 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
 
         # Build completion message with clear outcome
         outcome = _format_check_outcome(result.has_match, result.tag_result)
-        logger.info("Check result: %s", outcome)
+
+        # Determine tag_applied for JSON output
+        tag_applied: str | None = None
+        if result.tag_result and result.tag_result.tag_applied:
+            tag_applied = result.tag_result.tag_applied
+
+        if _output_format == "json":
+            _output_json_event(
+                "check_complete",
+                title=movie_title,
+                available=result.has_match,
+                tag_applied=tag_applied,
+            )
+        else:
+            logger.info("Check result: %s", outcome)
 
         # Record result in state file (even if no tag was applied)
         if _state_manager is not None:
@@ -172,7 +207,10 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
 
 async def _process_series_check(series_id: int, series_title: str, config: Config) -> None:
     """Background task to check 4K availability for a series."""
-    logger.info("Webhook: Sonarr check - %s", series_title)
+    if _output_format == "json":
+        _output_json_event("webhook_received", source="sonarr", title=series_title)
+    else:
+        logger.info("Webhook: Sonarr check - %s", series_title)
 
     try:
         # Check TTL cache first
@@ -207,7 +245,21 @@ async def _process_series_check(series_id: int, series_title: str, config: Confi
 
         # Build completion message with clear outcome
         outcome = _format_check_outcome(result.has_match, result.tag_result)
-        logger.info("Check result: %s", outcome)
+
+        # Determine tag_applied for JSON output
+        tag_applied: str | None = None
+        if result.tag_result and result.tag_result.tag_applied:
+            tag_applied = result.tag_result.tag_applied
+
+        if _output_format == "json":
+            _output_json_event(
+                "check_complete",
+                title=series_title,
+                available=result.has_match,
+                tag_applied=tag_applied,
+            )
+        else:
+            logger.info("Check result: %s", outcome)
 
         # Record result in state file (even if no tag was applied)
         if _state_manager is not None:
@@ -442,6 +494,7 @@ def run_server(
     config: Config | None = None,
     log_level: str = "info",
     scheduler_enabled: bool = True,
+    output_format: str = "text",
 ) -> None:
     """Run the webhook server with optional scheduler.
 
@@ -451,8 +504,9 @@ def run_server(
         config: Application configuration.
         log_level: Logging level for uvicorn.
         scheduler_enabled: Whether to start the scheduler.
+        output_format: Output format ('text' or 'json').
     """
-    global _scheduler_manager, _state_manager
+    global _scheduler_manager, _state_manager, _output_format
 
     try:
         import uvicorn
@@ -463,6 +517,9 @@ def run_server(
 
     if config is None:
         config = Config.load()
+
+    # Set the global output format
+    _output_format = output_format
 
     app = create_app(config)
 
@@ -491,6 +548,17 @@ def run_server(
             logger.warning(
                 "Scheduler dependencies not installed. Install with: pip install filtarr[scheduler]"
             )
+
+    # Output server_started event in JSON mode
+    if output_format == "json":
+        _output_json_event(
+            "server_started",
+            host=host,
+            port=port,
+            radarr_configured=bool(config.radarr),
+            sonarr_configured=bool(config.sonarr),
+            scheduler_enabled=scheduler_enabled and config.scheduler.enabled,
+        )
 
     async def run_with_scheduler() -> None:
         """Run uvicorn with scheduler lifecycle management."""

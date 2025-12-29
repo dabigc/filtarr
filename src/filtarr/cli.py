@@ -1922,6 +1922,9 @@ def serve(
     # Get log level from global context (set by app callback)
     effective_log_level = ctx.obj.get("log_level", "INFO") if ctx.obj else "INFO"
 
+    # Get output format from global context (set by app callback)
+    output_format = ctx.obj.get("output_format", "text") if ctx.obj else "text"
+
     console.print(
         f"[bold green]filtarr v{__version__} - Starting webhook server on {server_host}:{server_port}[/bold green]"
     )
@@ -1956,6 +1959,7 @@ def serve(
         config=config,
         log_level=effective_log_level,
         scheduler_enabled=scheduler_enabled,
+        output_format=output_format,
     )
 
 
