@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json as json_module
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -29,6 +30,23 @@ logger = logging.getLogger(__name__)
 _scheduler_manager: SchedulerManager | None = None
 # Global reference to state manager for TTL checks
 _state_manager: StateManager | None = None
+# Global reference to output format for JSON mode
+_output_format: str = "text"
+
+
+def _output_json_event(event_type: str, **data: object) -> None:
+    """Output a JSON event line to stdout.
+
+    Args:
+        event_type: Type of event (e.g., 'webhook_received', 'check_complete').
+        **data: Event data to include.
+    """
+    event = {
+        "event": event_type,
+        "timestamp": datetime.now(UTC).isoformat(),
+        **data,
+    }
+    print(json_module.dumps(event), flush=True)
 
 
 def _validate_api_key(api_key: str | None, config: Config) -> str | None:
@@ -53,6 +71,21 @@ def _validate_api_key(api_key: str | None, config: Config) -> str | None:
         return "sonarr"
 
     return None
+
+
+def _format_network_error(error: httpx.ConnectError | httpx.TimeoutException) -> str:
+    """Format a network error for clean logging.
+
+    Args:
+        error: The network error (connect or timeout).
+
+    Returns:
+        A concise error description.
+    """
+    if isinstance(error, httpx.TimeoutException):
+        return "connection timed out"
+    # ConnectError - extract just the core message
+    return "connection failed"
 
 
 def _format_check_outcome(
@@ -92,7 +125,10 @@ def _format_check_outcome(
 
 async def _process_movie_check(movie_id: int, movie_title: str, config: Config) -> None:
     """Background task to check 4K availability for a movie."""
-    logger.info(f"[{movie_title}] Starting availability check (id={movie_id})...")
+    if _output_format == "json":
+        _output_json_event("webhook_received", source="radarr", title=movie_title)
+    else:
+        logger.info("Webhook: Radarr check - %s", movie_title)
 
     try:
         # Check TTL cache first
@@ -103,13 +139,13 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
                     "4K available" if cached.result == "available" else "4K not available"
                 )
                 logger.info(
-                    f"[{movie_title}] Skipped - recently checked "
-                    f"({cached.last_checked.isoformat()}), result: {cached_outcome}"
+                    "Check result: skipped (recently checked), %s",
+                    cached_outcome,
                 )
                 return
 
         radarr_config = config.require_radarr()
-        logger.debug(f"[{movie_title}] Checking releases against criteria: 4K")
+        logger.debug("Checking releases against criteria: 4K")
         checker = ReleaseChecker(
             radarr_url=radarr_config.url,
             radarr_api_key=radarr_config.api_key,
@@ -120,12 +156,28 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
         result = await checker.check_movie(movie_id, apply_tags=True)
         matching_count = len(result.matched_releases)
         logger.debug(
-            f"[{movie_title}] Found {matching_count} matching releases out of {len(result.releases)} total"
+            "Found %d matching releases out of %d total",
+            matching_count,
+            len(result.releases),
         )
 
         # Build completion message with clear outcome
         outcome = _format_check_outcome(result.has_match, result.tag_result)
-        logger.info(f"[{movie_title}] Check complete - {outcome}")
+
+        # Determine tag_applied for JSON output
+        tag_applied: str | None = None
+        if result.tag_result and result.tag_result.tag_applied:
+            tag_applied = result.tag_result.tag_applied
+
+        if _output_format == "json":
+            _output_json_event(
+                "check_complete",
+                title=movie_title,
+                available=result.has_match,
+                tag_applied=tag_applied,
+            )
+        else:
+            logger.info("Check result: %s", outcome)
 
         # Record result in state file (even if no tag was applied)
         if _state_manager is not None:
@@ -136,24 +188,29 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
                 result.tag_result.tag_applied if result.tag_result else None,
             )
     except ConfigurationError as e:
-        logger.error(f"Configuration error checking movie {movie_id} ({movie_title}): {e}")
+        logger.error("Webhook error: %s - configuration error: %s", movie_title, e)
     except httpx.HTTPStatusError as e:
         logger.error(
-            f"HTTP error checking movie {movie_id} ({movie_title}): "
-            f"{e.response.status_code} {e.response.reason_phrase}"
+            "Webhook error: %s - HTTP %d %s",
+            movie_title,
+            e.response.status_code,
+            e.response.reason_phrase,
         )
     except (httpx.ConnectError, httpx.TimeoutException) as e:
-        logger.error(f"Network error checking movie {movie_id} ({movie_title}): {e}")
-    except ValidationError as e:
-        logger.error(f"Validation error checking movie {movie_id} ({movie_title}): {e}")
+        logger.error("Webhook error: %s - %s", movie_title, _format_network_error(e))
+    except ValidationError:
+        logger.error("Webhook error: %s - invalid response data", movie_title)
     except Exception:
         # Catch-all for unexpected errors - use exception() for full traceback
-        logger.exception(f"Unexpected error checking 4K availability for movie {movie_id}")
+        logger.exception("Webhook error: %s - unexpected error", movie_title)
 
 
 async def _process_series_check(series_id: int, series_title: str, config: Config) -> None:
     """Background task to check 4K availability for a series."""
-    logger.info(f"[{series_title}] Starting availability check (id={series_id})...")
+    if _output_format == "json":
+        _output_json_event("webhook_received", source="sonarr", title=series_title)
+    else:
+        logger.info("Webhook: Sonarr check - %s", series_title)
 
     try:
         # Check TTL cache first
@@ -164,13 +221,13 @@ async def _process_series_check(series_id: int, series_title: str, config: Confi
                     "4K available" if cached.result == "available" else "4K not available"
                 )
                 logger.info(
-                    f"[{series_title}] Skipped - recently checked "
-                    f"({cached.last_checked.isoformat()}), result: {cached_outcome}"
+                    "Check result: skipped (recently checked), %s",
+                    cached_outcome,
                 )
                 return
 
         sonarr_config = config.require_sonarr()
-        logger.debug(f"[{series_title}] Checking releases against criteria: 4K")
+        logger.debug("Checking releases against criteria: 4K")
         checker = ReleaseChecker(
             sonarr_url=sonarr_config.url,
             sonarr_api_key=sonarr_config.api_key,
@@ -181,12 +238,28 @@ async def _process_series_check(series_id: int, series_title: str, config: Confi
         result = await checker.check_series(series_id, apply_tags=True)
         matching_count = len(result.matched_releases)
         logger.debug(
-            f"[{series_title}] Found {matching_count} matching releases out of {len(result.releases)} total"
+            "Found %d matching releases out of %d total",
+            matching_count,
+            len(result.releases),
         )
 
         # Build completion message with clear outcome
         outcome = _format_check_outcome(result.has_match, result.tag_result)
-        logger.info(f"[{series_title}] Check complete - {outcome}")
+
+        # Determine tag_applied for JSON output
+        tag_applied: str | None = None
+        if result.tag_result and result.tag_result.tag_applied:
+            tag_applied = result.tag_result.tag_applied
+
+        if _output_format == "json":
+            _output_json_event(
+                "check_complete",
+                title=series_title,
+                available=result.has_match,
+                tag_applied=tag_applied,
+            )
+        else:
+            logger.info("Check result: %s", outcome)
 
         # Record result in state file (even if no tag was applied)
         if _state_manager is not None:
@@ -197,19 +270,21 @@ async def _process_series_check(series_id: int, series_title: str, config: Confi
                 result.tag_result.tag_applied if result.tag_result else None,
             )
     except ConfigurationError as e:
-        logger.error(f"Configuration error checking series {series_id} ({series_title}): {e}")
+        logger.error("Webhook error: %s - configuration error: %s", series_title, e)
     except httpx.HTTPStatusError as e:
         logger.error(
-            f"HTTP error checking series {series_id} ({series_title}): "
-            f"{e.response.status_code} {e.response.reason_phrase}"
+            "Webhook error: %s - HTTP %d %s",
+            series_title,
+            e.response.status_code,
+            e.response.reason_phrase,
         )
     except (httpx.ConnectError, httpx.TimeoutException) as e:
-        logger.error(f"Network error checking series {series_id} ({series_title}): {e}")
-    except ValidationError as e:
-        logger.error(f"Validation error checking series {series_id} ({series_title}): {e}")
+        logger.error("Webhook error: %s - %s", series_title, _format_network_error(e))
+    except ValidationError:
+        logger.error("Webhook error: %s - invalid response data", series_title)
     except Exception:
         # Catch-all for unexpected errors - use exception() for full traceback
-        logger.exception(f"Unexpected error checking 4K availability for series {series_id}")
+        logger.exception("Webhook error: %s - unexpected error", series_title)
 
 
 def create_app(config: Config | None = None) -> Any:
@@ -312,7 +387,7 @@ def create_app(config: Config | None = None) -> Any:
 
         # Only process MovieAdded events
         if not payload.is_movie_added():
-            logger.debug(f"Ignoring Radarr event: {payload.event_type}")
+            logger.debug("Ignoring Radarr event: %s", payload.event_type)
             return WebhookResponse(
                 status="ignored",
                 message=f"Event type '{payload.event_type}' is not handled",
@@ -321,8 +396,10 @@ def create_app(config: Config | None = None) -> Any:
             )
 
         # Schedule background task for 4K check
-        logger.info(
-            f"Received MovieAdded webhook for: {payload.movie.title} (id={payload.movie.id})"
+        logger.debug(
+            "Received MovieAdded webhook for: %s (id=%d)",
+            payload.movie.title,
+            payload.movie.id,
         )
         task = asyncio.create_task(
             _process_movie_check(payload.movie.id, payload.movie.title, config)
@@ -364,7 +441,7 @@ def create_app(config: Config | None = None) -> Any:
 
         # Only process SeriesAdd events
         if not payload.is_series_add():
-            logger.debug(f"Ignoring Sonarr event: {payload.event_type}")
+            logger.debug("Ignoring Sonarr event: %s", payload.event_type)
             return WebhookResponse(
                 status="ignored",
                 message=f"Event type '{payload.event_type}' is not handled",
@@ -373,8 +450,10 @@ def create_app(config: Config | None = None) -> Any:
             )
 
         # Schedule background task for 4K check
-        logger.info(
-            f"Received SeriesAdd webhook for: {payload.series.title} (id={payload.series.id})"
+        logger.debug(
+            "Received SeriesAdd webhook for: %s (id=%d)",
+            payload.series.title,
+            payload.series.id,
         )
         task = asyncio.create_task(
             _process_series_check(payload.series.id, payload.series.title, config)
@@ -415,6 +494,7 @@ def run_server(
     config: Config | None = None,
     log_level: str = "info",
     scheduler_enabled: bool = True,
+    output_format: str = "text",
 ) -> None:
     """Run the webhook server with optional scheduler.
 
@@ -424,8 +504,9 @@ def run_server(
         config: Application configuration.
         log_level: Logging level for uvicorn.
         scheduler_enabled: Whether to start the scheduler.
+        output_format: Output format ('text' or 'json').
     """
-    global _scheduler_manager, _state_manager
+    global _scheduler_manager, _state_manager, _output_format
 
     try:
         import uvicorn
@@ -436,6 +517,9 @@ def run_server(
 
     if config is None:
         config = Config.load()
+
+    # Set the global output format
+    _output_format = output_format
 
     app = create_app(config)
 
@@ -464,6 +548,17 @@ def run_server(
             logger.warning(
                 "Scheduler dependencies not installed. Install with: pip install filtarr[scheduler]"
             )
+
+    # Output server_started event in JSON mode
+    if output_format == "json":
+        _output_json_event(
+            "server_started",
+            host=host,
+            port=port,
+            radarr_configured=bool(config.radarr),
+            sonarr_configured=bool(config.sonarr),
+            scheduler_enabled=scheduler_enabled and config.scheduler.enabled,
+        )
 
     async def run_with_scheduler() -> None:
         """Run uvicorn with scheduler lifecycle management."""

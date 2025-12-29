@@ -133,3 +133,41 @@ class TestServeUsesGlobalLogLevel:
         assert mock_run_server.called
         call_kwargs = mock_run_server.call_args.kwargs
         assert call_kwargs.get("log_level") == "DEBUG"
+
+
+class TestCleanLogOutput:
+    """Tests that log output is clean at INFO level (no httpx noise)."""
+
+    def test_batch_output_is_clean_at_info(self) -> None:
+        """At INFO level, batch output should not include httpx logs."""
+        result = runner.invoke(
+            app,
+            ["--log-level", "info", "check", "batch", "--all-movies"],
+        )
+
+        # Verify no httpx log lines appear in output
+        # httpx logs contain "HTTP Request:" or reference the httpx module
+        assert "httpx" not in result.output.lower()
+        assert "HTTP Request:" not in result.output
+
+    def test_check_movie_output_is_clean_at_info(self) -> None:
+        """At INFO level, check movie output should not include httpx logs."""
+        result = runner.invoke(
+            app,
+            ["--log-level", "info", "check", "movie", "123"],
+        )
+
+        # Verify no httpx log lines appear in output
+        assert "httpx" not in result.output.lower()
+        assert "HTTP Request:" not in result.output
+
+    def test_check_series_output_is_clean_at_info(self) -> None:
+        """At INFO level, check series output should not include httpx logs."""
+        result = runner.invoke(
+            app,
+            ["--log-level", "info", "check", "series", "456"],
+        )
+
+        # Verify no httpx log lines appear in output
+        assert "httpx" not in result.output.lower()
+        assert "HTTP Request:" not in result.output

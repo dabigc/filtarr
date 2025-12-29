@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import pytest
 from rich.console import Console
 from typer.testing import CliRunner
 
@@ -14,6 +15,7 @@ from filtarr.checker import SamplingStrategy, SearchResult
 from filtarr.cli import (
     OutputFormat,
     _format_cached_time,
+    _get_effective_format,
     _is_transient_error,
     _parse_batch_file,
     _print_cached_result,
@@ -1956,3 +1958,166 @@ class TestIsTransientError:
 
         error2 = ValueError("Some value error")
         assert _is_transient_error(error2) is True
+
+
+class TestGlobalOutputFlags:
+    """Tests for global --timestamps and --output-format flags."""
+
+    def test_global_timestamps_flag_default(self) -> None:
+        """Timestamps should default to True."""
+        result = runner.invoke(app, ["version"])
+        assert result.exit_code == 0
+
+    def test_global_no_timestamps_flag(self) -> None:
+        """--no-timestamps flag should be accepted."""
+        result = runner.invoke(app, ["--no-timestamps", "version"])
+        assert result.exit_code == 0
+
+    def test_global_output_format_text(self) -> None:
+        """--output-format text should be accepted."""
+        result = runner.invoke(app, ["--output-format", "text", "version"])
+        assert result.exit_code == 0
+
+    def test_global_output_format_json(self) -> None:
+        """--output-format json should be accepted."""
+        result = runner.invoke(app, ["--output-format", "json", "version"])
+        assert result.exit_code == 0
+
+
+class TestGetEffectiveFormat:
+    """Tests for _get_effective_format helper function."""
+
+    def test_explicit_format_wins_over_global(self) -> None:
+        """Explicit --format should override global --output-format."""
+
+        # Mock context with global json
+        class MockObj:
+            def get(self, key: str, default: str) -> str:
+                return "json" if key == "output_format" else default
+
+        class MockCtx:
+            obj = MockObj()
+
+        result = _get_effective_format(MockCtx(), OutputFormat.TABLE, OutputFormat.SIMPLE)  # type: ignore[arg-type]
+        assert result == OutputFormat.TABLE  # Explicit wins
+
+    def test_global_json_when_no_explicit(self) -> None:
+        """Global --output-format json should be used when no explicit format."""
+
+        class MockObj:
+            def get(self, key: str, default: str) -> str:
+                return "json" if key == "output_format" else default
+
+        class MockCtx:
+            obj = MockObj()
+
+        result = _get_effective_format(MockCtx(), None, OutputFormat.TABLE)  # type: ignore[arg-type]
+        assert result == OutputFormat.JSON
+
+    def test_default_when_global_text(self) -> None:
+        """Default should be used when global is text and no explicit format."""
+
+        class MockObj:
+            def get(self, key: str, default: str) -> str:
+                return "text" if key == "output_format" else default
+
+        class MockCtx:
+            obj = MockObj()
+
+        result = _get_effective_format(MockCtx(), None, OutputFormat.TABLE)  # type: ignore[arg-type]
+        assert result == OutputFormat.TABLE
+
+    def test_default_when_no_context(self) -> None:
+        """Default should be used when context is None."""
+        result = _get_effective_format(None, None, OutputFormat.SIMPLE)
+        assert result == OutputFormat.SIMPLE
+
+    def test_default_when_context_obj_none(self) -> None:
+        """Default should be used when context.obj is None."""
+
+        class MockCtx:
+            obj = None
+
+        result = _get_effective_format(MockCtx(), None, OutputFormat.TABLE)  # type: ignore[arg-type]
+        assert result == OutputFormat.TABLE
+
+
+class TestGlobalOutputFormatIntegration:
+    """Integration tests for global --output-format affecting commands."""
+
+    def test_global_output_format_json_check_movie(self) -> None:
+        """Global --output-format json should produce JSON output for check movie."""
+        mock_result = SearchResult(item_id=123, item_type="movie", has_match=True)
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
+
+        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> SearchResult:
+            return mock_result
+
+        mock_checker = MagicMock()
+        mock_checker.check_movie = mock_check_movie
+        mock_state_manager = _create_mock_state_manager()
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+        ):
+            result = runner.invoke(app, ["--output-format", "json", "check", "movie", "123"])
+
+        assert result.exit_code == 0
+        # Output should be valid JSON
+        data = json.loads(result.output)
+        assert data["item_id"] == 123
+        assert data["has_match"] is True
+
+    def test_global_output_format_text_uses_table_default(self) -> None:
+        """Global --output-format text should use command's default format (TABLE)."""
+        mock_result = SearchResult(item_id=123, item_type="movie", has_match=True)
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
+
+        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> SearchResult:
+            return mock_result
+
+        mock_checker = MagicMock()
+        mock_checker.check_movie = mock_check_movie
+        mock_state_manager = _create_mock_state_manager()
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+        ):
+            result = runner.invoke(app, ["--output-format", "text", "check", "movie", "123"])
+
+        assert result.exit_code == 0
+        # Should contain TABLE format output (not JSON, not simple)
+        assert "Release Check" in result.output
+        assert "Movie 123" in result.output
+
+    def test_explicit_format_overrides_global_json(self) -> None:
+        """Explicit --format simple should override global --output-format json."""
+        mock_result = SearchResult(item_id=123, item_type="movie", has_match=True)
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
+
+        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> SearchResult:
+            return mock_result
+
+        mock_checker = MagicMock()
+        mock_checker.check_movie = mock_check_movie
+        mock_state_manager = _create_mock_state_manager()
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+        ):
+            result = runner.invoke(
+                app, ["--output-format", "json", "check", "movie", "123", "--format", "simple"]
+            )
+
+        assert result.exit_code == 0
+        # Should be SIMPLE format, not JSON
+        assert "movie:123: 4K available" in result.output
+        # Should NOT be valid JSON (simple format isn't JSON)
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(result.output)

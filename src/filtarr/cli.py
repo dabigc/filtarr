@@ -24,6 +24,7 @@ from filtarr.clients.sonarr import SonarrClient
 from filtarr.config import VALID_LOG_LEVELS, Config, ConfigurationError
 from filtarr.criteria import MOVIE_ONLY_CRITERIA, SearchCriteria
 from filtarr.logging import configure_logging
+from filtarr.output import OutputFormatter
 from filtarr.state import BatchProgress, CheckRecord, StateManager
 
 # Map CLI criteria names to SearchCriteria enum values
@@ -71,6 +72,20 @@ def main(
             help="Logging level (debug, info, warning, error, critical).",
         ),
     ] = None,
+    timestamps: Annotated[
+        bool,
+        typer.Option(
+            "--timestamps/--no-timestamps",
+            help="Show timestamps in output (default: enabled).",
+        ),
+    ] = True,
+    output_format: Annotated[
+        str | None,
+        typer.Option(
+            "--output-format",
+            help="Output format: text or json (default: text).",
+        ),
+    ] = None,
 ) -> None:
     """filtarr - Check release availability for movies and TV shows via Radarr/Sonarr."""
     import os
@@ -98,9 +113,11 @@ def main(
     # Configure logging
     configure_logging(level=effective_level)
 
-    # Store in context for commands that need it (e.g., serve for uvicorn)
+    # Store in context for commands that need it
     ctx.ensure_object(dict)
     ctx.obj["log_level"] = effective_level.upper()
+    ctx.obj["timestamps"] = timestamps
+    ctx.obj["output_format"] = output_format or "text"
 
 
 class OutputFormat(str, Enum):
@@ -138,6 +155,37 @@ def format_result_json(result: SearchResult) -> str:
         }
 
     return json.dumps(data, indent=2)
+
+
+def _get_effective_format(
+    typer_ctx: typer.Context | None,
+    explicit_format: OutputFormat | None,
+    default: OutputFormat,
+) -> OutputFormat:
+    """Get effective output format respecting global flag.
+
+    Priority: explicit --format > global --output-format > command default.
+
+    Args:
+        typer_ctx: Typer context with global options.
+        explicit_format: Explicitly passed --format value (None if not specified).
+        default: Command's default format.
+
+    Returns:
+        The effective OutputFormat to use.
+    """
+    # Explicit --format always wins
+    if explicit_format is not None:
+        return explicit_format
+
+    # Check global --output-format
+    if typer_ctx and typer_ctx.obj:
+        global_format = typer_ctx.obj.get("output_format", "text")
+        if global_format == "json":
+            return OutputFormat.JSON
+
+    # Fall back to command's default
+    return default
 
 
 def format_result_table(result: SearchResult) -> Table:
@@ -317,6 +365,7 @@ def _print_cached_result(
 
 @check_app.command("movie")
 def check_movie(
+    typer_ctx: typer.Context,
     movie: Annotated[str, typer.Argument(help="Movie ID or name to check")],
     criteria: Annotated[
         str,
@@ -327,8 +376,8 @@ def check_movie(
         ),
     ] = "4k",
     output_format: Annotated[
-        OutputFormat, typer.Option("--format", "-f", help="Output format")
-    ] = OutputFormat.TABLE,
+        OutputFormat | None, typer.Option("--format", "-f", help="Output format")
+    ] = None,
     no_tag: Annotated[bool, typer.Option("--no-tag", help="Disable automatic tagging")] = False,
     dry_run: Annotated[
         bool,
@@ -364,6 +413,8 @@ def check_movie(
         filtarr check movie 123 --dry-run
         filtarr check movie 123 --force
     """
+    effective_format = _get_effective_format(typer_ctx, output_format, OutputFormat.TABLE)
+
     try:
         # Validate criteria
         criteria_lower = criteria.lower()
@@ -400,7 +451,7 @@ def check_movie(
         if not force and not dry_run:
             cached = state_manager.get_cached_result("movie", movie_id, config.state.ttl_hours)
             if cached is not None:
-                _print_cached_result("movie", movie_id, cached, output_format)
+                _print_cached_result("movie", movie_id, cached, effective_format)
                 raise typer.Exit(0 if cached.result == "available" else 1)
 
         # Perform the actual check
@@ -422,7 +473,7 @@ def check_movie(
                 result.tag_result.tag_applied,
             )
 
-        print_result(result, output_format)
+        print_result(result, effective_format)
         raise typer.Exit(0 if result.has_match else 1)
     except typer.Exit:
         raise
@@ -436,6 +487,7 @@ def check_movie(
 
 @check_app.command("series")
 def check_series_cmd(
+    typer_ctx: typer.Context,
     series: Annotated[str, typer.Argument(help="Series ID or name to check")],
     criteria: Annotated[
         str,
@@ -453,8 +505,8 @@ def check_series_cmd(
         str, typer.Option("--strategy", help="Sampling strategy: recent, distributed, or all")
     ] = "recent",
     output_format: Annotated[
-        OutputFormat, typer.Option("--format", "-f", help="Output format")
-    ] = OutputFormat.TABLE,
+        OutputFormat | None, typer.Option("--format", "-f", help="Output format")
+    ] = None,
     no_tag: Annotated[bool, typer.Option("--no-tag", help="Disable automatic tagging")] = False,
     dry_run: Annotated[
         bool,
@@ -483,6 +535,8 @@ def check_series_cmd(
         filtarr check series 456 --dry-run
         filtarr check series 456 --force
     """
+    effective_format = _get_effective_format(typer_ctx, output_format, OutputFormat.TABLE)
+
     try:
         # Validate criteria
         criteria_lower = criteria.lower()
@@ -541,7 +595,7 @@ def check_series_cmd(
         if not force and not dry_run:
             cached = state_manager.get_cached_result("series", series_id, config.state.ttl_hours)
             if cached is not None:
-                _print_cached_result("series", series_id, cached, output_format)
+                _print_cached_result("series", series_id, cached, effective_format)
                 raise typer.Exit(0 if cached.result == "available" else 1)
 
         # Perform the actual check
@@ -568,7 +622,7 @@ def check_series_cmd(
                 result.tag_result.tag_applied,
             )
 
-        print_result(result, output_format)
+        print_result(result, effective_format)
         raise typer.Exit(0 if result.has_match else 1)
     except typer.Exit:
         raise
@@ -612,6 +666,7 @@ class BatchContext:
     output_format: OutputFormat
     console: Console
     error_console: Console
+    timestamps: bool = True
 
     # Counters (mutable)
     results: list[SearchResult] = field(default_factory=list)
@@ -619,6 +674,13 @@ class BatchContext:
     skipped_count: int = 0
     processed_this_run: int = 0
     batch_limit_reached: bool = False
+
+    # Output formatting for error/warning collection (initialized in __post_init__)
+    formatter: OutputFormatter = field(default_factory=OutputFormatter)
+
+    def __post_init__(self) -> None:
+        """Initialize formatter with timestamps setting."""
+        self.formatter = OutputFormatter(timestamps=self.timestamps)
 
 
 def _parse_batch_file(file: Path, error_console: Console) -> tuple[list[tuple[str, str]], set[str]]:
@@ -962,6 +1024,26 @@ def _is_transient_error(error: Exception) -> bool:
     return not isinstance(error, ConfigurationError)
 
 
+def _format_error_message(error: Exception) -> str:
+    """Format an error message for display and collection.
+
+    Args:
+        error: The exception to format
+
+    Returns:
+        A concise error message string
+    """
+    if isinstance(error, httpx.HTTPStatusError):
+        return f"HTTP {error.response.status_code}"
+    if isinstance(error, httpx.ConnectError):
+        return "Connection failed"
+    if isinstance(error, httpx.TimeoutException):
+        return "Request timed out"
+    if isinstance(error, ConfigurationError):
+        return str(error)
+    return str(error)
+
+
 async def _process_single_item(
     ctx: BatchContext,
     item_type: str,
@@ -974,6 +1056,11 @@ async def _process_single_item(
     Returns:
         True if processing should continue, False if batch limit reached
     """
+    # Create display name for error messages
+    display_name = (
+        item_name if item_name and not item_name.startswith("ID:") else f"{item_type}:{item_id}"
+    )
+
     try:
         result = await _process_batch_item(ctx, item_type, item_id, item_name)
 
@@ -990,20 +1077,28 @@ async def _process_single_item(
                 return False
 
     except ConfigurationError as e:
-        ctx.error_console.print(f"[red]Config error for {item_type}:{item_name}:[/red] {e}")
+        error_msg = _format_error_message(e)
+        ctx.error_console.print(f"[red]Config error for {display_name}:[/red] {error_msg}")
+        ctx.formatter.add_error(display_name, error_msg)
         # Config errors are permanent - mark as processed (retry won't help)
         if batch_progress and item_id > 0:
             ctx.state_manager.update_batch_progress(item_id)
     except httpx.HTTPStatusError as e:
-        ctx.error_console.print(f"[red]Error checking {item_type}:{item_name}:[/red] {e}")
+        error_msg = _format_error_message(e)
+        ctx.error_console.print(f"[red]Error checking {display_name}:[/red] {error_msg}")
+        ctx.formatter.add_error(display_name, error_msg)
         # Only mark as processed if NOT a transient error (allows retry for 5xx, 429)
         if not _is_transient_error(e) and batch_progress and item_id > 0:
             ctx.state_manager.update_batch_progress(item_id)
     except (httpx.ConnectError, httpx.TimeoutException) as e:
-        ctx.error_console.print(f"[red]Network error for {item_type}:{item_name}:[/red] {e}")
+        error_msg = _format_error_message(e)
+        ctx.error_console.print(f"[red]Network error for {display_name}:[/red] {error_msg}")
+        ctx.formatter.add_error(display_name, error_msg)
         # Network errors are transient - don't mark as processed (allows retry)
     except Exception as e:
-        ctx.error_console.print(f"[red]Error checking {item_type}:{item_name}:[/red] {e}")
+        error_msg = _format_error_message(e)
+        ctx.error_console.print(f"[red]Error checking {display_name}:[/red] {error_msg}")
+        ctx.formatter.add_error(display_name, error_msg)
         # Unknown errors - don't mark as processed (safer default, allows retry)
 
     return True
@@ -1049,6 +1144,12 @@ async def _run_batch_checks(
             batch_id = str(uuid.uuid4())[:8]
             batch_progress = ctx.state_manager.start_batch(batch_id, batch_type, len(all_items))
 
+    # Calculate progress bar total: use batch_size if set, otherwise total items
+    # This makes the progress bar show "3/5" instead of "3/100" when batch_size=5
+    progress_total = len(all_items)
+    if ctx.batch_size > 0:
+        progress_total = min(ctx.batch_size, len(all_items))
+
     # Process items with progress bar
     # Use TimeElapsedColumn instead of TimeRemainingColumn to avoid erratic ETA
     # calculations when errors/retries cause highly variable processing times
@@ -1058,9 +1159,9 @@ async def _run_batch_checks(
         TaskProgressColumn(),
         TimeElapsedColumn(),
         console=ctx.console,
-        disable=len(all_items) < 3,
+        disable=progress_total < 3,
     ) as progress:
-        task = progress.add_task("Checking items...", total=len(all_items))
+        task = progress.add_task("Checking items...", total=progress_total)
 
         for item_type, item_id, item_name in all_items:
             # Skip if already processed (resume mode)
@@ -1167,7 +1268,7 @@ def _prepare_file_items(
 
 
 def _print_batch_summary(ctx: BatchContext) -> None:
-    """Print batch summary."""
+    """Print batch summary including any collected errors."""
     console.print()
     display_criteria = _format_result_type(ctx.search_criteria.value)
     summary_parts = [
@@ -1179,9 +1280,22 @@ def _print_batch_summary(ctx: BatchContext) -> None:
         summary_parts.append(f"batch limit ({ctx.batch_size}) reached - run again to continue")
     console.print(f"[bold]Summary:[/bold] {', '.join(summary_parts)}")
 
+    # Print warnings and errors summary from formatter
+    summary_lines = ctx.formatter.format_summary()
+    for line in summary_lines:
+        if line.startswith("Warnings"):
+            console.print(f"[yellow]{line}[/yellow]")
+        elif line.startswith("Errors"):
+            console.print(f"[red]{line}[/red]")
+        elif line.startswith("  -"):
+            console.print(f"[dim]{line}[/dim]")
+        else:
+            console.print(line)
+
 
 @check_app.command("batch")
 def check_batch(
+    typer_ctx: typer.Context,
     file: Annotated[
         Path | None, typer.Option("--file", "-f", help="File with items to check (one per line)")
     ] = None,
@@ -1199,9 +1313,7 @@ def check_batch(
             help="Search criteria (movie-only criteria not allowed with --all-series)",
         ),
     ] = "4k",
-    format: Annotated[
-        OutputFormat, typer.Option("--format", help="Output format")
-    ] = OutputFormat.SIMPLE,
+    format: Annotated[OutputFormat | None, typer.Option("--format", help="Output format")] = None,
     seasons: Annotated[
         int, typer.Option("--seasons", "-s", help="Seasons to check for series")
     ] = 3,
@@ -1290,6 +1402,12 @@ def check_batch(
         file, include_rechecks, state_manager, config.tags.recheck_days
     )
 
+    # Get timestamps flag from global context (defaults to True if not set)
+    timestamps = typer_ctx.obj.get("timestamps", True) if typer_ctx.obj else True
+
+    # Get effective output format respecting global flag
+    effective_format = _get_effective_format(typer_ctx, format, OutputFormat.SIMPLE)
+
     # Create batch context
     ctx = BatchContext(
         config=config,
@@ -1302,9 +1420,10 @@ def check_batch(
         dry_run=dry_run,
         batch_size=batch_size,
         delay=delay,
-        output_format=format,
+        output_format=effective_format,
         console=console,
         error_console=error_console,
+        timestamps=timestamps,
     )
 
     # Run batch checks
@@ -1336,14 +1455,17 @@ def _get_scheduler_manager() -> SchedulerManager:
 
 @schedule_app.command("list")
 def schedule_list(
+    typer_ctx: typer.Context,
     enabled_only: Annotated[
         bool, typer.Option("--enabled-only", help="Show only enabled schedules")
     ] = False,
     output_format: Annotated[
-        OutputFormat, typer.Option("--format", "-f", help="Output format")
-    ] = OutputFormat.TABLE,
+        OutputFormat | None, typer.Option("--format", "-f", help="Output format")
+    ] = None,
 ) -> None:
     """List all configured schedules."""
+    effective_format = _get_effective_format(typer_ctx, output_format, OutputFormat.TABLE)
+
     from filtarr.scheduler import format_trigger_description, get_next_run_time
 
     manager = _get_scheduler_manager()
@@ -1356,7 +1478,7 @@ def schedule_list(
         console.print("[dim]No schedules configured[/dim]")
         raise typer.Exit(0)
 
-    if output_format == OutputFormat.JSON:
+    if effective_format == OutputFormat.JSON:
         data = [s.model_dump(mode="json") for s in schedules]
         console.print(json.dumps(data, indent=2, default=str))
     else:
@@ -1596,15 +1718,18 @@ def schedule_run(
 
 @schedule_app.command("history")
 def schedule_history(
+    typer_ctx: typer.Context,
     name: Annotated[
         str | None, typer.Option("--name", "-n", help="Filter by schedule name")
     ] = None,
     limit: Annotated[int, typer.Option("--limit", "-l", help="Maximum records to show")] = 20,
     output_format: Annotated[
-        OutputFormat, typer.Option("--format", "-f", help="Output format")
-    ] = OutputFormat.TABLE,
+        OutputFormat | None, typer.Option("--format", "-f", help="Output format")
+    ] = None,
 ) -> None:
     """Show schedule run history."""
+    effective_format = _get_effective_format(typer_ctx, output_format, OutputFormat.TABLE)
+
     manager = _get_scheduler_manager()
     history = manager.get_history(schedule_name=name, limit=limit)
 
@@ -1612,7 +1737,7 @@ def schedule_history(
         console.print("[dim]No history found[/dim]")
         raise typer.Exit(0)
 
-    if output_format == OutputFormat.JSON:
+    if effective_format == OutputFormat.JSON:
         data = [r.model_dump(mode="json") for r in history]
         console.print(json.dumps(data, indent=2, default=str))
     else:
@@ -1797,6 +1922,9 @@ def serve(
     # Get log level from global context (set by app callback)
     effective_log_level = ctx.obj.get("log_level", "INFO") if ctx.obj else "INFO"
 
+    # Get output format from global context (set by app callback)
+    output_format = ctx.obj.get("output_format", "text") if ctx.obj else "text"
+
     console.print(
         f"[bold green]filtarr v{__version__} - Starting webhook server on {server_host}:{server_port}[/bold green]"
     )
@@ -1831,6 +1959,7 @@ def serve(
         config=config,
         log_level=effective_log_level,
         scheduler_enabled=scheduler_enabled,
+        output_format=output_format,
     )
 
 

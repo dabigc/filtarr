@@ -2030,3 +2030,159 @@ api_key = "home-config-key"
 
         assert config.radarr is not None
         assert config.radarr.api_key == "home-config-key"
+
+
+class TestLoggingConfigFields:
+    """Tests for LoggingConfig timestamps and output_format fields."""
+
+    def test_logging_config_has_timestamps_field(self) -> None:
+        """LoggingConfig should have timestamps field defaulting to True."""
+        config = LoggingConfig()
+        assert config.timestamps is True
+
+    def test_logging_config_has_output_format_field(self) -> None:
+        """LoggingConfig should have output_format field defaulting to 'text'."""
+        config = LoggingConfig()
+        assert config.output_format == "text"
+
+    def test_logging_config_output_format_validation(self) -> None:
+        """LoggingConfig should validate output_format values."""
+        # Valid values
+        LoggingConfig(output_format="text")
+        LoggingConfig(output_format="json")
+
+        # Invalid value
+        with pytest.raises(ConfigurationError):
+            LoggingConfig(output_format="xml")
+
+    def test_logging_config_output_format_case_insensitive(self) -> None:
+        """output_format should be case insensitive."""
+        config = LoggingConfig(output_format="JSON")
+        assert config.output_format == "json"
+
+    def test_logging_config_timestamps_can_be_set_false(self) -> None:
+        """LoggingConfig should allow timestamps to be set to False."""
+        config = LoggingConfig(timestamps=False)
+        assert config.timestamps is False
+
+    def test_logging_config_output_format_text_normalized(self) -> None:
+        """output_format 'TEXT' should be normalized to 'text'."""
+        config = LoggingConfig(output_format="TEXT")
+        assert config.output_format == "text"
+
+    def test_logging_config_invalid_output_format_error_message(self) -> None:
+        """Error message should include valid output format options."""
+        with pytest.raises(ConfigurationError) as exc_info:
+            LoggingConfig(output_format="yaml")
+        assert "json" in str(exc_info.value)
+        assert "text" in str(exc_info.value)
+
+    def test_logging_config_from_toml_with_timestamps(self, tmp_path: Path) -> None:
+        """Should load timestamps from TOML file."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[logging]
+level = "INFO"
+timestamps = false
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            config = Config.load()
+
+        assert config.logging.timestamps is False
+
+    def test_logging_config_from_toml_with_output_format(self, tmp_path: Path) -> None:
+        """Should load output_format from TOML file."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[logging]
+level = "INFO"
+output_format = "json"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            config = Config.load()
+
+        assert config.logging.output_format == "json"
+
+    def test_logging_config_from_env_timestamps(self, tmp_path: Path) -> None:
+        """Should load timestamps from FILTARR_LOG_TIMESTAMPS env var."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_LOG_TIMESTAMPS": "false"},
+                clear=True,
+            ),
+        ):
+            config = Config.load()
+
+        assert config.logging.timestamps is False
+
+    def test_logging_config_from_env_output_format(self, tmp_path: Path) -> None:
+        """Should load output_format from FILTARR_LOG_OUTPUT_FORMAT env var."""
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_LOG_OUTPUT_FORMAT": "json"},
+                clear=True,
+            ),
+        ):
+            config = Config.load()
+
+        assert config.logging.output_format == "json"
+
+    def test_logging_config_env_overrides_file_timestamps(self, tmp_path: Path) -> None:
+        """FILTARR_LOG_TIMESTAMPS should override file config."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[logging]
+timestamps = true
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_LOG_TIMESTAMPS": "false"},
+                clear=True,
+            ),
+        ):
+            config = Config.load()
+
+        assert config.logging.timestamps is False
+
+    def test_logging_config_env_overrides_file_output_format(self, tmp_path: Path) -> None:
+        """FILTARR_LOG_OUTPUT_FORMAT should override file config."""
+        config_dir = tmp_path / ".config" / "filtarr"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.toml"
+        config_file.write_text("""
+[logging]
+output_format = "text"
+""")
+
+        with (
+            patch.object(Path, "home", return_value=tmp_path),
+            patch.dict(
+                os.environ,
+                {"FILTARR_LOG_OUTPUT_FORMAT": "json"},
+                clear=True,
+            ),
+        ):
+            config = Config.load()
+
+        assert config.logging.output_format == "json"

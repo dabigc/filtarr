@@ -154,6 +154,12 @@ def configure_logging(
     root_logger.setLevel(log_level)
     root_logger.addHandler(handler)
 
+    # Suppress third-party library noise at INFO and above
+    if log_level > logging.DEBUG:
+        third_party_loggers = ["httpx", "uvicorn", "uvicorn.access", "uvicorn.error"]
+        for logger_name in third_party_loggers:
+            logging.getLogger(logger_name).setLevel(logging.WARNING)
+
 
 def add_filter_to_existing_handlers() -> None:
     """Add the SensitiveDataFilter to all existing root handlers.

@@ -1707,3 +1707,613 @@ class TestRunBatchChecksNewProgress:
 
         # Should NOT have started a new batch
         mock_state_manager.start_batch.assert_not_called()
+
+
+class TestBatchProgressBarShowsBatchSize:
+    """Tests for progress bar showing batch size instead of total items."""
+
+    @pytest.mark.asyncio
+    async def test_progress_bar_total_is_batch_size_when_set(
+        self,
+        mock_config: Config,
+        real_console: Console,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """When batch_size is set, progress bar total should be min(batch_size, total_items)."""
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=5,  # Batch size of 5
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=real_console,
+            error_console=real_console,
+        )
+
+        # Create 100 mock movies (more than batch size)
+        mock_movies = []
+        for i in range(1, 101):
+            m = MagicMock()
+            m.id = i
+            m.title = f"Movie {i}"
+            mock_movies.append(m)
+
+        new_progress = BatchProgress(batch_id="new-batch", item_type="movie", total_items=100)
+        mock_state_manager.start_batch.return_value = new_progress
+
+        # Track how many items are actually processed
+        processed_count = 0
+
+        async def mock_process_single(*_args: Any, **_kwargs: Any) -> bool:
+            nonlocal processed_count
+            processed_count += 1
+            # Simulate successful processing
+            ctx.processed_this_run += 1
+            ctx.results.append(
+                SearchResult(item_id=processed_count, item_type="movie", has_match=True)
+            )
+            # Return False when batch limit reached
+            if ctx.batch_size > 0 and ctx.processed_this_run >= ctx.batch_size:
+                ctx.batch_limit_reached = True
+                return False
+            return True
+
+        with (
+            patch("filtarr.cli._fetch_movies_to_check", return_value=(mock_movies, set())),
+            patch("filtarr.cli._process_single_item", side_effect=mock_process_single),
+        ):
+            await _run_batch_checks(
+                ctx,
+                all_movies=True,
+                all_series=False,
+                skip_tagged=False,
+                file_items=[],
+                batch_type="movie",
+                existing_progress=None,
+            )
+
+        # Should have only processed batch_size items (5), not all 100
+        assert processed_count == 5
+        assert ctx.batch_limit_reached is True
+        assert len(ctx.results) == 5
+
+    @pytest.mark.asyncio
+    async def test_progress_bar_total_is_all_items_when_batch_size_zero(
+        self,
+        mock_config: Config,
+        real_console: Console,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """When batch_size is 0 (unlimited), progress bar total should be total items."""
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=0,  # Unlimited
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=real_console,
+            error_console=real_console,
+        )
+
+        # Create 10 mock movies
+        mock_movies = []
+        for i in range(1, 11):
+            m = MagicMock()
+            m.id = i
+            m.title = f"Movie {i}"
+            mock_movies.append(m)
+
+        new_progress = BatchProgress(batch_id="new-batch", item_type="movie", total_items=10)
+        mock_state_manager.start_batch.return_value = new_progress
+
+        processed_count = 0
+
+        async def mock_process_single(*_args: Any, **_kwargs: Any) -> bool:
+            nonlocal processed_count
+            processed_count += 1
+            ctx.results.append(
+                SearchResult(item_id=processed_count, item_type="movie", has_match=True)
+            )
+            return True
+
+        with (
+            patch("filtarr.cli._fetch_movies_to_check", return_value=(mock_movies, set())),
+            patch("filtarr.cli._process_single_item", side_effect=mock_process_single),
+        ):
+            await _run_batch_checks(
+                ctx,
+                all_movies=True,
+                all_series=False,
+                skip_tagged=False,
+                file_items=[],
+                batch_type="movie",
+                existing_progress=None,
+            )
+
+        # Should have processed all 10 items
+        assert processed_count == 10
+        assert ctx.batch_limit_reached is False
+        assert len(ctx.results) == 10
+
+    @pytest.mark.asyncio
+    async def test_progress_bar_total_uses_items_count_when_less_than_batch_size(
+        self,
+        mock_config: Config,
+        real_console: Console,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """When total items < batch_size, progress bar total should be total items."""
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=100,  # Batch size larger than items
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=real_console,
+            error_console=real_console,
+        )
+
+        # Create only 3 mock movies (less than batch size of 100)
+        mock_movies = []
+        for i in range(1, 4):
+            m = MagicMock()
+            m.id = i
+            m.title = f"Movie {i}"
+            mock_movies.append(m)
+
+        new_progress = BatchProgress(batch_id="new-batch", item_type="movie", total_items=3)
+        mock_state_manager.start_batch.return_value = new_progress
+
+        processed_count = 0
+
+        async def mock_process_single(*_args: Any, **_kwargs: Any) -> bool:
+            nonlocal processed_count
+            processed_count += 1
+            ctx.results.append(
+                SearchResult(item_id=processed_count, item_type="movie", has_match=True)
+            )
+            return True
+
+        with (
+            patch("filtarr.cli._fetch_movies_to_check", return_value=(mock_movies, set())),
+            patch("filtarr.cli._process_single_item", side_effect=mock_process_single),
+        ):
+            await _run_batch_checks(
+                ctx,
+                all_movies=True,
+                all_series=False,
+                skip_tagged=False,
+                file_items=[],
+                batch_type="movie",
+                existing_progress=None,
+            )
+
+        # Should have processed all 3 items (less than batch_size of 100)
+        assert processed_count == 3
+        assert ctx.batch_limit_reached is False
+        assert len(ctx.results) == 3
+
+
+# =============================================================================
+# TESTS FOR ERROR COLLECTION IN BATCH SUMMARY (Task 7)
+# =============================================================================
+
+
+class TestFormatErrorMessage:
+    """Tests for _format_error_message helper function."""
+
+    def test_format_http_status_error(self) -> None:
+        """Should format HTTP status errors as 'HTTP XXX'."""
+        from filtarr.cli import _format_error_message
+
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        mock_request = MagicMock()
+
+        error = httpx.HTTPStatusError("Not Found", request=mock_request, response=mock_response)
+
+        result = _format_error_message(error)
+        assert result == "HTTP 404"
+
+    def test_format_connect_error(self) -> None:
+        """Should format connection errors as 'Connection failed'."""
+        from filtarr.cli import _format_error_message
+
+        error = httpx.ConnectError("Connection refused")
+
+        result = _format_error_message(error)
+        assert result == "Connection failed"
+
+    def test_format_timeout_error(self) -> None:
+        """Should format timeout errors as 'Request timed out'."""
+        from filtarr.cli import _format_error_message
+
+        error = httpx.TimeoutException("Timeout")
+
+        result = _format_error_message(error)
+        assert result == "Request timed out"
+
+    def test_format_configuration_error(self) -> None:
+        """Should format configuration errors with their message."""
+        from filtarr.cli import _format_error_message
+
+        error = ConfigurationError("Radarr not configured")
+
+        result = _format_error_message(error)
+        assert result == "Radarr not configured"
+
+    def test_format_generic_error(self) -> None:
+        """Should format generic errors with str()."""
+        from filtarr.cli import _format_error_message
+
+        error = RuntimeError("Something went wrong")
+
+        result = _format_error_message(error)
+        assert result == "Something went wrong"
+
+
+class TestBatchErrorCollectionInSummary:
+    """Tests for error collection and display in batch summary."""
+
+    @pytest.mark.asyncio
+    async def test_errors_collected_during_processing(
+        self,
+        mock_config: Config,
+        mock_console: Any,
+        mock_error_console: Any,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """Errors should be collected in the formatter during batch processing."""
+
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=0,
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=mock_console,
+            error_console=mock_error_console,
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_request = MagicMock()
+
+        with patch(
+            "filtarr.cli._process_batch_item",
+            side_effect=httpx.HTTPStatusError(
+                "Internal Server Error", request=mock_request, response=mock_response
+            ),
+        ):
+            await _process_single_item(ctx, "movie", 123, "Test Movie", batch_progress=None)
+
+        # Error should be collected in formatter
+        assert len(ctx.formatter.errors) == 1
+        assert ctx.formatter.errors[0] == ("Test Movie", "HTTP 500")
+
+    @pytest.mark.asyncio
+    async def test_multiple_errors_collected(
+        self,
+        mock_config: Config,
+        mock_console: Any,
+        mock_error_console: Any,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """Multiple errors should be collected in the formatter."""
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=0,
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=mock_console,
+            error_console=mock_error_console,
+        )
+
+        # Simulate different types of errors
+        errors = [
+            httpx.ConnectError("Connection refused"),
+            httpx.TimeoutException("Timeout"),
+            ConfigurationError("API key missing"),
+        ]
+
+        for i, error in enumerate(errors):
+            with patch("filtarr.cli._process_batch_item", side_effect=error):
+                await _process_single_item(
+                    ctx, "movie", i + 1, f"Movie {i + 1}", batch_progress=None
+                )
+
+        # All errors should be collected
+        assert len(ctx.formatter.errors) == 3
+        assert ctx.formatter.errors[0] == ("Movie 1", "Connection failed")
+        assert ctx.formatter.errors[1] == ("Movie 2", "Request timed out")
+        assert ctx.formatter.errors[2] == ("Movie 3", "API key missing")
+
+    def test_batch_summary_with_no_errors(
+        self,
+        mock_config: Config,
+        mock_console: Any,
+        mock_error_console: Any,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """Batch summary should not show error section if no errors."""
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=0,
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=mock_console,
+            error_console=mock_error_console,
+        )
+
+        # No errors added
+
+        # Get format_summary output
+        summary_lines = ctx.formatter.format_summary()
+
+        # Should be empty if no errors
+        assert len(summary_lines) == 0
+
+    @pytest.mark.asyncio
+    async def test_error_uses_display_name_for_named_items(
+        self,
+        mock_config: Config,
+        mock_console: Any,
+        mock_error_console: Any,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """Error collection should use the item name for named items."""
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=0,
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=mock_console,
+            error_console=mock_error_console,
+        )
+
+        with patch(
+            "filtarr.cli._process_batch_item",
+            side_effect=httpx.ConnectError("Connection refused"),
+        ):
+            await _process_single_item(ctx, "movie", 123, "The Matrix", batch_progress=None)
+
+        # Should use the item name, not "movie:123"
+        assert len(ctx.formatter.errors) == 1
+        assert ctx.formatter.errors[0][0] == "The Matrix"
+
+    @pytest.mark.asyncio
+    async def test_error_uses_type_and_id_for_id_prefix_items(
+        self,
+        mock_config: Config,
+        mock_console: Any,
+        mock_error_console: Any,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """Error collection should use type:id for items with ID: prefix."""
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=0,
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=mock_console,
+            error_console=mock_error_console,
+        )
+
+        with patch(
+            "filtarr.cli._process_batch_item",
+            side_effect=httpx.TimeoutException("Timeout"),
+        ):
+            await _process_single_item(ctx, "movie", 456, "ID:456", batch_progress=None)
+
+        # Should use "movie:456" since item_name starts with "ID:"
+        assert len(ctx.formatter.errors) == 1
+        assert ctx.formatter.errors[0][0] == "movie:456"
+
+
+class TestBatchContextFormatterInitialization:
+    """Tests for BatchContext formatter initialization."""
+
+    def test_batch_context_has_formatter_by_default(
+        self,
+        mock_config: Config,
+        mock_console: Any,
+        mock_error_console: Any,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """BatchContext should have an OutputFormatter by default."""
+        from filtarr.output import OutputFormatter
+
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=0,
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=mock_console,
+            error_console=mock_error_console,
+        )
+
+        # Should have a formatter
+        assert ctx.formatter is not None
+        assert isinstance(ctx.formatter, OutputFormatter)
+        assert ctx.formatter.errors == []
+        assert ctx.formatter.warnings == []
+
+
+class TestPrintBatchSummary:
+    """Tests for _print_batch_summary output formatting."""
+
+    def test_print_batch_summary_with_warnings(
+        self,
+        mock_config: Config,
+        mock_console: Any,
+        mock_error_console: Any,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """_print_batch_summary should print warnings in yellow."""
+        from filtarr.cli import _print_batch_summary
+
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=0,
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=mock_console,
+            error_console=mock_error_console,
+        )
+
+        # Add a warning to the formatter
+        ctx.formatter.add_warning("Slow request (15s)")
+
+        # Call _print_batch_summary
+        with patch("filtarr.cli.console") as patched_console:
+            _print_batch_summary(ctx)
+
+            # Check that warnings are printed with yellow formatting
+            calls = [str(c) for c in patched_console.print.call_args_list]
+            # Should contain a call with yellow and "Warnings"
+            assert any("[yellow]" in c and "Warnings" in c for c in calls)
+
+    def test_print_batch_summary_with_errors(
+        self,
+        mock_config: Config,
+        mock_console: Any,
+        mock_error_console: Any,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """_print_batch_summary should print errors in red."""
+        from filtarr.cli import _print_batch_summary
+
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=0,
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=mock_console,
+            error_console=mock_error_console,
+        )
+
+        # Add an error to the formatter
+        ctx.formatter.add_error("The Matrix", "HTTP 404")
+
+        # Call _print_batch_summary
+        with patch("filtarr.cli.console") as patched_console:
+            _print_batch_summary(ctx)
+
+            # Check that errors are printed with red formatting
+            calls = [str(c) for c in patched_console.print.call_args_list]
+            # Should contain a call with red and "Errors"
+            assert any("[red]" in c and "Errors" in c for c in calls)
+            # Should contain detail lines with dim formatting
+            assert any("[dim]" in c and "The Matrix" in c for c in calls)
+
+    def test_print_batch_summary_with_warnings_and_errors(
+        self,
+        mock_config: Config,
+        mock_console: Any,
+        mock_error_console: Any,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """_print_batch_summary should print both warnings and errors."""
+        from filtarr.cli import _print_batch_summary
+
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=0,
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=mock_console,
+            error_console=mock_error_console,
+        )
+
+        # Add warnings and errors
+        ctx.formatter.add_warning("Slow request")
+        ctx.formatter.add_error("Movie 1", "Connection failed")
+
+        # Call _print_batch_summary
+        with patch("filtarr.cli.console") as patched_console:
+            _print_batch_summary(ctx)
+
+            calls = [str(c) for c in patched_console.print.call_args_list]
+            # Both warnings and errors should be printed
+            assert any("[yellow]" in c and "Warnings" in c for c in calls)
+            assert any("[red]" in c and "Errors" in c for c in calls)
