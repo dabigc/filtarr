@@ -157,6 +157,37 @@ def format_result_json(result: SearchResult) -> str:
     return json.dumps(data, indent=2)
 
 
+def _get_effective_format(
+    typer_ctx: typer.Context | None,
+    explicit_format: OutputFormat | None,
+    default: OutputFormat,
+) -> OutputFormat:
+    """Get effective output format respecting global flag.
+
+    Priority: explicit --format > global --output-format > command default.
+
+    Args:
+        typer_ctx: Typer context with global options.
+        explicit_format: Explicitly passed --format value (None if not specified).
+        default: Command's default format.
+
+    Returns:
+        The effective OutputFormat to use.
+    """
+    # Explicit --format always wins
+    if explicit_format is not None:
+        return explicit_format
+
+    # Check global --output-format
+    if typer_ctx and typer_ctx.obj:
+        global_format = typer_ctx.obj.get("output_format", "text")
+        if global_format == "json":
+            return OutputFormat.JSON
+
+    # Fall back to command's default
+    return default
+
+
 def format_result_table(result: SearchResult) -> Table:
     """Format result as a rich table."""
     if result.item_name:
