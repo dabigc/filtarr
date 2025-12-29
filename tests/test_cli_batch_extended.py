@@ -2196,3 +2196,124 @@ class TestBatchContextFormatterInitialization:
         assert isinstance(ctx.formatter, OutputFormatter)
         assert ctx.formatter.errors == []
         assert ctx.formatter.warnings == []
+
+
+class TestPrintBatchSummary:
+    """Tests for _print_batch_summary output formatting."""
+
+    def test_print_batch_summary_with_warnings(
+        self,
+        mock_config: Config,
+        mock_console: Any,
+        mock_error_console: Any,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """_print_batch_summary should print warnings in yellow."""
+        from filtarr.cli import _print_batch_summary
+
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=0,
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=mock_console,
+            error_console=mock_error_console,
+        )
+
+        # Add a warning to the formatter
+        ctx.formatter.add_warning("Slow request (15s)")
+
+        # Call _print_batch_summary
+        with patch("filtarr.cli.console") as patched_console:
+            _print_batch_summary(ctx)
+
+            # Check that warnings are printed with yellow formatting
+            calls = [str(c) for c in patched_console.print.call_args_list]
+            # Should contain a call with yellow and "Warnings"
+            assert any("[yellow]" in c and "Warnings" in c for c in calls)
+
+    def test_print_batch_summary_with_errors(
+        self,
+        mock_config: Config,
+        mock_console: Any,
+        mock_error_console: Any,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """_print_batch_summary should print errors in red."""
+        from filtarr.cli import _print_batch_summary
+
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=0,
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=mock_console,
+            error_console=mock_error_console,
+        )
+
+        # Add an error to the formatter
+        ctx.formatter.add_error("The Matrix", "HTTP 404")
+
+        # Call _print_batch_summary
+        with patch("filtarr.cli.console") as patched_console:
+            _print_batch_summary(ctx)
+
+            # Check that errors are printed with red formatting
+            calls = [str(c) for c in patched_console.print.call_args_list]
+            # Should contain a call with red and "Errors"
+            assert any("[red]" in c and "Errors" in c for c in calls)
+            # Should contain detail lines with dim formatting
+            assert any("[dim]" in c and "The Matrix" in c for c in calls)
+
+    def test_print_batch_summary_with_warnings_and_errors(
+        self,
+        mock_config: Config,
+        mock_console: Any,
+        mock_error_console: Any,
+        mock_state_manager: MagicMock,
+    ) -> None:
+        """_print_batch_summary should print both warnings and errors."""
+        from filtarr.cli import _print_batch_summary
+
+        ctx = BatchContext(
+            config=mock_config,
+            state_manager=mock_state_manager,
+            search_criteria=SearchCriteria.FOUR_K,
+            criteria_str="4k",
+            sampling_strategy=SamplingStrategy.RECENT,
+            seasons=3,
+            apply_tags=False,
+            dry_run=False,
+            batch_size=0,
+            delay=0,
+            output_format=OutputFormat.SIMPLE,
+            console=mock_console,
+            error_console=mock_error_console,
+        )
+
+        # Add warnings and errors
+        ctx.formatter.add_warning("Slow request")
+        ctx.formatter.add_error("Movie 1", "Connection failed")
+
+        # Call _print_batch_summary
+        with patch("filtarr.cli.console") as patched_console:
+            _print_batch_summary(ctx)
+
+            calls = [str(c) for c in patched_console.print.call_args_list]
+            # Both warnings and errors should be printed
+            assert any("[yellow]" in c and "Warnings" in c for c in calls)
+            assert any("[red]" in c and "Errors" in c for c in calls)
