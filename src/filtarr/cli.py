@@ -1313,9 +1313,7 @@ def check_batch(
             help="Search criteria (movie-only criteria not allowed with --all-series)",
         ),
     ] = "4k",
-    format: Annotated[
-        OutputFormat, typer.Option("--format", help="Output format")
-    ] = OutputFormat.SIMPLE,
+    format: Annotated[OutputFormat | None, typer.Option("--format", help="Output format")] = None,
     seasons: Annotated[
         int, typer.Option("--seasons", "-s", help="Seasons to check for series")
     ] = 3,
@@ -1407,6 +1405,9 @@ def check_batch(
     # Get timestamps flag from global context (defaults to True if not set)
     timestamps = typer_ctx.obj.get("timestamps", True) if typer_ctx.obj else True
 
+    # Get effective output format respecting global flag
+    effective_format = _get_effective_format(typer_ctx, format, OutputFormat.SIMPLE)
+
     # Create batch context
     ctx = BatchContext(
         config=config,
@@ -1419,7 +1420,7 @@ def check_batch(
         dry_run=dry_run,
         batch_size=batch_size,
         delay=delay,
-        output_format=format,
+        output_format=effective_format,
         console=console,
         error_console=error_console,
         timestamps=timestamps,
