@@ -92,7 +92,7 @@ def _format_check_outcome(
 
 async def _process_movie_check(movie_id: int, movie_title: str, config: Config) -> None:
     """Background task to check 4K availability for a movie."""
-    logger.info(f"[{movie_title}] Starting availability check (id={movie_id})...")
+    logger.info("Webhook: Radarr check - %s", movie_title)
 
     try:
         # Check TTL cache first
@@ -103,13 +103,13 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
                     "4K available" if cached.result == "available" else "4K not available"
                 )
                 logger.info(
-                    f"[{movie_title}] Skipped - recently checked "
-                    f"({cached.last_checked.isoformat()}), result: {cached_outcome}"
+                    "Check result: skipped (recently checked), %s",
+                    cached_outcome,
                 )
                 return
 
         radarr_config = config.require_radarr()
-        logger.debug(f"[{movie_title}] Checking releases against criteria: 4K")
+        logger.debug("Checking releases against criteria: 4K")
         checker = ReleaseChecker(
             radarr_url=radarr_config.url,
             radarr_api_key=radarr_config.api_key,
@@ -120,12 +120,14 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
         result = await checker.check_movie(movie_id, apply_tags=True)
         matching_count = len(result.matched_releases)
         logger.debug(
-            f"[{movie_title}] Found {matching_count} matching releases out of {len(result.releases)} total"
+            "Found %d matching releases out of %d total",
+            matching_count,
+            len(result.releases),
         )
 
         # Build completion message with clear outcome
         outcome = _format_check_outcome(result.has_match, result.tag_result)
-        logger.info(f"[{movie_title}] Check complete - {outcome}")
+        logger.info("Check result: %s", outcome)
 
         # Record result in state file (even if no tag was applied)
         if _state_manager is not None:
@@ -136,24 +138,26 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
                 result.tag_result.tag_applied if result.tag_result else None,
             )
     except ConfigurationError as e:
-        logger.error(f"Configuration error checking movie {movie_id} ({movie_title}): {e}")
+        logger.error("Webhook error: %s - configuration error: %s", movie_title, e)
     except httpx.HTTPStatusError as e:
         logger.error(
-            f"HTTP error checking movie {movie_id} ({movie_title}): "
-            f"{e.response.status_code} {e.response.reason_phrase}"
+            "Webhook error: %s - HTTP %d %s",
+            movie_title,
+            e.response.status_code,
+            e.response.reason_phrase,
         )
     except (httpx.ConnectError, httpx.TimeoutException) as e:
-        logger.error(f"Network error checking movie {movie_id} ({movie_title}): {e}")
+        logger.error("Webhook error: %s - network error: %s", movie_title, e)
     except ValidationError as e:
-        logger.error(f"Validation error checking movie {movie_id} ({movie_title}): {e}")
+        logger.error("Webhook error: %s - validation error: %s", movie_title, e)
     except Exception:
         # Catch-all for unexpected errors - use exception() for full traceback
-        logger.exception(f"Unexpected error checking 4K availability for movie {movie_id}")
+        logger.exception("Webhook error: %s - unexpected error", movie_title)
 
 
 async def _process_series_check(series_id: int, series_title: str, config: Config) -> None:
     """Background task to check 4K availability for a series."""
-    logger.info(f"[{series_title}] Starting availability check (id={series_id})...")
+    logger.info("Webhook: Sonarr check - %s", series_title)
 
     try:
         # Check TTL cache first
@@ -164,13 +168,13 @@ async def _process_series_check(series_id: int, series_title: str, config: Confi
                     "4K available" if cached.result == "available" else "4K not available"
                 )
                 logger.info(
-                    f"[{series_title}] Skipped - recently checked "
-                    f"({cached.last_checked.isoformat()}), result: {cached_outcome}"
+                    "Check result: skipped (recently checked), %s",
+                    cached_outcome,
                 )
                 return
 
         sonarr_config = config.require_sonarr()
-        logger.debug(f"[{series_title}] Checking releases against criteria: 4K")
+        logger.debug("Checking releases against criteria: 4K")
         checker = ReleaseChecker(
             sonarr_url=sonarr_config.url,
             sonarr_api_key=sonarr_config.api_key,
@@ -181,12 +185,14 @@ async def _process_series_check(series_id: int, series_title: str, config: Confi
         result = await checker.check_series(series_id, apply_tags=True)
         matching_count = len(result.matched_releases)
         logger.debug(
-            f"[{series_title}] Found {matching_count} matching releases out of {len(result.releases)} total"
+            "Found %d matching releases out of %d total",
+            matching_count,
+            len(result.releases),
         )
 
         # Build completion message with clear outcome
         outcome = _format_check_outcome(result.has_match, result.tag_result)
-        logger.info(f"[{series_title}] Check complete - {outcome}")
+        logger.info("Check result: %s", outcome)
 
         # Record result in state file (even if no tag was applied)
         if _state_manager is not None:
@@ -197,19 +203,21 @@ async def _process_series_check(series_id: int, series_title: str, config: Confi
                 result.tag_result.tag_applied if result.tag_result else None,
             )
     except ConfigurationError as e:
-        logger.error(f"Configuration error checking series {series_id} ({series_title}): {e}")
+        logger.error("Webhook error: %s - configuration error: %s", series_title, e)
     except httpx.HTTPStatusError as e:
         logger.error(
-            f"HTTP error checking series {series_id} ({series_title}): "
-            f"{e.response.status_code} {e.response.reason_phrase}"
+            "Webhook error: %s - HTTP %d %s",
+            series_title,
+            e.response.status_code,
+            e.response.reason_phrase,
         )
     except (httpx.ConnectError, httpx.TimeoutException) as e:
-        logger.error(f"Network error checking series {series_id} ({series_title}): {e}")
+        logger.error("Webhook error: %s - network error: %s", series_title, e)
     except ValidationError as e:
-        logger.error(f"Validation error checking series {series_id} ({series_title}): {e}")
+        logger.error("Webhook error: %s - validation error: %s", series_title, e)
     except Exception:
         # Catch-all for unexpected errors - use exception() for full traceback
-        logger.exception(f"Unexpected error checking 4K availability for series {series_id}")
+        logger.exception("Webhook error: %s - unexpected error", series_title)
 
 
 def create_app(config: Config | None = None) -> Any:
@@ -312,7 +320,7 @@ def create_app(config: Config | None = None) -> Any:
 
         # Only process MovieAdded events
         if not payload.is_movie_added():
-            logger.debug(f"Ignoring Radarr event: {payload.event_type}")
+            logger.debug("Ignoring Radarr event: %s", payload.event_type)
             return WebhookResponse(
                 status="ignored",
                 message=f"Event type '{payload.event_type}' is not handled",
@@ -321,8 +329,10 @@ def create_app(config: Config | None = None) -> Any:
             )
 
         # Schedule background task for 4K check
-        logger.info(
-            f"Received MovieAdded webhook for: {payload.movie.title} (id={payload.movie.id})"
+        logger.debug(
+            "Received MovieAdded webhook for: %s (id=%d)",
+            payload.movie.title,
+            payload.movie.id,
         )
         task = asyncio.create_task(
             _process_movie_check(payload.movie.id, payload.movie.title, config)
@@ -364,7 +374,7 @@ def create_app(config: Config | None = None) -> Any:
 
         # Only process SeriesAdd events
         if not payload.is_series_add():
-            logger.debug(f"Ignoring Sonarr event: {payload.event_type}")
+            logger.debug("Ignoring Sonarr event: %s", payload.event_type)
             return WebhookResponse(
                 status="ignored",
                 message=f"Event type '{payload.event_type}' is not handled",
@@ -373,8 +383,10 @@ def create_app(config: Config | None = None) -> Any:
             )
 
         # Schedule background task for 4K check
-        logger.info(
-            f"Received SeriesAdd webhook for: {payload.series.title} (id={payload.series.id})"
+        logger.debug(
+            "Received SeriesAdd webhook for: %s (id=%d)",
+            payload.series.title,
+            payload.series.id,
         )
         task = asyncio.create_task(
             _process_series_check(payload.series.id, payload.series.title, config)
