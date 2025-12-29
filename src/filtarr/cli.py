@@ -365,6 +365,7 @@ def _print_cached_result(
 
 @check_app.command("movie")
 def check_movie(
+    typer_ctx: typer.Context,
     movie: Annotated[str, typer.Argument(help="Movie ID or name to check")],
     criteria: Annotated[
         str,
@@ -375,8 +376,8 @@ def check_movie(
         ),
     ] = "4k",
     output_format: Annotated[
-        OutputFormat, typer.Option("--format", "-f", help="Output format")
-    ] = OutputFormat.TABLE,
+        OutputFormat | None, typer.Option("--format", "-f", help="Output format")
+    ] = None,
     no_tag: Annotated[bool, typer.Option("--no-tag", help="Disable automatic tagging")] = False,
     dry_run: Annotated[
         bool,
@@ -412,6 +413,8 @@ def check_movie(
         filtarr check movie 123 --dry-run
         filtarr check movie 123 --force
     """
+    effective_format = _get_effective_format(typer_ctx, output_format, OutputFormat.TABLE)
+
     try:
         # Validate criteria
         criteria_lower = criteria.lower()
@@ -448,7 +451,7 @@ def check_movie(
         if not force and not dry_run:
             cached = state_manager.get_cached_result("movie", movie_id, config.state.ttl_hours)
             if cached is not None:
-                _print_cached_result("movie", movie_id, cached, output_format)
+                _print_cached_result("movie", movie_id, cached, effective_format)
                 raise typer.Exit(0 if cached.result == "available" else 1)
 
         # Perform the actual check
@@ -470,7 +473,7 @@ def check_movie(
                 result.tag_result.tag_applied,
             )
 
-        print_result(result, output_format)
+        print_result(result, effective_format)
         raise typer.Exit(0 if result.has_match else 1)
     except typer.Exit:
         raise
