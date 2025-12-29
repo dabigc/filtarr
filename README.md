@@ -1,6 +1,6 @@
 # Filtarr
 
-[![CI](https://github.com/dabigc/filtarr/actions/workflows/ci.yml/badge.svg)](https://github.com/dabigc/filtarr/actions/workflows/ci.yml)
+[![CI](https://github.com/dabigc/filtarr/actions/workflows/ci.yml/badge.svg?event=pull_request)](https://github.com/dabigc/filtarr/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/filtarr.svg)](https://pypi.org/project/filtarr/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
