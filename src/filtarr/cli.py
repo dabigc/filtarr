@@ -1714,15 +1714,18 @@ def schedule_run(
 
 @schedule_app.command("history")
 def schedule_history(
+    typer_ctx: typer.Context,
     name: Annotated[
         str | None, typer.Option("--name", "-n", help="Filter by schedule name")
     ] = None,
     limit: Annotated[int, typer.Option("--limit", "-l", help="Maximum records to show")] = 20,
     output_format: Annotated[
-        OutputFormat, typer.Option("--format", "-f", help="Output format")
-    ] = OutputFormat.TABLE,
+        OutputFormat | None, typer.Option("--format", "-f", help="Output format")
+    ] = None,
 ) -> None:
     """Show schedule run history."""
+    effective_format = _get_effective_format(typer_ctx, output_format, OutputFormat.TABLE)
+
     manager = _get_scheduler_manager()
     history = manager.get_history(schedule_name=name, limit=limit)
 
@@ -1730,7 +1733,7 @@ def schedule_history(
         console.print("[dim]No history found[/dim]")
         raise typer.Exit(0)
 
-    if output_format == OutputFormat.JSON:
+    if effective_format == OutputFormat.JSON:
         data = [r.model_dump(mode="json") for r in history]
         console.print(json.dumps(data, indent=2, default=str))
     else:
