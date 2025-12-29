@@ -487,6 +487,7 @@ def check_movie(
 
 @check_app.command("series")
 def check_series_cmd(
+    typer_ctx: typer.Context,
     series: Annotated[str, typer.Argument(help="Series ID or name to check")],
     criteria: Annotated[
         str,
@@ -504,8 +505,8 @@ def check_series_cmd(
         str, typer.Option("--strategy", help="Sampling strategy: recent, distributed, or all")
     ] = "recent",
     output_format: Annotated[
-        OutputFormat, typer.Option("--format", "-f", help="Output format")
-    ] = OutputFormat.TABLE,
+        OutputFormat | None, typer.Option("--format", "-f", help="Output format")
+    ] = None,
     no_tag: Annotated[bool, typer.Option("--no-tag", help="Disable automatic tagging")] = False,
     dry_run: Annotated[
         bool,
@@ -534,6 +535,8 @@ def check_series_cmd(
         filtarr check series 456 --dry-run
         filtarr check series 456 --force
     """
+    effective_format = _get_effective_format(typer_ctx, output_format, OutputFormat.TABLE)
+
     try:
         # Validate criteria
         criteria_lower = criteria.lower()
@@ -592,7 +595,7 @@ def check_series_cmd(
         if not force and not dry_run:
             cached = state_manager.get_cached_result("series", series_id, config.state.ttl_hours)
             if cached is not None:
-                _print_cached_result("series", series_id, cached, output_format)
+                _print_cached_result("series", series_id, cached, effective_format)
                 raise typer.Exit(0 if cached.result == "available" else 1)
 
         # Perform the actual check
@@ -619,7 +622,7 @@ def check_series_cmd(
                 result.tag_result.tag_applied,
             )
 
-        print_result(result, output_format)
+        print_result(result, effective_format)
         raise typer.Exit(0 if result.has_match else 1)
     except typer.Exit:
         raise
