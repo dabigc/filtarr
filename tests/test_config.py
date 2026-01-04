@@ -2186,3 +2186,185 @@ output_format = "text"
             config = Config.load()
 
         assert config.logging.output_format == "json"
+
+
+class TestAllowInsecureSecurityWarning:
+    """Tests for security warning when allow_insecure=True is used with non-localhost URLs."""
+
+    def test_radarr_config_emits_warning_for_insecure_remote_url(self) -> None:
+        """RadarrConfig should emit UserWarning when allow_insecure=True with non-localhost URL."""
+        with pytest.warns(UserWarning, match="security risk"):
+            RadarrConfig(
+                url="http://radarr.example.com:7878",
+                api_key="key",
+                allow_insecure=True,
+            )
+
+    def test_sonarr_config_emits_warning_for_insecure_remote_url(self) -> None:
+        """SonarrConfig should emit UserWarning when allow_insecure=True with non-localhost URL."""
+        with pytest.warns(UserWarning, match="security risk"):
+            SonarrConfig(
+                url="http://sonarr.example.com:8989",
+                api_key="key",
+                allow_insecure=True,
+            )
+
+    def test_radarr_config_no_warning_when_allow_insecure_false(self) -> None:
+        """RadarrConfig should NOT emit warning when allow_insecure=False."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            # This should not raise any UserWarning
+            RadarrConfig(
+                url="https://radarr.example.com:7878",
+                api_key="key",
+                allow_insecure=False,
+            )
+
+    def test_sonarr_config_no_warning_when_allow_insecure_false(self) -> None:
+        """SonarrConfig should NOT emit warning when allow_insecure=False."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            # This should not raise any UserWarning
+            SonarrConfig(
+                url="https://sonarr.example.com:8989",
+                api_key="key",
+                allow_insecure=False,
+            )
+
+    def test_radarr_config_no_warning_for_localhost(self) -> None:
+        """RadarrConfig should NOT emit warning when allow_insecure=True but URL is localhost."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            # This should not raise any UserWarning (localhost is safe)
+            RadarrConfig(
+                url="http://localhost:7878",
+                api_key="key",
+                allow_insecure=True,
+            )
+
+    def test_sonarr_config_no_warning_for_localhost(self) -> None:
+        """SonarrConfig should NOT emit warning when allow_insecure=True but URL is localhost."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            # This should not raise any UserWarning (localhost is safe)
+            SonarrConfig(
+                url="http://localhost:8989",
+                api_key="key",
+                allow_insecure=True,
+            )
+
+    def test_radarr_config_no_warning_for_127_0_0_1(self) -> None:
+        """RadarrConfig should NOT emit warning when allow_insecure=True but URL is 127.0.0.1."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            # This should not raise any UserWarning (127.0.0.1 is safe)
+            RadarrConfig(
+                url="http://127.0.0.1:7878",
+                api_key="key",
+                allow_insecure=True,
+            )
+
+    def test_sonarr_config_no_warning_for_127_0_0_1(self) -> None:
+        """SonarrConfig should NOT emit warning when allow_insecure=True but URL is 127.0.0.1."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            # This should not raise any UserWarning (127.0.0.1 is safe)
+            SonarrConfig(
+                url="http://127.0.0.1:8989",
+                api_key="key",
+                allow_insecure=True,
+            )
+
+    def test_radarr_config_no_warning_for_ipv6_localhost(self) -> None:
+        """RadarrConfig should NOT emit warning when allow_insecure=True but URL is ::1."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            # This should not raise any UserWarning (::1 is safe)
+            RadarrConfig(
+                url="http://[::1]:7878",
+                api_key="key",
+                allow_insecure=True,
+            )
+
+    def test_sonarr_config_no_warning_for_ipv6_localhost(self) -> None:
+        """SonarrConfig should NOT emit warning when allow_insecure=True but URL is ::1."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            # This should not raise any UserWarning (::1 is safe)
+            SonarrConfig(
+                url="http://[::1]:8989",
+                api_key="key",
+                allow_insecure=True,
+            )
+
+    def test_warning_message_contains_security_explanation(self) -> None:
+        """Warning message should explain the security risk of using HTTP for remote servers."""
+        with pytest.warns(UserWarning) as warning_info:
+            RadarrConfig(
+                url="http://radarr.example.com:7878",
+                api_key="key",
+                allow_insecure=True,
+            )
+
+        warning_message = str(warning_info[0].message)
+        # Should mention HTTP or insecure
+        assert "HTTP" in warning_message or "insecure" in warning_message.lower()
+        # Should mention credentials or API key being exposed
+        assert (
+            "credential" in warning_message.lower()
+            or "api key" in warning_message.lower()
+            or "intercepted" in warning_message.lower()
+        )
+
+    def test_warning_message_mentions_url(self) -> None:
+        """Warning message should mention the URL being used insecurely."""
+        with pytest.warns(UserWarning) as warning_info:
+            SonarrConfig(
+                url="http://sonarr.example.com:8989",
+                api_key="key",
+                allow_insecure=True,
+            )
+
+        warning_message = str(warning_info[0].message)
+        # Should mention the host being used
+        assert "sonarr.example.com" in warning_message
+
+    def test_radarr_config_emits_warning_for_ip_address(self) -> None:
+        """RadarrConfig should emit warning for non-localhost IP addresses."""
+        with pytest.warns(UserWarning, match="security risk"):
+            RadarrConfig(
+                url="http://192.168.1.100:7878",
+                api_key="key",
+                allow_insecure=True,
+            )
+
+    def test_sonarr_config_emits_warning_for_ip_address(self) -> None:
+        """SonarrConfig should emit warning for non-localhost IP addresses."""
+        with pytest.warns(UserWarning, match="security risk"):
+            SonarrConfig(
+                url="http://10.0.0.50:8989",
+                api_key="key",
+                allow_insecure=True,
+            )
+
+    def test_radarr_config_no_warning_for_https_with_allow_insecure(self) -> None:
+        """RadarrConfig should NOT emit warning when using HTTPS even with allow_insecure=True."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            # HTTPS is secure, so no warning needed
+            RadarrConfig(
+                url="https://radarr.example.com:7878",
+                api_key="key",
+                allow_insecure=True,
+            )
+
+    def test_sonarr_config_no_warning_for_https_with_allow_insecure(self) -> None:
+        """SonarrConfig should NOT emit warning when using HTTPS even with allow_insecure=True."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            # HTTPS is secure, so no warning needed
+            SonarrConfig(
+                url="https://sonarr.example.com:8989",
+                api_key="key",
+                allow_insecure=True,
+            )

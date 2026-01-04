@@ -261,6 +261,206 @@ class TestSensitiveDataFilter:
         assert record.msg.count("api_key=***") == 2
 
 
+class TestURLEncodedAndAuthorizationFiltering:
+    """Tests for filtering URL-encoded credentials and Authorization headers."""
+
+    def test_filter_url_encoded_api_key_lowercase_hex(self) -> None:
+        """Should filter URL-encoded api_key with lowercase %3d."""
+        filter_ = SensitiveDataFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=1,
+            msg="Request URL: /api?api_key%3dsecret123",
+            args=(),
+            exc_info=None,
+        )
+
+        result = filter_.filter(record)
+
+        assert result is True
+        assert "secret123" not in record.msg
+        assert "api_key=***" in record.msg
+
+    def test_filter_url_encoded_api_key_uppercase_hex(self) -> None:
+        """Should filter URL-encoded api_key with uppercase %3D."""
+        filter_ = SensitiveDataFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=1,
+            msg="Calling /api?api_key%3DTOKEN-xyz",
+            args=(),
+            exc_info=None,
+        )
+
+        result = filter_.filter(record)
+
+        assert result is True
+        assert "TOKEN-xyz" not in record.msg
+        assert "api_key=***" in record.msg
+
+    def test_filter_url_encoded_api_hyphen_key(self) -> None:
+        """Should filter URL-encoded api-key with %3d."""
+        filter_ = SensitiveDataFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=1,
+            msg="Path: /endpoint?api-key%3dmysecret456",
+            args=(),
+            exc_info=None,
+        )
+
+        result = filter_.filter(record)
+
+        assert result is True
+        assert "mysecret456" not in record.msg
+        assert "api_key=***" in record.msg
+
+    def test_filter_url_encoded_with_percent_encoded_value(self) -> None:
+        """Should filter URL-encoded api_key where the value also contains %."""
+        filter_ = SensitiveDataFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=1,
+            msg="URL: /api?apikey%3Dkey%2Bwith%2Bplus",
+            args=(),
+            exc_info=None,
+        )
+
+        result = filter_.filter(record)
+
+        assert result is True
+        assert "key%2Bwith%2Bplus" not in record.msg
+        assert "api_key=***" in record.msg
+
+    def test_filter_authorization_bearer_header(self) -> None:
+        """Should filter Authorization: Bearer token."""
+        filter_ = SensitiveDataFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=1,
+            msg="Headers: Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+            args=(),
+            exc_info=None,
+        )
+
+        result = filter_.filter(record)
+
+        assert result is True
+        assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in record.msg
+        assert "Authorization: ***" in record.msg
+
+    def test_filter_authorization_bearer_with_quotes(self) -> None:
+        """Should filter Authorization header with quoted Bearer token."""
+        filter_ = SensitiveDataFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=1,
+            msg='"Authorization": "Bearer secret-token-123"',
+            args=(),
+            exc_info=None,
+        )
+
+        result = filter_.filter(record)
+
+        assert result is True
+        assert "secret-token-123" not in record.msg
+        assert "Authorization: ***" in record.msg
+
+    def test_filter_authorization_bearer_compact_format(self) -> None:
+        """Should filter Authorization=Bearer format."""
+        filter_ = SensitiveDataFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=1,
+            msg="Auth: Authorization=Bearer abc123xyz",
+            args=(),
+            exc_info=None,
+        )
+
+        result = filter_.filter(record)
+
+        assert result is True
+        assert "abc123xyz" not in record.msg
+        assert "Authorization: ***" in record.msg
+
+    def test_filter_authorization_case_insensitive(self) -> None:
+        """Should filter Authorization header case-insensitively."""
+        filter_ = SensitiveDataFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=1,
+            msg="AUTHORIZATION: bearer MySecretToken",
+            args=(),
+            exc_info=None,
+        )
+
+        result = filter_.filter(record)
+
+        assert result is True
+        assert "MySecretToken" not in record.msg
+        assert "Authorization: ***" in record.msg
+
+    def test_filter_multiple_encoding_and_auth_patterns(self) -> None:
+        """Should filter both URL-encoded keys and Authorization headers in same message."""
+        filter_ = SensitiveDataFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=1,
+            msg="Request /api?api_key%3Dkey123 with Authorization: Bearer token456",
+            args=(),
+            exc_info=None,
+        )
+
+        result = filter_.filter(record)
+
+        assert result is True
+        assert "key123" not in record.msg
+        assert "token456" not in record.msg
+        assert "api_key=***" in record.msg
+        assert "Authorization: ***" in record.msg
+
+    def test_existing_patterns_still_work_with_new_patterns(self) -> None:
+        """Ensure existing patterns still work alongside new patterns."""
+        filter_ = SensitiveDataFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=1,
+            msg="Regular api_key=secret1, X-Api-Key: secret2, api_key%3Dsecret3, Authorization: Bearer secret4",
+            args=(),
+            exc_info=None,
+        )
+
+        result = filter_.filter(record)
+
+        assert result is True
+        assert "secret1" not in record.msg
+        assert "secret2" not in record.msg
+        assert "secret3" not in record.msg
+        assert "secret4" not in record.msg
+        # All patterns should match and be redacted
+        assert "***" in record.msg
+
+
 class TestParseLogLevel:
     """Tests for parse_log_level function."""
 

@@ -22,6 +22,34 @@ class SonarrClient(BaseArrClient):
             matches = await client.search_series("Breaking Bad")
     """
 
+    @staticmethod
+    def _parse_seasons(data: dict[str, Any]) -> list[Season]:
+        """Parse seasons from a series API response.
+
+        Extracts and converts season data from the raw API response into
+        Season model instances. Handles missing statistics gracefully.
+
+        Args:
+            data: Raw series data dictionary from the Sonarr API
+
+        Returns:
+            List of Season models parsed from the response
+        """
+        seasons = []
+        for s in data.get("seasons", []):
+            stats = s.get("statistics", {})
+            seasons.append(
+                Season(
+                    seasonNumber=s.get("seasonNumber", 0),
+                    monitored=s.get("monitored", True),
+                    **{
+                        "statistics.episodeCount": stats.get("episodeCount", 0),
+                        "statistics.episodeFileCount": stats.get("episodeFileCount", 0),
+                    },
+                )
+            )
+        return seasons
+
     async def get_all_series(self) -> list[Series]:
         """Fetch all series in the library.
 
@@ -31,25 +59,12 @@ class SonarrClient(BaseArrClient):
         data = await self._get("/api/v3/series")
         series_list = []
         for item in data:
-            seasons = []
-            for s in item.get("seasons", []):
-                stats = s.get("statistics", {})
-                seasons.append(
-                    Season(
-                        seasonNumber=s.get("seasonNumber", 0),
-                        monitored=s.get("monitored", True),
-                        **{
-                            "statistics.episodeCount": stats.get("episodeCount", 0),
-                            "statistics.episodeFileCount": stats.get("episodeFileCount", 0),
-                        },
-                    )
-                )
             series_list.append(
                 Series(
                     id=item["id"],
                     title=item.get("title", ""),
                     year=item.get("year", 0),
-                    seasons=seasons,
+                    seasons=self._parse_seasons(item),
                     monitored=item.get("monitored", True),
                     tags=item.get("tags", []),
                 )
@@ -105,25 +120,11 @@ class SonarrClient(BaseArrClient):
         """
         data = await self._get(f"/api/v3/series/{series_id}")
 
-        seasons = []
-        for s in data.get("seasons", []):
-            stats = s.get("statistics", {})
-            seasons.append(
-                Season(
-                    seasonNumber=s.get("seasonNumber", 0),
-                    monitored=s.get("monitored", True),
-                    **{
-                        "statistics.episodeCount": stats.get("episodeCount", 0),
-                        "statistics.episodeFileCount": stats.get("episodeFileCount", 0),
-                    },
-                )
-            )
-
         return Series(
             id=data["id"],
             title=data.get("title", ""),
             year=data.get("year", 0),
-            seasons=seasons,
+            seasons=self._parse_seasons(data),
             monitored=data.get("monitored", True),
             tags=data.get("tags", []),
         )
@@ -195,6 +196,20 @@ class SonarrClient(BaseArrClient):
         """
         data = await self._get("/api/v3/release", params={"seriesId": series_id})
         return [self._parse_release(item) for item in data]
+
+    async def get_releases_for_item(self, item_id: int) -> list[Release]:
+        """Fetch releases for a specific media item (series).
+
+        This method implements the ReleaseProvider protocol, allowing SonarrClient
+        to be used polymorphically with RadarrClient in release-checking operations.
+
+        Args:
+            item_id: The Sonarr series ID
+
+        Returns:
+            List of releases found by indexers
+        """
+        return await self.get_series_releases(item_id)
 
     async def has_4k_releases(self, series_id: int) -> bool:
         """Check if a series has any 4K releases available.
@@ -274,24 +289,11 @@ class SonarrClient(BaseArrClient):
         await self.invalidate_cache("/api/v3/series")
 
         # Parse the response into a Series model
-        seasons = []
-        for s in data.get("seasons", []):
-            stats = s.get("statistics", {})
-            seasons.append(
-                Season(
-                    seasonNumber=s.get("seasonNumber", 0),
-                    monitored=s.get("monitored", True),
-                    **{
-                        "statistics.episodeCount": stats.get("episodeCount", 0),
-                        "statistics.episodeFileCount": stats.get("episodeFileCount", 0),
-                    },
-                )
-            )
         return Series(
             id=data["id"],
             title=data.get("title", ""),
             year=data.get("year", 0),
-            seasons=seasons,
+            seasons=self._parse_seasons(data),
             monitored=data.get("monitored", True),
             tags=data.get("tags", []),
         )

@@ -419,3 +419,664 @@ class TestTimingLogging:
         assert any("Slow request" in r.message for r in warning_records)
         assert any("6.00s" in r.message for r in warning_records)
         assert any("/api/v3/release" in r.message for r in warning_records)
+
+
+class TestHTTPStatusRetry:
+    """Tests for retry behavior on HTTP status errors (429, 5xx)."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_retry_on_429_rate_limit(self) -> None:
+        """Should retry on 429 Too Many Requests response."""
+        route = respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"})
+        # First call returns 429, second succeeds
+        route.side_effect = [
+            Response(429, json={"error": "Too Many Requests"}),
+            Response(200, json=[]),
+        ]
+
+        async with RadarrClient("http://localhost:7878", "test-api-key", max_retries=3) as client:
+            releases = await client.get_movie_releases(123)
+            assert releases == []
+            assert route.call_count == 2  # First failed, second succeeded
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_retry_on_500_internal_server_error(self) -> None:
+        """Should retry on 500 Internal Server Error."""
+        route = respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"})
+        route.side_effect = [
+            Response(500, json={"error": "Internal Server Error"}),
+            Response(200, json=[]),
+        ]
+
+        async with RadarrClient("http://localhost:7878", "test-api-key", max_retries=3) as client:
+            releases = await client.get_movie_releases(123)
+            assert releases == []
+            assert route.call_count == 2
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_retry_on_502_bad_gateway(self) -> None:
+        """Should retry on 502 Bad Gateway."""
+        route = respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"})
+        route.side_effect = [
+            Response(502, json={"error": "Bad Gateway"}),
+            Response(200, json=[]),
+        ]
+
+        async with RadarrClient("http://localhost:7878", "test-api-key", max_retries=3) as client:
+            releases = await client.get_movie_releases(123)
+            assert releases == []
+            assert route.call_count == 2
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_retry_on_503_service_unavailable(self) -> None:
+        """Should retry on 503 Service Unavailable."""
+        route = respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"})
+        route.side_effect = [
+            Response(503, json={"error": "Service Unavailable"}),
+            Response(200, json=[]),
+        ]
+
+        async with RadarrClient("http://localhost:7878", "test-api-key", max_retries=3) as client:
+            releases = await client.get_movie_releases(123)
+            assert releases == []
+            assert route.call_count == 2
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_retry_on_504_gateway_timeout(self) -> None:
+        """Should retry on 504 Gateway Timeout."""
+        route = respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"})
+        route.side_effect = [
+            Response(504, json={"error": "Gateway Timeout"}),
+            Response(200, json=[]),
+        ]
+
+        async with RadarrClient("http://localhost:7878", "test-api-key", max_retries=3) as client:
+            releases = await client.get_movie_releases(123)
+            assert releases == []
+            assert route.call_count == 2
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_max_retries_exhausted_on_429(self) -> None:
+        """Should raise after exhausting all retries on persistent 429."""
+        from httpx import HTTPStatusError
+
+        route = respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"})
+        # All calls return 429
+        route.side_effect = [
+            Response(429, json={"error": "Too Many Requests"}),
+            Response(429, json={"error": "Too Many Requests"}),
+            Response(429, json={"error": "Too Many Requests"}),
+        ]
+
+        async with RadarrClient("http://localhost:7878", "test-api-key", max_retries=3) as client:
+            with pytest.raises(HTTPStatusError) as exc_info:
+                await client.get_movie_releases(123)
+
+            assert exc_info.value.response.status_code == 429
+            assert route.call_count == 3
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_max_retries_exhausted_on_5xx(self) -> None:
+        """Should raise after exhausting all retries on persistent 5xx."""
+        from httpx import HTTPStatusError
+
+        route = respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"})
+        route.side_effect = [
+            Response(503, json={"error": "Service Unavailable"}),
+            Response(503, json={"error": "Service Unavailable"}),
+            Response(503, json={"error": "Service Unavailable"}),
+        ]
+
+        async with RadarrClient("http://localhost:7878", "test-api-key", max_retries=3) as client:
+            with pytest.raises(HTTPStatusError) as exc_info:
+                await client.get_movie_releases(123)
+
+            assert exc_info.value.response.status_code == 503
+            assert route.call_count == 3
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_429_with_retry_after_header_respects_delay(self) -> None:
+        """Should respect Retry-After header when present on 429 response."""
+        route = respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"})
+        # First call returns 429 with Retry-After header, second succeeds
+        route.side_effect = [
+            Response(
+                429,
+                json={"error": "Too Many Requests"},
+                headers={"Retry-After": "1"},  # Wait 1 second
+            ),
+            Response(200, json=[]),
+        ]
+
+        async with RadarrClient("http://localhost:7878", "test-api-key", max_retries=3) as client:
+            start_time = time.monotonic()
+            releases = await client.get_movie_releases(123)
+            elapsed = time.monotonic() - start_time
+
+            assert releases == []
+            assert route.call_count == 2
+            # Should have waited at least 1 second due to Retry-After header
+            assert elapsed >= 1.0
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_no_retry_on_400_bad_request(self) -> None:
+        """Should NOT retry on 400 Bad Request - fail fast."""
+        from httpx import HTTPStatusError
+
+        route = respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(400, json={"error": "Bad Request"})
+        )
+
+        async with RadarrClient("http://localhost:7878", "test-api-key", max_retries=3) as client:
+            with pytest.raises(HTTPStatusError) as exc_info:
+                await client.get_movie_releases(123)
+
+            assert exc_info.value.response.status_code == 400
+            assert route.call_count == 1  # No retries
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_no_retry_on_403_forbidden(self) -> None:
+        """Should NOT retry on 403 Forbidden - fail fast."""
+        from httpx import HTTPStatusError
+
+        route = respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(403, json={"error": "Forbidden"})
+        )
+
+        async with RadarrClient("http://localhost:7878", "test-api-key", max_retries=3) as client:
+            with pytest.raises(HTTPStatusError) as exc_info:
+                await client.get_movie_releases(123)
+
+            assert exc_info.value.response.status_code == 403
+            assert route.call_count == 1  # No retries
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_mixed_retry_scenarios(self) -> None:
+        """Should handle mixed error scenarios correctly."""
+        route = respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"})
+        # First 429, then 503, then success
+        route.side_effect = [
+            Response(429, json={"error": "Too Many Requests"}),
+            Response(503, json={"error": "Service Unavailable"}),
+            Response(200, json=[]),
+        ]
+
+        async with RadarrClient("http://localhost:7878", "test-api-key", max_retries=4) as client:
+            releases = await client.get_movie_releases(123)
+            assert releases == []
+            assert route.call_count == 3
+
+
+class TestReleaseProviderProtocol:
+    """Tests for ReleaseProvider Protocol compliance."""
+
+    def test_radarr_client_satisfies_release_provider_protocol(self) -> None:
+        """RadarrClient should satisfy ReleaseProvider protocol at runtime."""
+        from filtarr.clients.base import ReleaseProvider
+
+        client = RadarrClient("http://localhost:7878", "test-api-key")
+        assert isinstance(client, ReleaseProvider)
+
+    def test_sonarr_client_satisfies_release_provider_protocol(self) -> None:
+        """SonarrClient should satisfy ReleaseProvider protocol at runtime."""
+        from filtarr.clients.base import ReleaseProvider
+        from filtarr.clients.sonarr import SonarrClient
+
+        client = SonarrClient("http://localhost:8989", "test-api-key")
+        assert isinstance(client, ReleaseProvider)
+
+    def test_release_provider_is_runtime_checkable(self) -> None:
+        """ReleaseProvider should be runtime_checkable for isinstance checks."""
+        from filtarr.clients.base import ReleaseProvider
+
+        # Verify the protocol has the runtime_checkable decorator
+        assert hasattr(ReleaseProvider, "__protocol_attrs__") or hasattr(
+            ReleaseProvider, "_is_runtime_protocol"
+        )
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_radarr_get_releases_for_item_works(self) -> None:
+        """RadarrClient.get_releases_for_item should return releases."""
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "abc",
+                        "title": "Movie.2160p",
+                        "indexer": "Test",
+                        "size": 1000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
+            releases = await client.get_releases_for_item(123)
+            assert len(releases) == 1
+            assert releases[0].guid == "abc"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_sonarr_get_releases_for_item_works(self) -> None:
+        """SonarrClient.get_releases_for_item should return releases."""
+        from filtarr.clients.sonarr import SonarrClient
+
+        respx.get("http://localhost:8989/api/v3/release", params={"seriesId": "456"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "xyz",
+                        "title": "Show.S01E01.2160p",
+                        "indexer": "Test",
+                        "size": 2000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+
+        async with SonarrClient("http://localhost:8989", "test-api-key") as client:
+            releases = await client.get_releases_for_item(456)
+            assert len(releases) == 1
+            assert releases[0].guid == "xyz"
+
+    @pytest.mark.asyncio
+    async def test_mock_release_provider_usable(self) -> None:
+        """A mock ReleaseProvider should be usable in place of real clients."""
+        from unittest.mock import AsyncMock
+
+        from filtarr.clients.base import ReleaseProvider
+        from filtarr.models.common import Quality, Release
+
+        # Create a mock that satisfies the protocol
+        mock_provider = AsyncMock(spec=ReleaseProvider)
+        mock_provider.get_releases_for_item.return_value = [
+            Release(
+                guid="mock-guid",
+                title="Mock.Release.2160p",
+                indexer="MockIndexer",
+                size=1000,
+                quality=Quality(id=19, name="WEBDL-2160p"),
+            )
+        ]
+
+        # Verify the mock works
+        releases = await mock_provider.get_releases_for_item(123)
+        assert len(releases) == 1
+        assert releases[0].guid == "mock-guid"
+        mock_provider.get_releases_for_item.assert_called_once_with(123)
+
+    def test_base_arr_client_does_not_satisfy_release_provider(self) -> None:
+        """BaseArrClient itself should NOT satisfy ReleaseProvider (abstract)."""
+        from filtarr.clients.base import BaseArrClient, ReleaseProvider
+
+        client = BaseArrClient("http://localhost:7878", "test-api-key")
+        # BaseArrClient doesn't implement get_releases_for_item, so should not match
+        assert not isinstance(client, ReleaseProvider)
+
+
+class TestCacheStampedeProtection:
+    """Tests for cache thundering herd / stampede protection."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_concurrent_requests_only_trigger_one_api_call(self) -> None:
+        """Concurrent requests for same cache key should only trigger one API call.
+
+        This tests the cache stampede/thundering herd protection. When multiple
+        concurrent requests arrive for the same uncached key, only the first
+        should hit the API while others wait.
+        """
+        import asyncio
+
+        import httpx
+
+        # Track how many times the API is called
+        call_count = 0
+
+        async def mock_response(_request: httpx.Request) -> Response:
+            nonlocal call_count
+            call_count += 1
+            # Add a small delay to simulate API latency
+            await asyncio.sleep(0.1)
+            return Response(
+                200,
+                json=[
+                    {
+                        "guid": "abc",
+                        "title": "Movie.2160p",
+                        "indexer": "Test",
+                        "size": 1000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
+            side_effect=mock_response
+        )
+
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
+            # Fire 5 concurrent requests for the same movie
+            tasks = [client.get_movie_releases(123) for _ in range(5)]
+            results = await asyncio.gather(*tasks)
+
+            # All results should be identical
+            assert all(len(r) == 1 for r in results)
+            assert all(r[0].guid == "abc" for r in results)
+
+            # Only ONE API call should have been made (stampede protection)
+            assert call_count == 1, f"Expected 1 API call, got {call_count}"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_second_request_waits_for_first_to_complete(self) -> None:
+        """Second concurrent request should wait for first request to complete.
+
+        The second request should not start its own API call but instead wait
+        for the first request's result.
+        """
+        import asyncio
+
+        import httpx
+
+        request_start_times: list[float] = []
+        response_times: list[float] = []
+
+        async def mock_response(_request: httpx.Request) -> Response:
+            request_start_times.append(time.monotonic())
+            await asyncio.sleep(0.2)  # Simulate slow API
+            response_times.append(time.monotonic())
+            return Response(200, json=[])
+
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
+            side_effect=mock_response
+        )
+
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
+            start_time = time.monotonic()
+            tasks = [client.get_movie_releases(123) for _ in range(3)]
+            await asyncio.gather(*tasks)
+            total_elapsed = time.monotonic() - start_time
+
+            # Only one request should have been made
+            assert len(request_start_times) == 1, "Only one API request should be made"
+
+            # Total time should be around 0.2s (one request), not 0.6s (three sequential)
+            assert total_elapsed < 0.5, (
+                f"Total time {total_elapsed}s suggests requests didn't share results"
+            )
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_concurrent_requests_receive_same_cached_result(self) -> None:
+        """All concurrent requests should receive the exact same cached result object."""
+        import asyncio
+
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "unique-guid-123",
+                        "title": "Cached.Movie.2160p",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
+            tasks = [client.get_movie_releases(123) for _ in range(3)]
+            results = await asyncio.gather(*tasks)
+
+            # All results should have the same content
+            for result in results:
+                assert len(result) == 1
+                assert result[0].guid == "unique-guid-123"
+                assert result[0].title == "Cached.Movie.2160p"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_error_in_first_request_propagates_to_all_waiters(self) -> None:
+        """If the first request fails, all waiters should receive the same error.
+
+        This ensures that when stampede protection coalesces multiple requests,
+        an error in the "leader" request propagates to all waiting requests.
+        """
+        import asyncio
+
+        import httpx
+        from httpx import HTTPStatusError
+
+        call_count = 0
+
+        async def mock_error_response(_request: httpx.Request) -> Response:
+            nonlocal call_count
+            call_count += 1
+            await asyncio.sleep(0.1)
+            return Response(401, json={"error": "Unauthorized"})
+
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
+            side_effect=mock_error_response
+        )
+
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
+            tasks = [client.get_movie_releases(123) for _ in range(3)]
+
+            # All tasks should fail with the same error
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # All results should be HTTPStatusError with 401
+            for result in results:
+                assert isinstance(result, HTTPStatusError)
+                assert result.response.status_code == 401
+
+            # Only ONE API call should have been made
+            assert call_count == 1, f"Expected 1 API call, got {call_count}"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_different_cache_keys_make_separate_requests(self) -> None:
+        """Different cache keys should NOT share requests (only same key coalescses)."""
+        import asyncio
+
+        import httpx
+
+        call_count = 0
+
+        async def mock_response(request: httpx.Request) -> Response:
+            nonlocal call_count
+            call_count += 1
+            await asyncio.sleep(0.05)
+            movie_id = request.url.params.get("movieId")
+            return Response(
+                200,
+                json=[
+                    {
+                        "guid": f"guid-{movie_id}",
+                        "title": f"Movie{movie_id}.2160p",
+                        "indexer": "Test",
+                        "size": 1000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+
+        respx.get("http://localhost:7878/api/v3/release").mock(side_effect=mock_response)
+
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
+            # Request 3 different movies concurrently
+            tasks = [
+                client.get_movie_releases(123),
+                client.get_movie_releases(456),
+                client.get_movie_releases(789),
+            ]
+            results = await asyncio.gather(*tasks)
+
+            # Each should have their own result
+            assert results[0][0].guid == "guid-123"
+            assert results[1][0].guid == "guid-456"
+            assert results[2][0].guid == "guid-789"
+
+            # Three separate API calls for three different movies
+            assert call_count == 3, f"Expected 3 API calls, got {call_count}"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_retryable_error_in_first_request_propagates_to_waiters(self) -> None:
+        """If the first request fails with a retryable error, waiters get the error too.
+
+        After retries are exhausted, the error should propagate to all waiting requests.
+        """
+        import asyncio
+
+        import httpx
+        from httpx import HTTPStatusError
+
+        call_count = 0
+
+        async def mock_503_response(_request: httpx.Request) -> Response:
+            nonlocal call_count
+            call_count += 1
+            await asyncio.sleep(0.05)
+            return Response(503, json={"error": "Service Unavailable"})
+
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
+            side_effect=mock_503_response
+        )
+
+        # Use max_retries=1 to speed up the test
+        async with RadarrClient("http://localhost:7878", "test-api-key", max_retries=1) as client:
+            tasks = [client.get_movie_releases(123) for _ in range(3)]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # All results should be HTTPStatusError with 503
+            for result in results:
+                assert isinstance(result, HTTPStatusError)
+                assert result.response.status_code == 503
+
+            # The "leader" request should have made 1 attempt (max_retries=1)
+            # With stampede protection, waiters don't make their own calls
+            assert call_count == 1, f"Expected 1 API call, got {call_count}"
+
+
+class TestConnectionPoolConfiguration:
+    """Tests for explicit connection pool configuration (Task 4.5)."""
+
+    def test_max_connections_parameter_default_value(self) -> None:
+        """BaseArrClient should have default max_connections value of 20."""
+        client = BaseArrClient("http://localhost:7878", "test-api-key")
+        assert client.max_connections == 20
+
+    def test_max_keepalive_connections_parameter_default_value(self) -> None:
+        """BaseArrClient should have default max_keepalive_connections value of 10."""
+        client = BaseArrClient("http://localhost:7878", "test-api-key")
+        assert client.max_keepalive_connections == 10
+
+    def test_max_connections_parameter_is_configurable(self) -> None:
+        """max_connections should be configurable via constructor parameter."""
+        client = BaseArrClient("http://localhost:7878", "test-api-key", max_connections=50)
+        assert client.max_connections == 50
+
+    def test_max_keepalive_connections_parameter_is_configurable(self) -> None:
+        """max_keepalive_connections should be configurable via constructor parameter."""
+        client = BaseArrClient(
+            "http://localhost:7878", "test-api-key", max_keepalive_connections=25
+        )
+        assert client.max_keepalive_connections == 25
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_limits_object_passed_to_async_client(self) -> None:
+        """httpx.Limits object should be correctly passed to AsyncClient constructor."""
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(200, json=[])
+        )
+
+        async with RadarrClient(
+            "http://localhost:7878",
+            "test-api-key",
+            max_connections=30,
+            max_keepalive_connections=15,
+        ) as client:
+            # Access the internal httpx client
+            internal_client = client._client
+            assert internal_client is not None
+
+            # Verify the limits are set correctly on the connection pool
+            # httpx stores limits in the transport's pool object
+            pool = internal_client._transport._pool
+            assert pool._max_connections == 30
+            assert pool._max_keepalive_connections == 15
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_default_limits_applied_when_not_specified(self) -> None:
+        """Default limits (20/10) should be applied when not specified."""
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(200, json=[])
+        )
+
+        async with RadarrClient("http://localhost:7878", "test-api-key") as client:
+            # Access the internal httpx client
+            internal_client = client._client
+            assert internal_client is not None
+
+            # Verify default limits on the connection pool
+            pool = internal_client._transport._pool
+            assert pool._max_connections == 20
+            assert pool._max_keepalive_connections == 10
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_radarr_client_inherits_connection_pool_config(self) -> None:
+        """RadarrClient should support connection pool configuration from BaseArrClient."""
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
+            return_value=Response(200, json=[])
+        )
+
+        client = RadarrClient(
+            "http://localhost:7878",
+            "test-api-key",
+            max_connections=40,
+            max_keepalive_connections=20,
+        )
+        assert client.max_connections == 40
+        assert client.max_keepalive_connections == 20
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_sonarr_client_inherits_connection_pool_config(self) -> None:
+        """SonarrClient should support connection pool configuration from BaseArrClient."""
+        from filtarr.clients.sonarr import SonarrClient
+
+        respx.get("http://localhost:8989/api/v3/release", params={"seriesId": "123"}).mock(
+            return_value=Response(200, json=[])
+        )
+
+        client = SonarrClient(
+            "http://localhost:8989",
+            "test-api-key",
+            max_connections=40,
+            max_keepalive_connections=20,
+        )
+        assert client.max_connections == 40
+        assert client.max_keepalive_connections == 20

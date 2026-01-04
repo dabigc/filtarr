@@ -90,6 +90,20 @@ class RadarrClient(BaseArrClient):
         data = await self._get("/api/v3/release", params={"movieId": movie_id})
         return [self._parse_release(item) for item in data]
 
+    async def get_releases_for_item(self, item_id: int) -> list[Release]:
+        """Fetch releases for a specific media item (movie).
+
+        This method implements the ReleaseProvider protocol, allowing RadarrClient
+        to be used polymorphically with SonarrClient in release-checking operations.
+
+        Args:
+            item_id: The Radarr movie ID
+
+        Returns:
+            List of releases found by indexers
+        """
+        return await self.get_movie_releases(item_id)
+
     async def has_4k_releases(self, movie_id: int) -> bool:
         """Check if a movie has any 4K releases available.
 

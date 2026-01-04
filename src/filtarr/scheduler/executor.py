@@ -60,6 +60,9 @@ class JobExecutor:
     ) -> ScheduleRunRecord:
         """Execute a batch operation based on schedule definition.
 
+        Creates a single client instance for each service type (Radarr/Sonarr) and reuses
+        it for both list fetching and batch processing, enabling connection pooling.
+
         Args:
             schedule: The schedule definition to execute
 
@@ -80,16 +83,39 @@ class JobExecutor:
         items_with_4k = 0
         errors: list[str] = []
 
+        # Determine which clients we need
+        need_radarr = schedule.target in (ScheduleTarget.MOVIES, ScheduleTarget.BOTH)
+        need_sonarr = schedule.target in (ScheduleTarget.SERIES, ScheduleTarget.BOTH)
+
+        # Create clients for the entire operation (connection pooling)
+        radarr_client: RadarrClient | None = None
+        sonarr_client: SonarrClient | None = None
+
         try:
-            # Get items to check based on target
+            # Initialize clients if needed
+            if need_radarr:
+                radarr_config = self._config.require_radarr()
+                radarr_client = RadarrClient(
+                    radarr_config.url, radarr_config.api_key, timeout=self._config.timeout
+                )
+                await radarr_client.__aenter__()
+
+            if need_sonarr:
+                sonarr_config = self._config.require_sonarr()
+                sonarr_client = SonarrClient(
+                    sonarr_config.url, sonarr_config.api_key, timeout=self._config.timeout
+                )
+                await sonarr_client.__aenter__()
+
+            # Get items to check based on target (reusing clients)
             movies_to_check: list[Movie] = []
             series_to_check: list[Series] = []
 
-            if schedule.target in (ScheduleTarget.MOVIES, ScheduleTarget.BOTH):
-                movies_to_check = await self._get_movies_to_check(schedule)
+            if need_radarr and radarr_client:
+                movies_to_check = await self._get_movies_to_check(schedule, radarr_client)
 
-            if schedule.target in (ScheduleTarget.SERIES, ScheduleTarget.BOTH):
-                series_to_check = await self._get_series_to_check(schedule)
+            if need_sonarr and sonarr_client:
+                series_to_check = await self._get_series_to_check(schedule, sonarr_client)
 
             total_items = len(movies_to_check) + len(series_to_check)
             logger.info(
@@ -112,8 +138,8 @@ class JobExecutor:
                     len(movies_batch),
                 )
 
-            # Process movies concurrently
-            movie_result = await self._process_movies_batch(movies_batch, schedule)
+            # Process movies concurrently (reusing client)
+            movie_result = await self._process_movies_batch(movies_batch, schedule, radarr_client)
             items_processed += movie_result.items_processed
             items_with_4k += movie_result.items_with_4k
             errors.extend(movie_result.errors)
@@ -136,9 +162,11 @@ class JobExecutor:
                     len(series_batch),
                 )
 
-            # Process series concurrently
+            # Process series concurrently (reusing client)
             if series_batch:
-                series_result = await self._process_series_batch(series_batch, schedule)
+                series_result = await self._process_series_batch(
+                    series_batch, schedule, sonarr_client
+                )
                 items_processed += series_result.items_processed
                 items_with_4k += series_result.items_with_4k
                 errors.extend(series_result.errors)
@@ -163,6 +191,13 @@ class JobExecutor:
             logger.exception(error_msg)
             errors.append(error_msg)
             status = RunStatus.FAILED
+
+        finally:
+            # Always close clients properly
+            if radarr_client:
+                await radarr_client.__aexit__(None, None, None)
+            if sonarr_client:
+                await sonarr_client.__aexit__(None, None, None)
 
         # Update the run record
         completed_at = datetime.now(UTC)
@@ -192,7 +227,10 @@ class JobExecutor:
         )
 
     async def _process_movies_batch(
-        self, movies: list[Movie], schedule: ScheduleDefinition
+        self,
+        movies: list[Movie],
+        schedule: ScheduleDefinition,
+        client: RadarrClient | None = None,
     ) -> BatchResult:
         """Process a batch of movies with concurrent execution.
 
@@ -202,6 +240,8 @@ class JobExecutor:
         Args:
             movies: List of movies to check
             schedule: Schedule definition
+            client: Optional pre-created RadarrClient for connection reuse.
+                   If provided, it will be injected into the ReleaseChecker.
 
         Returns:
             BatchResult with aggregated results
@@ -213,8 +253,8 @@ class JobExecutor:
         result = BatchResult()
         lock = asyncio.Lock()
 
-        # Create a single checker for the entire batch (connection pooling)
-        checker = self._create_checker(need_radarr=True)
+        # Create a checker that reuses the injected client (connection pooling)
+        checker = self._create_checker(need_radarr=True, radarr_client=client)
 
         async def check_with_limit(movie: Movie) -> None:
             async with semaphore:
@@ -251,7 +291,10 @@ class JobExecutor:
         return result
 
     async def _process_series_batch(
-        self, series_list: list[Series], schedule: ScheduleDefinition
+        self,
+        series_list: list[Series],
+        schedule: ScheduleDefinition,
+        client: SonarrClient | None = None,
     ) -> BatchResult:
         """Process a batch of series with concurrent execution.
 
@@ -261,6 +304,8 @@ class JobExecutor:
         Args:
             series_list: List of series to check
             schedule: Schedule definition
+            client: Optional pre-created SonarrClient for connection reuse.
+                   If provided, it will be injected into the ReleaseChecker.
 
         Returns:
             BatchResult with aggregated results
@@ -272,8 +317,8 @@ class JobExecutor:
         result = BatchResult()
         lock = asyncio.Lock()
 
-        # Create a single checker for the entire batch (connection pooling)
-        checker = self._create_checker(need_sonarr=True)
+        # Create a checker that reuses the injected client (connection pooling)
+        checker = self._create_checker(need_sonarr=True, sonarr_client=client)
 
         async def check_with_limit(series: Series) -> None:
             async with semaphore:
@@ -309,63 +354,65 @@ class JobExecutor:
             await asyncio.gather(*[check_with_limit(series) for series in series_list])
         return result
 
-    async def _get_movies_to_check(self, schedule: ScheduleDefinition) -> list[Movie]:
+    async def _get_movies_to_check(
+        self, schedule: ScheduleDefinition, client: RadarrClient
+    ) -> list[Movie]:
         """Get list of movies to check based on schedule settings.
 
         Args:
             schedule: Schedule definition
+            client: RadarrClient instance for API calls (enables connection reuse)
 
         Returns:
             List of movies to check
         """
-        radarr = self._config.require_radarr()
-        async with RadarrClient(radarr.url, radarr.api_key, timeout=self._config.timeout) as client:
-            all_movies = await client.get_all_movies()
+        all_movies = await client.get_all_movies()
 
-            if not schedule.skip_tagged:
-                return all_movies
+        if not schedule.skip_tagged:
+            return all_movies
 
-            # Get tags to skip using the new pattern-based API
-            available_tag, unavailable_tag = self._config.tags.get_tag_names("4k")
-            tag_names = {available_tag, unavailable_tag}
-            all_tags = await client.get_tags()
-            skip_tag_ids = {tag.id for tag in all_tags if tag.label in tag_names}
+        # Get tags to skip using the new pattern-based API
+        available_tag, unavailable_tag = self._config.tags.get_tag_names("4k")
+        tag_names = {available_tag, unavailable_tag}
+        all_tags = await client.get_tags()
+        skip_tag_ids = {tag.id for tag in all_tags if tag.label in tag_names}
 
-            # Filter out already-tagged movies
-            return [
-                movie
-                for movie in all_movies
-                if not any(tag_id in skip_tag_ids for tag_id in movie.tags)
-            ]
+        # Filter out already-tagged movies
+        return [
+            movie
+            for movie in all_movies
+            if not any(tag_id in skip_tag_ids for tag_id in movie.tags)
+        ]
 
-    async def _get_series_to_check(self, schedule: ScheduleDefinition) -> list[Series]:
+    async def _get_series_to_check(
+        self, schedule: ScheduleDefinition, client: SonarrClient
+    ) -> list[Series]:
         """Get list of series to check based on schedule settings.
 
         Args:
             schedule: Schedule definition
+            client: SonarrClient instance for API calls (enables connection reuse)
 
         Returns:
             List of series to check
         """
-        sonarr = self._config.require_sonarr()
-        async with SonarrClient(sonarr.url, sonarr.api_key, timeout=self._config.timeout) as client:
-            all_series = await client.get_all_series()
+        all_series = await client.get_all_series()
 
-            if not schedule.skip_tagged:
-                return all_series
+        if not schedule.skip_tagged:
+            return all_series
 
-            # Get tags to skip using the new pattern-based API
-            available_tag, unavailable_tag = self._config.tags.get_tag_names("4k")
-            tag_names = {available_tag, unavailable_tag}
-            all_tags = await client.get_tags()
-            skip_tag_ids = {tag.id for tag in all_tags if tag.label in tag_names}
+        # Get tags to skip using the new pattern-based API
+        available_tag, unavailable_tag = self._config.tags.get_tag_names("4k")
+        tag_names = {available_tag, unavailable_tag}
+        all_tags = await client.get_tags()
+        skip_tag_ids = {tag.id for tag in all_tags if tag.label in tag_names}
 
-            # Filter out already-tagged series
-            return [
-                series
-                for series in all_series
-                if not any(tag_id in skip_tag_ids for tag_id in series.tags)
-            ]
+        # Filter out already-tagged series
+        return [
+            series
+            for series in all_series
+            if not any(tag_id in skip_tag_ids for tag_id in series.tags)
+        ]
 
     async def _check_movie(
         self,
@@ -430,27 +477,36 @@ class JobExecutor:
         )
 
     def _create_checker(
-        self, need_radarr: bool = False, need_sonarr: bool = False
+        self,
+        need_radarr: bool = False,
+        need_sonarr: bool = False,
+        radarr_client: RadarrClient | None = None,
+        sonarr_client: SonarrClient | None = None,
     ) -> ReleaseChecker:
         """Create a ReleaseChecker instance.
 
         Args:
             need_radarr: Whether Radarr is needed
             need_sonarr: Whether Sonarr is needed
+            radarr_client: Optional pre-created RadarrClient for connection reuse.
+                          If provided, takes precedence and URL/API key are not used.
+            sonarr_client: Optional pre-created SonarrClient for connection reuse.
+                          If provided, takes precedence and URL/API key are not used.
 
         Returns:
-            Configured ReleaseChecker instance
+            Configured ReleaseChecker instance with optional client injection
         """
         radarr_url = None
         radarr_api_key = None
         sonarr_url = None
         sonarr_api_key = None
 
-        if need_radarr and self._config.radarr:
+        # Only set URL/API key if client is not injected
+        if need_radarr and radarr_client is None and self._config.radarr:
             radarr_url = self._config.radarr.url
             radarr_api_key = self._config.radarr.api_key
 
-        if need_sonarr and self._config.sonarr:
+        if need_sonarr and sonarr_client is None and self._config.sonarr:
             sonarr_url = self._config.sonarr.url
             sonarr_api_key = self._config.sonarr.api_key
 
@@ -461,6 +517,8 @@ class JobExecutor:
             sonarr_api_key=sonarr_api_key,
             timeout=self._config.timeout,
             tag_config=self._config.tags,
+            radarr_client=radarr_client,
+            sonarr_client=sonarr_client,
         )
 
 

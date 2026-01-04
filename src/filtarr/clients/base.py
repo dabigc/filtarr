@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import logging
 import time
@@ -11,16 +12,128 @@ from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
 import httpx
 from cachetools import TTLCache
 from tenacity import (
+    RetryCallState,
     retry,
-    retry_if_exception_type,
+    retry_base,
     stop_after_attempt,
     wait_exponential,
 )
+
+# Status codes that should trigger a retry
+RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+
+
+class RetryableHTTPError(Exception):
+    """Exception for HTTP errors that should trigger a retry.
+
+    This exception wraps HTTPStatusError for cases where we want to retry
+    (429, 5xx responses) and carries the retry delay from Retry-After header.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        response: httpx.Response,
+        retry_after: float | None = None,
+    ) -> None:
+        """Initialize RetryableHTTPError.
+
+        Args:
+            message: Error message
+            response: The HTTP response that triggered the error
+            retry_after: Optional delay in seconds from Retry-After header
+        """
+        super().__init__(message)
+        self.response = response
+        self.retry_after = retry_after
+
+    @property
+    def status_code(self) -> int:
+        """Get the HTTP status code."""
+        return self.response.status_code
+
+
+class RetryPredicate(retry_base):
+    """Custom retry predicate that retries on connection errors and retryable HTTP errors."""
+
+    def __call__(self, retry_state: RetryCallState) -> bool:
+        """Check if the exception should trigger a retry.
+
+        Args:
+            retry_state: The current retry state
+
+        Returns:
+            True if the exception should trigger a retry
+        """
+        if retry_state.outcome is None:
+            return False
+
+        exception = retry_state.outcome.exception()
+        if exception is None:
+            return False
+
+        # Retry on connection errors
+        if isinstance(exception, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)):
+            return True
+
+        # Retry on our custom retryable HTTP error
+        return isinstance(exception, RetryableHTTPError)
+
+
+class RetryAfterWait(wait_exponential):
+    """Custom wait strategy that respects Retry-After header when present."""
+
+    def __call__(self, retry_state: RetryCallState) -> float:
+        """Calculate the wait time, respecting Retry-After if available.
+
+        Args:
+            retry_state: The current retry state
+
+        Returns:
+            Wait time in seconds
+        """
+        # Check if the exception has a retry_after value
+        if retry_state.outcome is not None:
+            exception = retry_state.outcome.exception()
+            if isinstance(exception, RetryableHTTPError) and exception.retry_after is not None:
+                return exception.retry_after
+
+        # Fall back to exponential backoff
+        return super().__call__(retry_state)
+
 
 if TYPE_CHECKING:
     from filtarr.models.common import Release, Tag
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class ReleaseProvider(Protocol):
+    """Protocol for clients that can fetch releases for media items.
+
+    This protocol defines the interface for clients that can search for and
+    return releases from indexers. Both RadarrClient and SonarrClient implement
+    this protocol, allowing them to be used polymorphically in release-checking
+    operations.
+
+    Example:
+        async def check_releases(provider: ReleaseProvider, item_id: int) -> bool:
+            releases = await provider.get_releases_for_item(item_id)
+            return any(r.is_4k() for r in releases)
+    """
+
+    async def get_releases_for_item(self, item_id: int) -> list[Release]:
+        """Fetch releases for a specific media item.
+
+        Args:
+            item_id: The ID of the media item (movie ID for Radarr,
+                     series ID for Sonarr)
+
+        Returns:
+            List of Release models found by indexers
+        """
+        ...
 
 
 @runtime_checkable
@@ -96,6 +209,8 @@ class BaseArrClient:
         timeout: float = 120.0,
         cache_ttl: int = 300,
         max_retries: int = 3,
+        max_connections: int = 20,
+        max_keepalive_connections: int = 10,
     ) -> None:
         """Initialize the client.
 
@@ -105,23 +220,40 @@ class BaseArrClient:
             timeout: Request timeout in seconds (default 120.0)
             cache_ttl: Cache time-to-live in seconds (default 300)
             max_retries: Maximum number of retry attempts (default 3)
+            max_connections: Maximum number of concurrent connections in the pool
+                (default 20). This limits the total number of simultaneous
+                connections to the server.
+            max_keepalive_connections: Maximum number of idle keep-alive connections
+                to maintain in the pool (default 10). Keep-alive connections are
+                reused for subsequent requests to avoid connection overhead.
         """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
         self.cache_ttl = cache_ttl
         self.max_retries = max_retries
+        self.max_connections = max_connections
+        self.max_keepalive_connections = max_keepalive_connections
 
         self._client: httpx.AsyncClient | None = None
         self._cache: TTLCache[str, Any] = TTLCache(maxsize=1000, ttl=cache_ttl)
         self._cache_lock = asyncio.Lock()
+        # Pending requests for stampede protection (thundering herd prevention)
+        # Maps cache_key -> (Event, result_holder)
+        # result_holder is a dict with 'data' or 'error' key once completed
+        self._pending_requests: dict[str, tuple[asyncio.Event, dict[str, Any]]] = {}
 
     async def __aenter__(self) -> Self:
         """Enter async context manager."""
+        limits = httpx.Limits(
+            max_connections=self.max_connections,
+            max_keepalive_connections=self.max_keepalive_connections,
+        )
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             headers={"X-Api-Key": self.api_key},
             timeout=self.timeout,
+            limits=limits,
         )
         return self
 
@@ -160,10 +292,11 @@ class BaseArrClient:
         return hashlib.sha256(key_data.encode()).hexdigest()[:16]
 
     async def _get(self, endpoint: str, params: dict[str, Any] | None = None) -> Any:
-        """Make a cached GET request.
+        """Make a cached GET request with stampede protection.
 
         Checks the cache first. If not found, makes the request and caches
-        the result.
+        the result. Includes stampede protection to prevent thundering herd
+        when multiple concurrent requests hit the same uncached key.
 
         Args:
             endpoint: The API endpoint path (e.g., "/api/v3/release")
@@ -177,21 +310,67 @@ class BaseArrClient:
         """
         cache_key = self._make_cache_key(endpoint, params)
 
-        # Check cache first (with lock for async safety)
+        # Variables to track if we're the leader or a waiter
+        is_leader = False
+        event: asyncio.Event | None = None
+        result_holder: dict[str, Any] | None = None
+
         async with self._cache_lock:
+            # Check cache first
             if cache_key in self._cache:
                 logger.debug("Cache hit for %s", endpoint)
                 return self._cache[cache_key]
 
-        # Cache miss - fetch from API
-        logger.debug("Cache miss for %s, fetching from API", endpoint)
-        data = await self._get_uncached(endpoint, params)
+            # Check if there's already a pending request for this key
+            if cache_key in self._pending_requests:
+                # Another request is already fetching this data - we'll wait for it
+                event, result_holder = self._pending_requests[cache_key]
+                logger.debug("Waiting for pending request for %s", endpoint)
+            else:
+                # We'll be the "leader" - create the pending request entry
+                is_leader = True
+                event = asyncio.Event()
+                result_holder = {}
+                self._pending_requests[cache_key] = (event, result_holder)
+                logger.debug("Cache miss for %s, fetching from API", endpoint)
 
-        # Store in cache
-        async with self._cache_lock:
-            self._cache[cache_key] = data
+        # If we're a waiter (not the leader), wait for the leader to complete
+        if not is_leader:
+            assert event is not None and result_holder is not None
+            await event.wait()
 
-        return data
+            # Return the result or re-raise the error
+            if "error" in result_holder:
+                raise result_holder["error"]
+            return result_holder["data"]
+
+        # We're the leader - fetch the data
+        assert event is not None and result_holder is not None
+        try:
+            data = await self._get_uncached(endpoint, params)
+
+            # Store in cache and set result for waiters
+            async with self._cache_lock:
+                self._cache[cache_key] = data
+                result_holder["data"] = data
+                # Clean up pending request entry
+                self._pending_requests.pop(cache_key, None)
+
+            # Signal waiters that data is ready (outside lock to avoid deadlock)
+            event.set()
+
+            return data
+
+        except Exception as e:
+            # Store error for waiters
+            async with self._cache_lock:
+                result_holder["error"] = e
+                # Clean up pending request entry
+                self._pending_requests.pop(cache_key, None)
+
+            # Signal waiters that we're done (with error)
+            event.set()
+            raise
 
     async def _get_uncached(self, endpoint: str, params: dict[str, Any] | None = None) -> Any:
         """Make a GET request without caching.
@@ -248,10 +427,8 @@ class BaseArrClient:
 
         @retry(
             stop=stop_after_attempt(self.max_retries),
-            wait=wait_exponential(multiplier=1, min=1, max=10),
-            retry=retry_if_exception_type(
-                (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)
-            ),
+            wait=RetryAfterWait(multiplier=1, min=1, max=10),
+            retry=RetryPredicate(),
             before_sleep=self._log_retry,
             reraise=True,
         )
@@ -267,10 +444,24 @@ class BaseArrClient:
             if response.status_code in (401, 404):
                 response.raise_for_status()
 
-            # Retry on 429 or 5xx
-            if response.status_code == 429 or response.status_code >= 500:
+            # Retry on 429 or 5xx - raise RetryableHTTPError
+            if response.status_code in RETRYABLE_STATUS_CODES:
                 logger.warning("Retryable HTTP error %d for %s", response.status_code, endpoint)
-                response.raise_for_status()
+
+                # Parse Retry-After header if present (for 429 responses)
+                retry_after: float | None = None
+                if response.status_code == 429:
+                    retry_after_header = response.headers.get("Retry-After")
+                    if retry_after_header:
+                        # Retry-After can also be an HTTP date, but we only parse numeric values
+                        with contextlib.suppress(ValueError):
+                            retry_after = float(retry_after_header)
+
+                raise RetryableHTTPError(
+                    f"Retryable HTTP error {response.status_code} for {endpoint}",
+                    response=response,
+                    retry_after=retry_after,
+                )
 
             # Other errors - raise without retry
             response.raise_for_status()
@@ -290,6 +481,16 @@ class BaseArrClient:
             elif elapsed > 2.0:
                 logger.debug("Request to %s took %.2fs", endpoint, elapsed)
             return result
+        except RetryableHTTPError as e:
+            # Re-raise as HTTPStatusError to maintain backward compatibility
+            elapsed = time.monotonic() - start_time
+            logger.warning(
+                "Request to %s failed after %.2fs",
+                endpoint,
+                elapsed,
+            )
+            e.response.raise_for_status()
+            raise  # This line is never reached, but needed for type checking
         except Exception:
             elapsed = time.monotonic() - start_time
             logger.warning(

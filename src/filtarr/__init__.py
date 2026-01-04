@@ -94,7 +94,7 @@ SonarrClient
     Low-level async client for the Sonarr API.
 """
 
-from filtarr.checker import ReleaseChecker, SamplingStrategy, SearchResult
+from filtarr.checker import MediaType, ReleaseChecker, SamplingStrategy, SearchResult
 from filtarr.clients.radarr import RadarrClient
 from filtarr.clients.sonarr import SonarrClient
 from filtarr.criteria import ResultType, SearchCriteria
@@ -102,6 +102,7 @@ from filtarr.criteria import ResultType, SearchCriteria
 __version__ = "2.1.0"
 
 __all__ = [
+    "MediaType",
     "RadarrClient",
     "ReleaseChecker",
     "ResultType",

@@ -9,6 +9,8 @@ import pytest
 import respx
 from httpx import Response
 
+from filtarr.clients.radarr import RadarrClient
+from filtarr.clients.sonarr import SonarrClient
 from filtarr.config import Config, RadarrConfig, SchedulerConfig, SonarrConfig, TagConfig
 from filtarr.scheduler import (
     IntervalTrigger,
@@ -371,7 +373,8 @@ class TestGetSeriesToCheck:
         )
 
         executor = JobExecutor(mock_config, mock_state_manager)
-        series = await executor._get_series_to_check(schedule)
+        async with SonarrClient("http://127.0.0.1:8989", "sonarr-key") as client:
+            series = await executor._get_series_to_check(schedule, client)
 
         # Both series should be returned since skip_tagged=False
         assert len(series) == 2
@@ -410,7 +413,8 @@ class TestGetSeriesToCheck:
         )
 
         executor = JobExecutor(mock_config, mock_state_manager)
-        series = await executor._get_series_to_check(schedule)
+        async with SonarrClient("http://127.0.0.1:8989", "sonarr-key") as client:
+            series = await executor._get_series_to_check(schedule, client)
 
         # Only series 2 should be returned (series 1 has tag id 1 which is 4k-available)
         assert len(series) == 1
@@ -445,7 +449,8 @@ class TestGetMoviesToCheck:
         )
 
         executor = JobExecutor(mock_config, mock_state_manager)
-        movies = await executor._get_movies_to_check(schedule)
+        async with RadarrClient("http://localhost:7878", "radarr-key") as client:
+            movies = await executor._get_movies_to_check(schedule, client)
 
         # Both movies should be returned
         assert len(movies) == 2
@@ -485,7 +490,8 @@ class TestGetMoviesToCheck:
         )
 
         executor = JobExecutor(mock_config, mock_state_manager)
-        movies = await executor._get_movies_to_check(schedule)
+        async with RadarrClient("http://localhost:7878", "radarr-key") as client:
+            movies = await executor._get_movies_to_check(schedule, client)
 
         # Only movie 3 should be returned (movie 1 and 2 have skip tags)
         assert len(movies) == 1
@@ -1518,3 +1524,401 @@ class TestScheduleDefinitionConcurrency:
                 trigger=IntervalTrigger(hours=6),
                 concurrency=0,
             )
+
+
+class TestClientReuseForFetchAndBatch:
+    """Tests for Task 4.2: Verify same client is reused for fetch and batch processing.
+
+    The goal is to ensure:
+    1. Same client instance used for list fetch and batch processing
+    2. Client lifecycle is managed correctly
+    3. Connection pooling is utilized (mock verification)
+    4. Error handling when client fails mid-batch
+    """
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_same_radarr_client_used_for_fetch_and_batch(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Verify that the same RadarrClient is used for fetching movies and batch processing.
+
+        This test verifies that we don't create separate client instances for:
+        1. _get_movies_to_check (list fetching)
+        2. _process_movies_batch (batch processing)
+        """
+        radarr_client_instances: list[object] = []
+
+        # Track RadarrClient instantiations
+        original_radarr_init = RadarrClient.__init__
+
+        def tracking_radarr_init(self: RadarrClient, *args: object, **kwargs: object) -> None:
+            radarr_client_instances.append(self)
+            original_radarr_init(self, *args, **kwargs)
+
+        # Mock endpoints
+        respx.get("http://localhost:7878/api/v3/movie").mock(
+            return_value=Response(
+                200,
+                json=[{"id": 1, "title": "Movie 1", "year": 2024, "tags": []}],
+            )
+        )
+        respx.get("http://localhost:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.get("http://localhost:7878/api/v3/movie/1").mock(
+            return_value=Response(
+                200,
+                json={"id": 1, "title": "Movie 1", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "1"}).mock(
+            return_value=Response(200, json=[])
+        )
+        respx.post("http://localhost:7878/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-unavailable"})
+        )
+        respx.put("http://localhost:7878/api/v3/movie/1").mock(
+            return_value=Response(
+                200,
+                json={"id": 1, "title": "Movie 1", "year": 2024, "tags": [1]},
+            )
+        )
+
+        schedule = ScheduleDefinition(
+            name="test-client-reuse",
+            target=ScheduleTarget.MOVIES,
+            trigger=IntervalTrigger(hours=6),
+            delay=0,
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+
+        with patch.object(RadarrClient, "__init__", tracking_radarr_init):
+            result = await executor.execute(schedule)
+
+        assert result.status == RunStatus.COMPLETED
+        assert result.items_processed == 1
+
+        # KEY ASSERTION: Only ONE RadarrClient should be created for both
+        # list fetch AND batch processing (connection pooling)
+        # Currently this will FAIL because we create 2 clients:
+        # one in _get_movies_to_check and one in ReleaseChecker._process_movies_batch
+        assert len(radarr_client_instances) == 1, (
+            f"Expected 1 RadarrClient instance, got {len(radarr_client_instances)}. "
+            "Client should be reused between list fetch and batch processing."
+        )
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_same_sonarr_client_used_for_fetch_and_batch(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Verify that the same SonarrClient is used for fetching series and batch processing."""
+        sonarr_client_instances: list[object] = []
+
+        # Track SonarrClient instantiations
+        original_sonarr_init = SonarrClient.__init__
+
+        def tracking_sonarr_init(self: SonarrClient, *args: object, **kwargs: object) -> None:
+            sonarr_client_instances.append(self)
+            original_sonarr_init(self, *args, **kwargs)
+
+        # Mock endpoints
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(
+            return_value=Response(
+                200,
+                json=[{"id": 1, "title": "Series 1", "year": 2024, "seasons": [], "tags": []}],
+            )
+        )
+        respx.get("http://127.0.0.1:8989/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.get("http://127.0.0.1:8989/api/v3/series/1").mock(
+            return_value=Response(
+                200,
+                json={"id": 1, "title": "Series 1", "year": 2024, "seasons": [], "tags": []},
+            )
+        )
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "1"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 101,
+                        "seriesId": 1,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2024-01-01",
+                        "monitored": True,
+                    }
+                ],
+            )
+        )
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
+            return_value=Response(200, json=[])
+        )
+        respx.post("http://127.0.0.1:8989/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-unavailable"})
+        )
+        respx.put("http://127.0.0.1:8989/api/v3/series/1").mock(
+            return_value=Response(
+                200,
+                json={"id": 1, "title": "Series 1", "year": 2024, "seasons": [], "tags": [1]},
+            )
+        )
+
+        schedule = ScheduleDefinition(
+            name="test-client-reuse-series",
+            target=ScheduleTarget.SERIES,
+            trigger=IntervalTrigger(hours=6),
+            delay=0,
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+
+        with patch.object(SonarrClient, "__init__", tracking_sonarr_init):
+            result = await executor.execute(schedule)
+
+        assert result.status == RunStatus.COMPLETED
+        assert result.items_processed == 1
+
+        # KEY ASSERTION: Only ONE SonarrClient should be created
+        assert len(sonarr_client_instances) == 1, (
+            f"Expected 1 SonarrClient instance, got {len(sonarr_client_instances)}. "
+            "Client should be reused between list fetch and batch processing."
+        )
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_client_lifecycle_managed_correctly(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Verify that client is properly opened and closed during execute().
+
+        The client should:
+        1. Be created once at the start of execute()
+        2. Stay open for all operations (list fetch + batch processing)
+        3. Be properly closed at the end (even on success)
+        """
+        aenter_calls = 0
+        aexit_calls = 0
+
+        original_aenter = RadarrClient.__aenter__
+        original_aexit = RadarrClient.__aexit__
+
+        async def tracking_aenter(self: RadarrClient) -> RadarrClient:
+            nonlocal aenter_calls
+            aenter_calls += 1
+            return await original_aenter(self)
+
+        async def tracking_aexit(self: RadarrClient, *args: object, **kwargs: object) -> None:
+            nonlocal aexit_calls
+            aexit_calls += 1
+            return await original_aexit(self, *args, **kwargs)
+
+        # Mock endpoints
+        respx.get("http://localhost:7878/api/v3/movie").mock(
+            return_value=Response(
+                200,
+                json=[{"id": 1, "title": "Movie 1", "year": 2024, "tags": []}],
+            )
+        )
+        respx.get("http://localhost:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+        respx.get("http://localhost:7878/api/v3/movie/1").mock(
+            return_value=Response(
+                200,
+                json={"id": 1, "title": "Movie 1", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "1"}).mock(
+            return_value=Response(200, json=[])
+        )
+        respx.post("http://localhost:7878/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-unavailable"})
+        )
+        respx.put("http://localhost:7878/api/v3/movie/1").mock(
+            return_value=Response(
+                200,
+                json={"id": 1, "title": "Movie 1", "year": 2024, "tags": [1]},
+            )
+        )
+
+        schedule = ScheduleDefinition(
+            name="test-lifecycle",
+            target=ScheduleTarget.MOVIES,
+            trigger=IntervalTrigger(hours=6),
+            delay=0,
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+
+        with (
+            patch.object(RadarrClient, "__aenter__", tracking_aenter),
+            patch.object(RadarrClient, "__aexit__", tracking_aexit),
+        ):
+            result = await executor.execute(schedule)
+
+        assert result.status == RunStatus.COMPLETED
+
+        # Verify lifecycle: should be opened once and closed once
+        # (only 1 client lifecycle for both list fetch and batch processing)
+        assert aenter_calls == 1, (
+            f"Expected 1 __aenter__ call, got {aenter_calls}. "
+            "Client should be opened once for entire operation."
+        )
+        assert aexit_calls == 1, (
+            f"Expected 1 __aexit__ call, got {aexit_calls}. "
+            "Client should be closed once after entire operation."
+        )
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_error_during_batch_properly_closes_client(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Verify that client is properly closed even when batch processing fails.
+
+        The client should be closed in the finally block even if an error occurs
+        mid-batch processing.
+        """
+        aexit_calls = 0
+
+        original_aexit = RadarrClient.__aexit__
+
+        async def tracking_aexit(self: RadarrClient, *args: object, **kwargs: object) -> None:
+            nonlocal aexit_calls
+            aexit_calls += 1
+            return await original_aexit(self, *args, **kwargs)
+
+        # Mock endpoints - list fetch succeeds
+        respx.get("http://localhost:7878/api/v3/movie").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": 1, "title": "Movie 1", "year": 2024, "tags": []},
+                    {"id": 2, "title": "Movie 2", "year": 2024, "tags": []},
+                ],
+            )
+        )
+        respx.get("http://localhost:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+
+        # First movie fails, second movie succeeds
+        respx.get("http://localhost:7878/api/v3/movie/1").mock(
+            return_value=Response(500, json={"error": "Server error"})
+        )
+        respx.get("http://localhost:7878/api/v3/movie/2").mock(
+            return_value=Response(
+                200,
+                json={"id": 2, "title": "Movie 2", "year": 2024, "tags": []},
+            )
+        )
+        respx.get("http://localhost:7878/api/v3/release", params={"movieId": "2"}).mock(
+            return_value=Response(200, json=[])
+        )
+        respx.post("http://localhost:7878/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-unavailable"})
+        )
+        respx.put("http://localhost:7878/api/v3/movie/2").mock(
+            return_value=Response(
+                200,
+                json={"id": 2, "title": "Movie 2", "year": 2024, "tags": [1]},
+            )
+        )
+
+        schedule = ScheduleDefinition(
+            name="test-error-cleanup",
+            target=ScheduleTarget.MOVIES,
+            trigger=IntervalTrigger(hours=6),
+            delay=0,
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+
+        with patch.object(RadarrClient, "__aexit__", tracking_aexit):
+            result = await executor.execute(schedule)
+
+        # Partial success expected
+        assert result.items_processed == 1
+        assert len(result.errors) == 1
+
+        # KEY: Client should still be closed properly
+        assert aexit_calls == 1, (
+            f"Expected 1 __aexit__ call, got {aexit_calls}. "
+            "Client should be closed even when errors occur mid-batch."
+        )
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_connection_pooling_verified_same_httpx_client(
+        self, mock_config: Config, mock_state_manager: StateManager
+    ) -> None:
+        """Verify that httpx connection pooling is utilized by tracking request calls.
+
+        When the same client is reused, all requests should go through the same
+        httpx.AsyncClient instance, enabling connection reuse.
+        """
+        request_client_ids: list[int] = []
+
+        # Track the client used for each request
+        original_request = RadarrClient._request_with_retry
+
+        async def tracking_request(
+            self: RadarrClient, method: str, path: str, **kwargs: object
+        ) -> object:
+            # Track the httpx client id being used
+            if hasattr(self, "_client") and self._client is not None:
+                request_client_ids.append(id(self._client))
+            return await original_request(self, method, path, **kwargs)
+
+        # Mock endpoints for 3 movies
+        respx.get("http://localhost:7878/api/v3/movie").mock(
+            return_value=Response(
+                200,
+                json=[
+                    {"id": i, "title": f"Movie {i}", "year": 2024, "tags": []} for i in range(1, 4)
+                ],
+            )
+        )
+        respx.get("http://localhost:7878/api/v3/tag").mock(return_value=Response(200, json=[]))
+
+        for movie_id in range(1, 4):
+            respx.get(f"http://localhost:7878/api/v3/movie/{movie_id}").mock(
+                return_value=Response(
+                    200,
+                    json={"id": movie_id, "title": f"Movie {movie_id}", "year": 2024, "tags": []},
+                )
+            )
+            respx.get(
+                "http://localhost:7878/api/v3/release", params={"movieId": str(movie_id)}
+            ).mock(return_value=Response(200, json=[]))
+            respx.put(f"http://localhost:7878/api/v3/movie/{movie_id}").mock(
+                return_value=Response(
+                    200,
+                    json={"id": movie_id, "title": f"Movie {movie_id}", "year": 2024, "tags": [1]},
+                )
+            )
+
+        respx.post("http://localhost:7878/api/v3/tag").mock(
+            return_value=Response(201, json={"id": 1, "label": "4k-unavailable"})
+        )
+
+        schedule = ScheduleDefinition(
+            name="test-connection-pool",
+            target=ScheduleTarget.MOVIES,
+            trigger=IntervalTrigger(hours=6),
+            delay=0,
+        )
+
+        executor = JobExecutor(mock_config, mock_state_manager)
+
+        with patch.object(RadarrClient, "_request_with_retry", tracking_request):
+            result = await executor.execute(schedule)
+
+        assert result.status == RunStatus.COMPLETED
+        assert result.items_processed == 3
+
+        # All requests should use the same httpx client (same id)
+        assert len(request_client_ids) > 0, "Expected some requests to be tracked"
+        unique_client_ids = set(request_client_ids)
+        assert len(unique_client_ids) == 1, (
+            f"Expected all requests to use same httpx client, "
+            f"but found {len(unique_client_ids)} different clients: {unique_client_ids}. "
+            "This indicates connection pooling is not being utilized."
+        )

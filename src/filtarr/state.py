@@ -256,16 +256,49 @@ class StateFile:
 
 
 class StateManager:
-    """Manager for loading and saving state files."""
+    """Manager for loading and saving state files.
 
-    def __init__(self, path: Path) -> None:
+    Supports write batching to reduce disk I/O during batch operations.
+    Writes are batched by default (every 100 operations) to improve performance.
+    Use flush() to force an immediate write, or use as a context manager to
+    ensure pending writes are flushed on exit.
+    """
+
+    def __init__(self, path: Path, batch_size: int = 100) -> None:
         """Initialize the state manager.
 
         Args:
             path: Path to the state file
+            batch_size: Number of operations before automatic write (default: 100).
+                        Set to 1 to write on every operation (no batching).
         """
         self.path = path
+        self.batch_size = batch_size
         self._state: StateFile | None = None
+        self._pending_writes: int = 0
+
+    def __enter__(self) -> StateManager:
+        """Enter context manager."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        """Exit context manager, flushing any pending writes."""
+        self.flush()
+
+    @property
+    def pending_writes(self) -> int:
+        """Number of pending (unflushed) writes."""
+        return self._pending_writes
+
+    @property
+    def has_pending_writes(self) -> bool:
+        """Whether there are pending unflushed writes."""
+        return self._pending_writes > 0
 
     def load(self) -> StateFile:
         """Load state from file, creating empty state if file doesn't exist.
@@ -290,8 +323,11 @@ class StateManager:
 
         return self._state
 
-    def save(self) -> None:
-        """Save state to file."""
+    def _do_save(self) -> None:
+        """Perform the actual save to disk (internal method).
+
+        This is the low-level save operation. Use save() or flush() instead.
+        """
         if self._state is None:
             return
 
@@ -304,6 +340,35 @@ class StateManager:
         except OSError as e:
             logger.error("Failed to save state file %s: %s", self.path, e)
 
+    def save(self) -> None:
+        """Save state to file (immediate write, resets pending count).
+
+        Note: For batched operations, use _maybe_save() which respects batch_size.
+        This method always writes immediately.
+        """
+        self._do_save()
+        self._pending_writes = 0
+
+    def flush(self) -> None:
+        """Force immediate write of any pending changes.
+
+        Call this to ensure all in-memory changes are persisted to disk.
+        This is automatically called when using StateManager as a context manager.
+        """
+        if self._pending_writes > 0 or self._state is not None:
+            self._do_save()
+            self._pending_writes = 0
+
+    def _maybe_save(self) -> None:
+        """Increment pending count and save if batch_size reached.
+
+        Internal method used by operations that should be batched.
+        """
+        self._pending_writes += 1
+        if self._pending_writes >= self.batch_size:
+            self._do_save()
+            self._pending_writes = 0
+
     def record_check(
         self,
         item_type: Literal["movie", "series"],
@@ -311,17 +376,20 @@ class StateManager:
         has_4k: bool,
         tag_applied: str | None = None,
     ) -> None:
-        """Record a check result and save state.
+        """Record a check result (batched write).
 
         Args:
             item_type: "movie" or "series"
             item_id: The item ID
             has_4k: Whether 4K was available
             tag_applied: The tag that was applied (if any)
+
+        Note: Writes are batched based on batch_size. Use flush() to force
+        immediate persistence, or use StateManager as a context manager.
         """
         state = self.load()
         state.record_check(item_type, item_id, has_4k, tag_applied)
-        self.save()
+        self._maybe_save()
 
     def get_stale_unavailable_items(
         self, recheck_days: int
@@ -441,15 +509,18 @@ class StateManager:
         return state.batch_progress
 
     def update_batch_progress(self, item_id: int) -> None:
-        """Mark an item as processed in the current batch.
+        """Mark an item as processed in the current batch (batched write).
 
         Args:
             item_id: The ID of the processed item
+
+        Note: Writes are batched based on batch_size. Use flush() to force
+        immediate persistence.
         """
         state = self.load()
         if state.batch_progress is not None:
             state.batch_progress.mark_processed(item_id)
-            self.save()
+            self._maybe_save()
 
     def clear_batch_progress(self) -> None:
         """Clear the batch progress (call on successful completion)."""

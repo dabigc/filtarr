@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json as json_module
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
 from pydantic import ValidationError
@@ -25,13 +26,6 @@ if TYPE_CHECKING:
     from filtarr.tagger import TagResult
 
 logger = logging.getLogger(__name__)
-
-# Global reference to scheduler manager for status endpoint
-_scheduler_manager: SchedulerManager | None = None
-# Global reference to state manager for TTL checks
-_state_manager: StateManager | None = None
-# Global reference to output format for JSON mode
-_output_format: str = "text"
 
 
 def _output_json_event(event_type: str, **data: object) -> None:
@@ -52,6 +46,8 @@ def _output_json_event(event_type: str, **data: object) -> None:
 def _validate_api_key(api_key: str | None, config: Config) -> str | None:
     """Validate the API key against configured keys.
 
+    Uses hmac.compare_digest for constant-time comparison to prevent timing attacks.
+
     Args:
         api_key: The API key from the X-Api-Key header.
         config: Application configuration.
@@ -62,12 +58,12 @@ def _validate_api_key(api_key: str | None, config: Config) -> str | None:
     if not api_key:
         return None
 
-    # Check against Radarr API key
-    if config.radarr and api_key == config.radarr.api_key:
+    # Check against Radarr API key using constant-time comparison
+    if config.radarr and hmac.compare_digest(api_key, config.radarr.api_key):
         return "radarr"
 
-    # Check against Sonarr API key
-    if config.sonarr and api_key == config.sonarr.api_key:
+    # Check against Sonarr API key using constant-time comparison
+    if config.sonarr and hmac.compare_digest(api_key, config.sonarr.api_key):
         return "sonarr"
 
     return None
@@ -123,17 +119,38 @@ def _format_check_outcome(
         return "4K not available (tagging disabled)"
 
 
-async def _process_movie_check(movie_id: int, movie_title: str, config: Config) -> None:
-    """Background task to check 4K availability for a movie."""
-    if _output_format == "json":
-        _output_json_event("webhook_received", source="radarr", title=movie_title)
+async def _process_media_check(
+    media_type: Literal["movie", "series"],
+    media_id: int,
+    media_title: str,
+    config: Config,
+    state_manager: StateManager | None = None,
+    output_format: str = "text",
+) -> None:
+    """Generic background task to check 4K availability for media.
+
+    This function handles both movie and series checks, parameterized by media_type.
+
+    Args:
+        media_type: Type of media ("movie" or "series").
+        media_id: The Radarr movie ID or Sonarr series ID.
+        media_title: The media title for logging.
+        config: Application configuration.
+        state_manager: Optional state manager for TTL caching.
+        output_format: Output format ('text' or 'json').
+    """
+    # Determine service name for logging
+    service_name = "Radarr" if media_type == "movie" else "Sonarr"
+
+    if output_format == "json":
+        _output_json_event("webhook_received", source=service_name.lower(), title=media_title)
     else:
-        logger.info("Webhook: Radarr check - %s", movie_title)
+        logger.info("Webhook: %s check - %s", service_name, media_title)
 
     try:
         # Check TTL cache first
-        if _state_manager is not None and config.state.ttl_hours > 0:
-            cached = _state_manager.get_cached_result("movie", movie_id, config.state.ttl_hours)
+        if state_manager is not None and config.state.ttl_hours > 0:
+            cached = state_manager.get_cached_result(media_type, media_id, config.state.ttl_hours)
             if cached is not None:
                 cached_outcome = (
                     "4K available" if cached.result == "available" else "4K not available"
@@ -144,16 +161,27 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
                 )
                 return
 
-        radarr_config = config.require_radarr()
-        logger.debug("Checking releases against criteria: 4K")
-        checker = ReleaseChecker(
-            radarr_url=radarr_config.url,
-            radarr_api_key=radarr_config.api_key,
-            timeout=config.timeout,
-            tag_config=config.tags,
-        )
+        # Get the appropriate config and create checker
+        if media_type == "movie":
+            radarr_config = config.require_radarr()
+            checker = ReleaseChecker(
+                radarr_url=radarr_config.url,
+                radarr_api_key=radarr_config.api_key,
+                timeout=config.timeout,
+                tag_config=config.tags,
+            )
+            result = await checker.check_movie(media_id, apply_tags=True)
+        else:
+            sonarr_config = config.require_sonarr()
+            checker = ReleaseChecker(
+                sonarr_url=sonarr_config.url,
+                sonarr_api_key=sonarr_config.api_key,
+                timeout=config.timeout,
+                tag_config=config.tags,
+            )
+            result = await checker.check_series(media_id, apply_tags=True)
 
-        result = await checker.check_movie(movie_id, apply_tags=True)
+        logger.debug("Checking releases against criteria: 4K")
         matching_count = len(result.matched_releases)
         logger.debug(
             "Found %d matching releases out of %d total",
@@ -169,10 +197,10 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
         if result.tag_result and result.tag_result.tag_applied:
             tag_applied = result.tag_result.tag_applied
 
-        if _output_format == "json":
+        if output_format == "json":
             _output_json_event(
                 "check_complete",
-                title=movie_title,
+                title=media_title,
                 available=result.has_match,
                 tag_applied=tag_applied,
             )
@@ -180,118 +208,100 @@ async def _process_movie_check(movie_id: int, movie_title: str, config: Config) 
             logger.info("Check result: %s", outcome)
 
         # Record result in state file (even if no tag was applied)
-        if _state_manager is not None:
-            _state_manager.record_check(
-                "movie",
-                movie_id,
+        if state_manager is not None:
+            state_manager.record_check(
+                media_type,
+                media_id,
                 result.has_match,
                 result.tag_result.tag_applied if result.tag_result else None,
             )
     except ConfigurationError as e:
-        logger.error("Webhook error: %s - configuration error: %s", movie_title, e)
+        logger.error("Webhook error: %s - configuration error: %s", media_title, e)
     except httpx.HTTPStatusError as e:
         logger.error(
             "Webhook error: %s - HTTP %d %s",
-            movie_title,
+            media_title,
             e.response.status_code,
             e.response.reason_phrase,
         )
     except (httpx.ConnectError, httpx.TimeoutException) as e:
-        logger.error("Webhook error: %s - %s", movie_title, _format_network_error(e))
+        logger.error("Webhook error: %s - %s", media_title, _format_network_error(e))
     except ValidationError:
-        logger.error("Webhook error: %s - invalid response data", movie_title)
+        logger.error("Webhook error: %s - invalid response data", media_title)
     except Exception:
         # Catch-all for unexpected errors - use exception() for full traceback
-        logger.exception("Webhook error: %s - unexpected error", movie_title)
+        logger.exception("Webhook error: %s - unexpected error", media_title)
 
 
-async def _process_series_check(series_id: int, series_title: str, config: Config) -> None:
-    """Background task to check 4K availability for a series."""
-    if _output_format == "json":
-        _output_json_event("webhook_received", source="sonarr", title=series_title)
-    else:
-        logger.info("Webhook: Sonarr check - %s", series_title)
+async def _process_movie_check(
+    movie_id: int,
+    movie_title: str,
+    config: Config,
+    state_manager: StateManager | None = None,
+    output_format: str = "text",
+) -> None:
+    """Background task to check 4K availability for a movie.
 
-    try:
-        # Check TTL cache first
-        if _state_manager is not None and config.state.ttl_hours > 0:
-            cached = _state_manager.get_cached_result("series", series_id, config.state.ttl_hours)
-            if cached is not None:
-                cached_outcome = (
-                    "4K available" if cached.result == "available" else "4K not available"
-                )
-                logger.info(
-                    "Check result: skipped (recently checked), %s",
-                    cached_outcome,
-                )
-                return
+    Delegates to _process_media_check with media_type="movie".
 
-        sonarr_config = config.require_sonarr()
-        logger.debug("Checking releases against criteria: 4K")
-        checker = ReleaseChecker(
-            sonarr_url=sonarr_config.url,
-            sonarr_api_key=sonarr_config.api_key,
-            timeout=config.timeout,
-            tag_config=config.tags,
-        )
-
-        result = await checker.check_series(series_id, apply_tags=True)
-        matching_count = len(result.matched_releases)
-        logger.debug(
-            "Found %d matching releases out of %d total",
-            matching_count,
-            len(result.releases),
-        )
-
-        # Build completion message with clear outcome
-        outcome = _format_check_outcome(result.has_match, result.tag_result)
-
-        # Determine tag_applied for JSON output
-        tag_applied: str | None = None
-        if result.tag_result and result.tag_result.tag_applied:
-            tag_applied = result.tag_result.tag_applied
-
-        if _output_format == "json":
-            _output_json_event(
-                "check_complete",
-                title=series_title,
-                available=result.has_match,
-                tag_applied=tag_applied,
-            )
-        else:
-            logger.info("Check result: %s", outcome)
-
-        # Record result in state file (even if no tag was applied)
-        if _state_manager is not None:
-            _state_manager.record_check(
-                "series",
-                series_id,
-                result.has_match,
-                result.tag_result.tag_applied if result.tag_result else None,
-            )
-    except ConfigurationError as e:
-        logger.error("Webhook error: %s - configuration error: %s", series_title, e)
-    except httpx.HTTPStatusError as e:
-        logger.error(
-            "Webhook error: %s - HTTP %d %s",
-            series_title,
-            e.response.status_code,
-            e.response.reason_phrase,
-        )
-    except (httpx.ConnectError, httpx.TimeoutException) as e:
-        logger.error("Webhook error: %s - %s", series_title, _format_network_error(e))
-    except ValidationError:
-        logger.error("Webhook error: %s - invalid response data", series_title)
-    except Exception:
-        # Catch-all for unexpected errors - use exception() for full traceback
-        logger.exception("Webhook error: %s - unexpected error", series_title)
+    Args:
+        movie_id: The Radarr movie ID.
+        movie_title: The movie title for logging.
+        config: Application configuration.
+        state_manager: Optional state manager for TTL caching.
+        output_format: Output format ('text' or 'json').
+    """
+    await _process_media_check(
+        media_type="movie",
+        media_id=movie_id,
+        media_title=movie_title,
+        config=config,
+        state_manager=state_manager,
+        output_format=output_format,
+    )
 
 
-def create_app(config: Config | None = None) -> Any:
+async def _process_series_check(
+    series_id: int,
+    series_title: str,
+    config: Config,
+    state_manager: StateManager | None = None,
+    output_format: str = "text",
+) -> None:
+    """Background task to check 4K availability for a series.
+
+    Delegates to _process_media_check with media_type="series".
+
+    Args:
+        series_id: The Sonarr series ID.
+        series_title: The series title for logging.
+        config: Application configuration.
+        state_manager: Optional state manager for TTL caching.
+        output_format: Output format ('text' or 'json').
+    """
+    await _process_media_check(
+        media_type="series",
+        media_id=series_id,
+        media_title=series_title,
+        config=config,
+        state_manager=state_manager,
+        output_format=output_format,
+    )
+
+
+def create_app(
+    config: Config | None = None,
+    state_manager: StateManager | None = None,
+    scheduler_manager: SchedulerManager | None = None,
+    output_format: str = "text",
+) -> Any:
     """Create the FastAPI application for webhook handling.
 
     Args:
         config: Application configuration. If None, loads from default sources.
+        state_manager: Optional state manager for TTL caching.
+        scheduler_manager: Optional scheduler manager for scheduled jobs.
+        output_format: Output format ('text' or 'json'). Defaults to 'text'.
 
     Returns:
         Configured FastAPI application.
@@ -313,6 +323,12 @@ def create_app(config: Config | None = None) -> Any:
         version="2.1.0",  # x-release-please-version
     )
 
+    # Store state on app.state for proper isolation (no global mutable state)
+    app.state.scheduler_manager = scheduler_manager
+    app.state.state_manager = state_manager
+    app.state.output_format = output_format
+    app.state.config = config
+
     # Store background tasks to prevent garbage collection
     background_tasks: set[asyncio.Task[None]] = set()
 
@@ -332,15 +348,17 @@ def create_app(config: Config | None = None) -> Any:
             "scheduler": None,
         }
 
-        if _scheduler_manager is not None:
-            schedules = _scheduler_manager.get_all_schedules()
+        # Access scheduler_manager from app.state for proper isolation
+        sched_manager = app.state.scheduler_manager
+        if sched_manager is not None:
+            schedules = sched_manager.get_all_schedules()
             enabled_schedules = [s for s in schedules if s.enabled]
-            running = _scheduler_manager.get_running_schedules()
-            recent_history = _scheduler_manager.get_history(limit=5)
+            running = sched_manager.get_running_schedules()
+            recent_history = sched_manager.get_history(limit=5)
 
             result["scheduler"] = {
                 "enabled": True,
-                "running": _scheduler_manager.is_running,
+                "running": sched_manager.is_running,
                 "total_schedules": len(schedules),
                 "enabled_schedules": len(enabled_schedules),
                 "currently_running": list(running),
@@ -402,7 +420,13 @@ def create_app(config: Config | None = None) -> Any:
             payload.movie.id,
         )
         task = asyncio.create_task(
-            _process_movie_check(payload.movie.id, payload.movie.title, config)
+            _process_movie_check(
+                payload.movie.id,
+                payload.movie.title,
+                config,
+                state_manager=app.state.state_manager,
+                output_format=app.state.output_format,
+            )
         )
         background_tasks.add(task)
         task.add_done_callback(background_tasks.discard)
@@ -456,7 +480,13 @@ def create_app(config: Config | None = None) -> Any:
             payload.series.id,
         )
         task = asyncio.create_task(
-            _process_series_check(payload.series.id, payload.series.title, config)
+            _process_series_check(
+                payload.series.id,
+                payload.series.title,
+                config,
+                state_manager=app.state.state_manager,
+                output_format=app.state.output_format,
+            )
         )
         background_tasks.add(task)
         task.add_done_callback(background_tasks.discard)
@@ -506,8 +536,6 @@ def run_server(
         scheduler_enabled: Whether to start the scheduler.
         output_format: Output format ('text' or 'json').
     """
-    global _scheduler_manager, _state_manager, _output_format
-
     try:
         import uvicorn
     except ImportError as e:
@@ -518,17 +546,11 @@ def run_server(
     if config is None:
         config = Config.load()
 
-    # Set the global output format
-    _output_format = output_format
-
-    app = create_app(config)
-
     # Initialize state manager for TTL checks and ensure state file exists
     from filtarr.state import StateManager
 
     state_manager = StateManager(config.state.path)
     state_manager.ensure_initialized()
-    _state_manager = state_manager
     logger.info("State file initialized at: %s", config.state.path)
     if config.state.ttl_hours > 0:
         logger.info("State TTL: %d hours", config.state.ttl_hours)
@@ -542,12 +564,19 @@ def run_server(
             from filtarr.scheduler import SchedulerManager
 
             scheduler_manager = SchedulerManager(config, state_manager)
-            _scheduler_manager = scheduler_manager
             logger.info("Scheduler configured and will start with server")
         except ImportError:
             logger.warning(
                 "Scheduler dependencies not installed. Install with: pip install filtarr[scheduler]"
             )
+
+    # Create app with state passed directly (no globals)
+    app = create_app(
+        config=config,
+        state_manager=state_manager,
+        scheduler_manager=scheduler_manager,
+        output_format=output_format,
+    )
 
     # Output server_started event in JSON mode
     if output_format == "json":

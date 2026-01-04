@@ -66,11 +66,82 @@ class TestSelectSeasonsToCheck:
         assert result == [4, 5]
 
 
+class TestMediaTypeEnum:
+    """Tests for MediaType enum."""
+
+    def test_media_type_movie_value_is_string_movie(self) -> None:
+        """MediaType.MOVIE.value should be 'movie'."""
+        from filtarr.checker import MediaType
+
+        assert MediaType.MOVIE.value == "movie"
+
+    def test_media_type_series_value_is_string_series(self) -> None:
+        """MediaType.SERIES.value should be 'series'."""
+        from filtarr.checker import MediaType
+
+        assert MediaType.SERIES.value == "series"
+
+    def test_media_type_is_str_subclass(self) -> None:
+        """MediaType should be a StrEnum (subclass of str) for JSON serialization."""
+        from filtarr.checker import MediaType
+
+        # StrEnum instances should be str instances
+        assert isinstance(MediaType.MOVIE, str)
+        assert isinstance(MediaType.SERIES, str)
+
+    def test_media_type_string_comparison(self) -> None:
+        """MediaType values should compare equal to their string equivalents."""
+        from filtarr.checker import MediaType
+
+        assert MediaType.MOVIE == "movie"
+        assert MediaType.SERIES == "series"
+
+    def test_media_type_in_dict_key(self) -> None:
+        """MediaType should work as dictionary key and serialize to string."""
+        from filtarr.checker import MediaType
+
+        data = {MediaType.MOVIE: "movie_value", MediaType.SERIES: "series_value"}
+        # String keys should work to access the same values due to StrEnum
+        assert data["movie"] == "movie_value"
+        assert data["series"] == "series_value"
+
+
 class TestSearchResult:
     """Tests for SearchResult dataclass."""
 
+    def test_search_result_item_type_is_media_type_enum(self) -> None:
+        """SearchResult.item_type should accept MediaType enum."""
+        from filtarr.checker import MediaType
+
+        result = SearchResult(
+            item_id=123,
+            item_type=MediaType.MOVIE,
+            has_match=True,
+        )
+        assert result.item_type == MediaType.MOVIE
+        assert result.item_type == "movie"  # StrEnum comparison
+
+    def test_search_result_item_type_serializes_to_string(self) -> None:
+        """SearchResult with MediaType should serialize to string for JSON output."""
+        import json
+
+        from filtarr.checker import MediaType
+
+        result = SearchResult(
+            item_id=123,
+            item_type=MediaType.SERIES,
+            has_match=False,
+        )
+        # When using StrEnum, str() should return the string value
+        assert str(result.item_type) == "series"
+        # JSON serialization should work (StrEnum is str subclass)
+        data = {"item_type": result.item_type}
+        json_str = json.dumps(data)
+        assert '"series"' in json_str
+
     def test_matched_releases_property(self) -> None:
         """Should filter to only 4K releases."""
+        from filtarr.checker import MediaType
         from filtarr.models.common import Quality, Release
 
         releases = [
@@ -99,7 +170,7 @@ class TestSearchResult:
 
         result = SearchResult(
             item_id=123,
-            item_type="movie",
+            item_type=MediaType.MOVIE,
             has_match=True,
             releases=releases,
         )
@@ -2746,3 +2817,732 @@ class TestTagCaching:
 
         # Cache should be None
         assert checker._tagger._tag_cache is None
+
+
+class TestClientInjection:
+    """Tests for pre-created client injection in ReleaseChecker.
+
+    Task 3.1: Accept Pre-Created Clients in ReleaseChecker
+    - Injected clients should be used when provided
+    - Backward compatibility should be maintained
+    - Injected clients should NOT be closed on __aexit__
+    """
+
+    @pytest.mark.asyncio
+    async def test_injected_radarr_client_is_used(self) -> None:
+        """Should use injected radarr_client when provided."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from filtarr.clients.radarr import RadarrClient
+        from filtarr.models.common import Quality, Release
+        from filtarr.models.radarr import Movie
+
+        # Create a mock client
+        mock_client = MagicMock(spec=RadarrClient)
+        mock_client.get_movie = AsyncMock(return_value=Movie(id=123, title="Test Movie", year=2024))
+        mock_client.get_movie_releases = AsyncMock(
+            return_value=[
+                Release(
+                    guid="rel-1",
+                    title="Movie.2160p.UHD",
+                    indexer="Test",
+                    size=5000,
+                    quality=Quality(id=31, name="Bluray-2160p"),
+                )
+            ]
+        )
+
+        # Create checker with injected client
+        checker = ReleaseChecker(radarr_client=mock_client)
+
+        # The injected client should be stored
+        assert checker._radarr_client is mock_client
+
+        # Perform a check - it should use the injected client
+        result = await checker.check_movie(123, apply_tags=False)
+
+        # Verify the injected client was used
+        mock_client.get_movie.assert_called_once_with(123)
+        mock_client.get_movie_releases.assert_called_once_with(123)
+        assert result.has_match is True
+        assert result.item_id == 123
+
+    @pytest.mark.asyncio
+    async def test_injected_sonarr_client_is_used(self) -> None:
+        """Should use injected sonarr_client when provided."""
+        from datetime import date
+        from unittest.mock import AsyncMock, MagicMock
+
+        from filtarr.clients.sonarr import SonarrClient
+        from filtarr.models.common import Quality, Release
+        from filtarr.models.sonarr import Episode, Series
+
+        # Create a mock client
+        mock_client = MagicMock(spec=SonarrClient)
+        mock_client.get_series = AsyncMock(
+            return_value=Series(id=456, title="Test Series", year=2020, seasons=[])
+        )
+        mock_client.get_episodes = AsyncMock(
+            return_value=[
+                Episode(
+                    id=101,
+                    series_id=456,
+                    season_number=1,
+                    episode_number=1,
+                    air_date=date(2020, 1, 1),
+                    monitored=True,
+                )
+            ]
+        )
+        mock_client.get_episode_releases = AsyncMock(
+            return_value=[
+                Release(
+                    guid="rel-1",
+                    title="Show.S01.2160p",
+                    indexer="Test",
+                    size=3000,
+                    quality=Quality(id=19, name="WEBDL-2160p"),
+                )
+            ]
+        )
+
+        # Create checker with injected client
+        checker = ReleaseChecker(sonarr_client=mock_client)
+
+        # The injected client should be stored
+        assert checker._sonarr_client is mock_client
+
+        # Perform a check - it should use the injected client
+        result = await checker.check_series(456, apply_tags=False)
+
+        # Verify the injected client was used
+        mock_client.get_series.assert_called_once_with(456)
+        mock_client.get_episodes.assert_called_once_with(456)
+        assert result.has_match is True
+        assert result.item_id == 456
+
+    @pytest.mark.asyncio
+    async def test_backward_compatibility_url_api_key_still_works(self) -> None:
+        """Should maintain backward compatibility when using URL + API key."""
+        # This uses respx to mock HTTP calls, same as existing tests
+        import respx
+        from httpx import Response
+
+        with respx.mock:
+            respx.get("http://localhost:7878/api/v3/movie/123").mock(
+                return_value=Response(200, json={"id": 123, "title": "Test Movie", "year": 2024})
+            )
+            respx.get("http://localhost:7878/api/v3/release", params={"movieId": "123"}).mock(
+                return_value=Response(
+                    200,
+                    json=[
+                        {
+                            "guid": "rel-1",
+                            "title": "Movie.2160p.UHD",
+                            "indexer": "Test",
+                            "size": 5000,
+                            "quality": {"quality": {"id": 31, "name": "Bluray-2160p"}},
+                        }
+                    ],
+                )
+            )
+
+            # Create checker with URL + API key (backward compatible way)
+            checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test-key")
+
+            # Clients should not be stored initially (created on demand)
+            assert checker._radarr_client is None
+
+            # Perform a check
+            result = await checker.check_movie(123, apply_tags=False)
+
+            assert result.has_match is True
+            assert result.item_id == 123
+
+    @pytest.mark.asyncio
+    async def test_injected_clients_not_closed_on_aexit(self) -> None:
+        """Injected clients should NOT be closed on __aexit__ (caller manages lifecycle)."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from filtarr.clients.radarr import RadarrClient
+        from filtarr.clients.sonarr import SonarrClient
+
+        # Create mock clients with tracked __aexit__
+        mock_radarr = MagicMock(spec=RadarrClient)
+        mock_radarr.__aexit__ = AsyncMock()
+
+        mock_sonarr = MagicMock(spec=SonarrClient)
+        mock_sonarr.__aexit__ = AsyncMock()
+
+        # Create checker with injected clients
+        checker = ReleaseChecker(radarr_client=mock_radarr, sonarr_client=mock_sonarr)
+
+        # Use as context manager
+        async with checker:
+            # Clients should be available
+            assert checker._radarr_client is mock_radarr
+            assert checker._sonarr_client is mock_sonarr
+
+        # After exiting context, __aexit__ should NOT have been called on injected clients
+        mock_radarr.__aexit__.assert_not_called()
+        mock_sonarr.__aexit__.assert_not_called()
+
+        # Injected clients should still be stored (not None'd out)
+        assert checker._radarr_client is mock_radarr
+        assert checker._sonarr_client is mock_sonarr
+
+    @pytest.mark.asyncio
+    async def test_internally_created_clients_are_closed_on_aexit(self) -> None:
+        """Internally-created clients should be closed on __aexit__."""
+        from unittest.mock import AsyncMock, patch
+
+        from filtarr.clients.radarr import RadarrClient
+
+        # Create checker with URL + API key (will create client internally)
+        checker = ReleaseChecker(radarr_url="http://localhost:7878", radarr_api_key="test-key")
+
+        with (
+            patch.object(RadarrClient, "__aenter__", new_callable=AsyncMock) as enter,
+            patch.object(RadarrClient, "__aexit__", new_callable=AsyncMock) as exit_mock,
+        ):
+            enter.return_value = None
+
+            async with checker:
+                # Client should be created
+                assert checker._radarr_client is not None
+
+            # __aexit__ SHOULD have been called for internally-created client
+            exit_mock.assert_called_once()
+
+            # Client should be None'd out after exiting
+            assert checker._radarr_client is None
+
+    @pytest.mark.asyncio
+    async def test_mixed_injection_and_config(self) -> None:
+        """Should support mixed mode: injected client + URL config for other."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from filtarr.clients.radarr import RadarrClient
+        from filtarr.clients.sonarr import SonarrClient
+
+        # Create mock Radarr client (injected)
+        mock_radarr = MagicMock(spec=RadarrClient)
+        mock_radarr.__aexit__ = AsyncMock()
+
+        # Create checker with injected Radarr + Sonarr URL config
+        checker = ReleaseChecker(
+            radarr_client=mock_radarr,
+            sonarr_url="http://localhost:8989",
+            sonarr_api_key="test-key",
+        )
+
+        with (
+            patch.object(SonarrClient, "__aenter__", new_callable=AsyncMock) as sonarr_enter,
+            patch.object(SonarrClient, "__aexit__", new_callable=AsyncMock) as sonarr_exit,
+        ):
+            sonarr_enter.return_value = None
+
+            async with checker:
+                # Radarr should use injected client
+                assert checker._radarr_client is mock_radarr
+                # Sonarr should be created internally
+                assert checker._sonarr_client is not None
+
+            # Radarr (injected) should NOT have __aexit__ called
+            mock_radarr.__aexit__.assert_not_called()
+            # Sonarr (internally created) SHOULD have __aexit__ called
+            sonarr_exit.assert_called_once()
+
+    def test_injected_client_takes_precedence_over_url_config(self) -> None:
+        """Injected client should take precedence over URL + API key config."""
+        from unittest.mock import MagicMock
+
+        from filtarr.clients.radarr import RadarrClient
+
+        mock_client = MagicMock(spec=RadarrClient)
+
+        # Provide BOTH injected client AND URL config
+        checker = ReleaseChecker(
+            radarr_client=mock_client,
+            radarr_url="http://localhost:7878",
+            radarr_api_key="test-key",
+        )
+
+        # Injected client should be used
+        assert checker._radarr_client is mock_client
+
+    @pytest.mark.asyncio
+    async def test_check_movie_with_injected_client_in_context(self) -> None:
+        """Injected client should work correctly when used within async context."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from filtarr.clients.radarr import RadarrClient
+        from filtarr.models.common import Quality, Release
+        from filtarr.models.radarr import Movie
+
+        mock_client = MagicMock(spec=RadarrClient)
+        mock_client.get_movie = AsyncMock(return_value=Movie(id=123, title="Test Movie", year=2024))
+        mock_client.get_movie_releases = AsyncMock(
+            return_value=[
+                Release(
+                    guid="rel-1",
+                    title="Movie.2160p.UHD",
+                    indexer="Test",
+                    size=5000,
+                    quality=Quality(id=31, name="Bluray-2160p"),
+                )
+            ]
+        )
+
+        checker = ReleaseChecker(radarr_client=mock_client)
+
+        # Use as context manager
+        async with checker:
+            result = await checker.check_movie(123, apply_tags=False)
+
+            assert result.has_match is True
+            mock_client.get_movie.assert_called_once()
+
+    def test_injected_client_sets_in_context_flag_appropriately(self) -> None:
+        """With injected client, _in_context should still be managed correctly."""
+        from unittest.mock import MagicMock
+
+        from filtarr.clients.radarr import RadarrClient
+
+        mock_client = MagicMock(spec=RadarrClient)
+        checker = ReleaseChecker(radarr_client=mock_client)
+
+        # Before context, _in_context should be False
+        assert checker._in_context is False
+
+    @pytest.mark.asyncio
+    async def test_raises_error_when_neither_injected_nor_configured_for_radarr(
+        self,
+    ) -> None:
+        """Should raise ValueError when Radarr is neither injected nor configured."""
+        checker = ReleaseChecker()
+
+        with pytest.raises(ValueError, match="Radarr is not configured"):
+            await checker.check_movie(123)
+
+    @pytest.mark.asyncio
+    async def test_raises_error_when_neither_injected_nor_configured_for_sonarr(
+        self,
+    ) -> None:
+        """Should raise ValueError when Sonarr is neither injected nor configured."""
+        checker = ReleaseChecker()
+
+        with pytest.raises(ValueError, match="Sonarr is not configured"):
+            await checker.check_series(456)
+
+
+class TestParallelEpisodeChecks:
+    """Tests for parallel episode release fetching.
+
+    These tests verify that episode release checks run concurrently using
+    asyncio.gather while maintaining correct short-circuit behavior when
+    a match is found.
+    """
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_multiple_episode_checks_run_concurrently(self) -> None:
+        """Multiple episode checks should run in parallel, not sequentially.
+
+        This test verifies that when checking multiple seasons, all episode
+        release requests are made concurrently, not one after another.
+        We measure the total time and verify it's close to the slowest single
+        request (parallel) rather than the sum of all requests (sequential).
+        """
+        import asyncio
+        import time
+
+        # Mock series info
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
+            )
+        )
+
+        # Mock episodes for 3 seasons
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 101,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-01",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 201,
+                        "seriesId": 123,
+                        "seasonNumber": 2,
+                        "episodeNumber": 1,
+                        "airDate": "2021-01-01",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 301,
+                        "seriesId": 123,
+                        "seasonNumber": 3,
+                        "episodeNumber": 1,
+                        "airDate": "2022-01-01",
+                        "monitored": True,
+                    },
+                ],
+            )
+        )
+
+        # Track request timing to verify parallelism
+        request_times: list[tuple[int, float, float]] = []  # (ep_id, start, end)
+        delay_per_request = 0.1  # 100ms per request
+
+        async def delayed_response(request: httpx.Request) -> Response:
+            """Simulate network latency for each request."""
+            ep_id = int(request.url.params["episodeId"])
+            start = time.time()
+            await asyncio.sleep(delay_per_request)
+            end = time.time()
+            request_times.append((ep_id, start, end))
+            return Response(
+                200,
+                json=[
+                    {
+                        "guid": f"rel-{ep_id}",
+                        "title": "Show.S0X.1080p",
+                        "indexer": "Test",
+                        "size": 1000,
+                        "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}},
+                    }
+                ],
+            )
+
+        # Mock release endpoints with delay
+        for ep_id in [101, 201, 301]:
+            respx.get(
+                "http://127.0.0.1:8989/api/v3/release", params={"episodeId": str(ep_id)}
+            ).mock(side_effect=delayed_response)
+
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
+
+        start_time = time.time()
+        result = await checker.check_series(123, strategy=SamplingStrategy.ALL, apply_tags=False)
+        total_time = time.time() - start_time
+
+        assert result.has_match is False
+        assert len(result.seasons_checked) == 3
+
+        # Verify parallel execution: total time should be close to single request time
+        # If sequential, it would take 3 * 0.1 = 0.3s
+        # If parallel, it should take ~0.1s (plus overhead)
+        # We allow 50% tolerance for parallel (0.1 * 1.5 = 0.15s)
+        # and require it to be faster than sequential (0.3s)
+        assert total_time < delay_per_request * len(request_times), (
+            f"Requests appear sequential: took {total_time:.3f}s for "
+            f"{len(request_times)} requests, expected < {delay_per_request * len(request_times):.3f}s"
+        )
+
+        # Verify all requests were made
+        assert len(request_times) == 3
+        ep_ids = [rt[0] for rt in request_times]
+        assert set(ep_ids) == {101, 201, 301}
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_short_circuit_on_first_match_with_parallel_fetch(self) -> None:
+        """Short-circuit should still work when a match is found during parallel fetch.
+
+        Even with parallel fetching, if any season has a match, the result
+        should indicate has_match=True and include the matching releases.
+        """
+        # Mock series info
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
+            )
+        )
+
+        # Mock episodes for 3 seasons
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 101,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-01",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 201,
+                        "seriesId": 123,
+                        "seasonNumber": 2,
+                        "episodeNumber": 1,
+                        "airDate": "2021-01-01",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 301,
+                        "seriesId": 123,
+                        "seasonNumber": 3,
+                        "episodeNumber": 1,
+                        "airDate": "2022-01-01",
+                        "monitored": True,
+                    },
+                ],
+            )
+        )
+
+        # Season 1: No 4K
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-101",
+                        "title": "Show.S01.1080p",
+                        "indexer": "Test",
+                        "size": 1000,
+                        "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}},
+                    }
+                ],
+            )
+        )
+
+        # Season 2: Has 4K!
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "201"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-201-4k",
+                        "title": "Show.S02.2160p.WEB-DL",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+
+        # Season 3: No 4K
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "301"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-301",
+                        "title": "Show.S03.1080p",
+                        "indexer": "Test",
+                        "size": 1000,
+                        "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}},
+                    }
+                ],
+            )
+        )
+
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
+        result = await checker.check_series(123, strategy=SamplingStrategy.ALL, apply_tags=False)
+
+        # Should find the 4K match
+        assert result.has_match is True
+        # All seasons should be checked since fetches happen in parallel
+        assert len(result.seasons_checked) == 3
+        # Should have releases from all seasons
+        assert len(result.releases) == 3
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_error_in_one_request_does_not_break_others(self) -> None:
+        """Error in one episode release request should not prevent other checks.
+
+        When fetching releases in parallel, if one request fails, the others
+        should still complete successfully and the results should be available.
+        """
+        # Mock series info
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
+            )
+        )
+
+        # Mock episodes for 3 seasons
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 101,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-01",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 201,
+                        "seriesId": 123,
+                        "seasonNumber": 2,
+                        "episodeNumber": 1,
+                        "airDate": "2021-01-01",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 301,
+                        "seriesId": 123,
+                        "seasonNumber": 3,
+                        "episodeNumber": 1,
+                        "airDate": "2022-01-01",
+                        "monitored": True,
+                    },
+                ],
+            )
+        )
+
+        # Season 1: Success (no 4K)
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-101",
+                        "title": "Show.S01.1080p",
+                        "indexer": "Test",
+                        "size": 1000,
+                        "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}},
+                    }
+                ],
+            )
+        )
+
+        # Season 2: Error (HTTP 500)
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "201"}).mock(
+            return_value=Response(500, json={"error": "Internal Server Error"})
+        )
+
+        # Season 3: Success with 4K
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "301"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-301-4k",
+                        "title": "Show.S03.2160p.WEB-DL",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
+        result = await checker.check_series(123, strategy=SamplingStrategy.ALL, apply_tags=False)
+
+        # Should still find the 4K match from season 3
+        assert result.has_match is True
+        # Successful seasons should be checked
+        assert 1 in result.seasons_checked
+        assert 3 in result.seasons_checked
+        # Should have releases from successful requests
+        assert len(result.releases) >= 2
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_timing_verifies_parallel_not_sequential_execution(self) -> None:
+        """Verify requests execute in parallel using timing measurements.
+
+        This is a more rigorous timing test that explicitly measures whether
+        requests overlap in time (parallel) vs execute one after another (sequential).
+        """
+        import asyncio
+        import time
+
+        # Mock series info
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200, json={"id": 123, "title": "Test Series", "year": 2020, "seasons": []}
+            )
+        )
+
+        # Mock 5 seasons for more pronounced timing difference
+        episodes = [
+            {
+                "id": 100 + i,
+                "seriesId": 123,
+                "seasonNumber": i,
+                "episodeNumber": 1,
+                "airDate": f"202{i}-01-01",
+                "monitored": True,
+            }
+            for i in range(1, 6)
+        ]
+
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+            return_value=Response(200, json=episodes)
+        )
+
+        request_events: list[tuple[str, float, int]] = []  # (event, time, ep_id)
+        delay = 0.05  # 50ms per request
+
+        async def timed_response(request: httpx.Request) -> Response:
+            ep_id = int(request.url.params["episodeId"])
+            request_events.append(("start", time.time(), ep_id))
+            await asyncio.sleep(delay)
+            request_events.append(("end", time.time(), ep_id))
+            return Response(
+                200,
+                json=[
+                    {
+                        "guid": f"rel-{ep_id}",
+                        "title": "Show.1080p",
+                        "indexer": "Test",
+                        "size": 1000,
+                        "quality": {"quality": {"id": 7, "name": "Bluray-1080p"}},
+                    }
+                ],
+            )
+
+        for ep_id in [101, 102, 103, 104, 105]:
+            respx.get(
+                "http://127.0.0.1:8989/api/v3/release", params={"episodeId": str(ep_id)}
+            ).mock(side_effect=timed_response)
+
+        checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
+
+        start_time = time.time()
+        result = await checker.check_series(123, strategy=SamplingStrategy.ALL, apply_tags=False)
+        total_time = time.time() - start_time
+
+        assert result.has_match is False
+        assert len(result.seasons_checked) == 5
+
+        # Calculate overlap to verify parallelism
+        # With parallel execution: all requests start at roughly the same time
+        # With sequential execution: each starts after the previous ends
+        start_events = [(t, ep) for event, t, ep in request_events if event == "start"]
+
+        # All start times should be within a small window for parallel execution
+        start_times = [t for t, _ in start_events]
+        start_spread = max(start_times) - min(start_times)
+
+        # For parallel execution, spread should be very small (< delay)
+        # For sequential execution, spread would be >= (n-1) * delay
+        assert start_spread < delay * 2, (
+            f"Requests not starting in parallel: spread is {start_spread:.3f}s, "
+            f"expected < {delay * 2:.3f}s"
+        )
+
+        # Total time should be close to single request time
+        # Sequential would be 5 * 0.05 = 0.25s
+        # Parallel should be ~0.05s + overhead
+        assert total_time < delay * len(start_events), (
+            f"Total time {total_time:.3f}s suggests sequential execution, "
+            f"expected < {delay * len(start_events):.3f}s for parallel"
+        )

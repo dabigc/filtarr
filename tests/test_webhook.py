@@ -113,6 +113,25 @@ class TestValidateApiKey:
         result = filtarr.webhook._validate_api_key("radarr-api-key", radarr_only_config)
         assert result == "radarr"
 
+    def test_validate_api_key_uses_constant_time_comparison(self, full_config: Config) -> None:
+        """Should use hmac.compare_digest for constant-time comparison to prevent timing attacks."""
+        import hmac
+
+        # Verify hmac.compare_digest is called during API key validation
+        with patch(
+            "filtarr.webhook.hmac.compare_digest", wraps=hmac.compare_digest
+        ) as mock_compare:
+            # Test with valid Radarr key
+            filtarr.webhook._validate_api_key("radarr-api-key", full_config)
+            # compare_digest should have been called for Radarr key comparison
+            assert mock_compare.called, "hmac.compare_digest should be used for API key comparison"
+
+    def test_validate_api_key_rejects_non_string_types(self, full_config: Config) -> None:
+        """Should handle type edge cases gracefully."""
+        # None is already tested, but let's ensure we handle it safely with compare_digest
+        result = filtarr.webhook._validate_api_key(None, full_config)
+        assert result is None
+
 
 class TestWebhookModels:
     """Tests for webhook Pydantic models."""
@@ -245,26 +264,20 @@ class TestStatusEndpoint:
             )
         ]
 
-        # Store original value to restore later
-        original_scheduler = filtarr.webhook._scheduler_manager
+        # Create app with scheduler manager passed via create_app
+        app = filtarr.webhook.create_app(full_config, scheduler_manager=mock_scheduler)
+        client = TestClient(app)
 
-        try:
-            filtarr.webhook._scheduler_manager = mock_scheduler
-            app = filtarr.webhook.create_app(full_config)
-            client = TestClient(app)
+        response = client.get("/status")
 
-            response = client.get("/status")
-
-            assert response.status_code == 200
-            data = response.json()
-            assert data["scheduler"]["enabled"] is True
-            assert data["scheduler"]["running"] is True
-            assert data["scheduler"]["total_schedules"] == 3
-            assert data["scheduler"]["enabled_schedules"] == 2
-            assert data["scheduler"]["currently_running"] == ["test-schedule"]
-            assert len(data["scheduler"]["recent_runs"]) == 1
-        finally:
-            filtarr.webhook._scheduler_manager = original_scheduler
+        assert response.status_code == 200
+        data = response.json()
+        assert data["scheduler"]["enabled"] is True
+        assert data["scheduler"]["running"] is True
+        assert data["scheduler"]["total_schedules"] == 3
+        assert data["scheduler"]["enabled_schedules"] == 2
+        assert data["scheduler"]["currently_running"] == ["test-schedule"]
+        assert len(data["scheduler"]["recent_runs"]) == 1
 
     def test_status_radarr_only_config(self, radarr_only_config: Config) -> None:
         """Should show sonarr_configured as False when not configured."""
@@ -1057,26 +1070,21 @@ class TestTTLCaching:
         )
         mock_state_manager.get_cached_result.return_value = cached_record
 
-        # Store original value to restore later
-        original_state_manager = filtarr.webhook._state_manager
-
-        try:
-            filtarr.webhook._state_manager = mock_state_manager
-
-            with caplog.at_level(logging.INFO):
-                await filtarr.webhook._process_movie_check(123, "Test Movie", config)
-
-            # Verify state manager was queried for cached result
-            mock_state_manager.get_cached_result.assert_called_once_with("movie", 123, 24)
-
-            # Verify log message about using cached result (new format)
-            assert any(
-                "Check result: skipped (recently checked)" in record.getMessage()
-                for record in caplog.records
+        # Pass state_manager as parameter (no global state)
+        with caplog.at_level(logging.INFO):
+            await filtarr.webhook._process_movie_check(
+                123, "Test Movie", config, state_manager=mock_state_manager
             )
-            assert any("4K available" in record.getMessage() for record in caplog.records)
-        finally:
-            filtarr.webhook._state_manager = original_state_manager
+
+        # Verify state manager was queried for cached result
+        mock_state_manager.get_cached_result.assert_called_once_with("movie", 123, 24)
+
+        # Verify log message about using cached result (new format)
+        assert any(
+            "Check result: skipped (recently checked)" in record.getMessage()
+            for record in caplog.records
+        )
+        assert any("4K available" in record.getMessage() for record in caplog.records)
 
     @pytest.mark.asyncio
     async def test_movie_check_proceeds_when_ttl_cache_miss(self, full_config: Config) -> None:
@@ -1093,32 +1101,27 @@ class TestTTLCaching:
         mock_state_manager = MagicMock()
         mock_state_manager.get_cached_result.return_value = None
 
-        original_state_manager = filtarr.webhook._state_manager
+        # Mock ReleaseChecker to avoid actual API calls
+        with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
+            mock_checker = MagicMock()
+            mock_result = MagicMock()
+            mock_result.has_match = True
+            mock_result.matched_releases = []
+            mock_result.releases = []
+            mock_result.tag_result = MagicMock()
+            mock_result.tag_result.tag_applied = "4k-available"
+            mock_result.tag_result.tag_already_present = False
+            mock_result.tag_result.dry_run = False
+            mock_checker.check_movie = AsyncMock(return_value=mock_result)
+            mock_checker_class.return_value = mock_checker
 
-        try:
-            filtarr.webhook._state_manager = mock_state_manager
+            await filtarr.webhook._process_movie_check(
+                123, "Test Movie", config, state_manager=mock_state_manager
+            )
 
-            # Mock ReleaseChecker to avoid actual API calls
-            with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
-                mock_checker = MagicMock()
-                mock_result = MagicMock()
-                mock_result.has_match = True
-                mock_result.matched_releases = []
-                mock_result.releases = []
-                mock_result.tag_result = MagicMock()
-                mock_result.tag_result.tag_applied = "4k-available"
-                mock_result.tag_result.tag_already_present = False
-                mock_result.tag_result.dry_run = False
-                mock_checker.check_movie = AsyncMock(return_value=mock_result)
-                mock_checker_class.return_value = mock_checker
-
-                await filtarr.webhook._process_movie_check(123, "Test Movie", config)
-
-                # Verify ReleaseChecker was created and used
-                mock_checker_class.assert_called_once()
-                mock_checker.check_movie.assert_called_once_with(123, apply_tags=True)
-        finally:
-            filtarr.webhook._state_manager = original_state_manager
+            # Verify ReleaseChecker was created and used
+            mock_checker_class.assert_called_once()
+            mock_checker.check_movie.assert_called_once_with(123, apply_tags=True)
 
     @pytest.mark.asyncio
     async def test_movie_check_skips_ttl_when_disabled(self, full_config: Config) -> None:
@@ -1133,30 +1136,25 @@ class TestTTLCaching:
 
         mock_state_manager = MagicMock()
 
-        original_state_manager = filtarr.webhook._state_manager
+        with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
+            mock_checker = MagicMock()
+            mock_result = MagicMock()
+            mock_result.has_match = False
+            mock_result.matched_releases = []
+            mock_result.releases = []
+            mock_result.tag_result = MagicMock()
+            mock_result.tag_result.tag_applied = None
+            mock_result.tag_result.tag_already_present = False
+            mock_result.tag_result.dry_run = False
+            mock_checker.check_movie = AsyncMock(return_value=mock_result)
+            mock_checker_class.return_value = mock_checker
 
-        try:
-            filtarr.webhook._state_manager = mock_state_manager
+            await filtarr.webhook._process_movie_check(
+                123, "Test Movie", config, state_manager=mock_state_manager
+            )
 
-            with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
-                mock_checker = MagicMock()
-                mock_result = MagicMock()
-                mock_result.has_match = False
-                mock_result.matched_releases = []
-                mock_result.releases = []
-                mock_result.tag_result = MagicMock()
-                mock_result.tag_result.tag_applied = None
-                mock_result.tag_result.tag_already_present = False
-                mock_result.tag_result.dry_run = False
-                mock_checker.check_movie = AsyncMock(return_value=mock_result)
-                mock_checker_class.return_value = mock_checker
-
-                await filtarr.webhook._process_movie_check(123, "Test Movie", config)
-
-                # TTL check should not be called when disabled
-                mock_state_manager.get_cached_result.assert_not_called()
-        finally:
-            filtarr.webhook._state_manager = original_state_manager
+            # TTL check should not be called when disabled
+            mock_state_manager.get_cached_result.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_series_check_skips_when_ttl_cache_hit(
@@ -1182,25 +1180,20 @@ class TestTTLCaching:
         )
         mock_state_manager.get_cached_result.return_value = cached_record
 
-        original_state_manager = filtarr.webhook._state_manager
-
-        try:
-            filtarr.webhook._state_manager = mock_state_manager
-
-            with caplog.at_level(logging.INFO):
-                await filtarr.webhook._process_series_check(456, "Breaking Bad", config)
-
-            # Verify state manager was queried for cached result
-            mock_state_manager.get_cached_result.assert_called_once_with("series", 456, 24)
-
-            # Verify log message about using cached result (new format)
-            assert any(
-                "Check result: skipped (recently checked)" in record.getMessage()
-                for record in caplog.records
+        with caplog.at_level(logging.INFO):
+            await filtarr.webhook._process_series_check(
+                456, "Breaking Bad", config, state_manager=mock_state_manager
             )
-            assert any("4K not available" in record.getMessage() for record in caplog.records)
-        finally:
-            filtarr.webhook._state_manager = original_state_manager
+
+        # Verify state manager was queried for cached result
+        mock_state_manager.get_cached_result.assert_called_once_with("series", 456, 24)
+
+        # Verify log message about using cached result (new format)
+        assert any(
+            "Check result: skipped (recently checked)" in record.getMessage()
+            for record in caplog.records
+        )
+        assert any("4K not available" in record.getMessage() for record in caplog.records)
 
     @pytest.mark.asyncio
     async def test_series_check_proceeds_when_ttl_cache_miss(self, full_config: Config) -> None:
@@ -1217,32 +1210,27 @@ class TestTTLCaching:
         mock_state_manager = MagicMock()
         mock_state_manager.get_cached_result.return_value = None
 
-        original_state_manager = filtarr.webhook._state_manager
+        # Mock ReleaseChecker to avoid actual API calls
+        with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
+            mock_checker = MagicMock()
+            mock_result = MagicMock()
+            mock_result.has_match = True
+            mock_result.matched_releases = []
+            mock_result.releases = []
+            mock_result.tag_result = MagicMock()
+            mock_result.tag_result.tag_applied = "4k-available"
+            mock_result.tag_result.tag_already_present = False
+            mock_result.tag_result.dry_run = False
+            mock_checker.check_series = AsyncMock(return_value=mock_result)
+            mock_checker_class.return_value = mock_checker
 
-        try:
-            filtarr.webhook._state_manager = mock_state_manager
+            await filtarr.webhook._process_series_check(
+                456, "Breaking Bad", config, state_manager=mock_state_manager
+            )
 
-            # Mock ReleaseChecker to avoid actual API calls
-            with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
-                mock_checker = MagicMock()
-                mock_result = MagicMock()
-                mock_result.has_match = True
-                mock_result.matched_releases = []
-                mock_result.releases = []
-                mock_result.tag_result = MagicMock()
-                mock_result.tag_result.tag_applied = "4k-available"
-                mock_result.tag_result.tag_already_present = False
-                mock_result.tag_result.dry_run = False
-                mock_checker.check_series = AsyncMock(return_value=mock_result)
-                mock_checker_class.return_value = mock_checker
-
-                await filtarr.webhook._process_series_check(456, "Breaking Bad", config)
-
-                # Verify ReleaseChecker was created and used
-                mock_checker_class.assert_called_once()
-                mock_checker.check_series.assert_called_once_with(456, apply_tags=True)
-        finally:
-            filtarr.webhook._state_manager = original_state_manager
+            # Verify ReleaseChecker was created and used
+            mock_checker_class.assert_called_once()
+            mock_checker.check_series.assert_called_once_with(456, apply_tags=True)
 
     @pytest.mark.asyncio
     async def test_series_check_skips_ttl_when_disabled(self, full_config: Config) -> None:
@@ -1257,30 +1245,25 @@ class TestTTLCaching:
 
         mock_state_manager = MagicMock()
 
-        original_state_manager = filtarr.webhook._state_manager
+        with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
+            mock_checker = MagicMock()
+            mock_result = MagicMock()
+            mock_result.has_match = False
+            mock_result.matched_releases = []
+            mock_result.releases = []
+            mock_result.tag_result = MagicMock()
+            mock_result.tag_result.tag_applied = None
+            mock_result.tag_result.tag_already_present = False
+            mock_result.tag_result.dry_run = False
+            mock_checker.check_series = AsyncMock(return_value=mock_result)
+            mock_checker_class.return_value = mock_checker
 
-        try:
-            filtarr.webhook._state_manager = mock_state_manager
+            await filtarr.webhook._process_series_check(
+                456, "Breaking Bad", config, state_manager=mock_state_manager
+            )
 
-            with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
-                mock_checker = MagicMock()
-                mock_result = MagicMock()
-                mock_result.has_match = False
-                mock_result.matched_releases = []
-                mock_result.releases = []
-                mock_result.tag_result = MagicMock()
-                mock_result.tag_result.tag_applied = None
-                mock_result.tag_result.tag_already_present = False
-                mock_result.tag_result.dry_run = False
-                mock_checker.check_series = AsyncMock(return_value=mock_result)
-                mock_checker_class.return_value = mock_checker
-
-                await filtarr.webhook._process_series_check(456, "Breaking Bad", config)
-
-                # TTL check should not be called when disabled
-                mock_state_manager.get_cached_result.assert_not_called()
-        finally:
-            filtarr.webhook._state_manager = original_state_manager
+            # TTL check should not be called when disabled
+            mock_state_manager.get_cached_result.assert_not_called()
 
 
 class TestStateRecording:
@@ -1303,46 +1286,41 @@ class TestStateRecording:
         mock_state_manager = MagicMock()
         mock_state_manager.get_cached_result.return_value = None
 
-        original_state_manager = filtarr.webhook._state_manager
+        with (
+            patch("filtarr.webhook.ReleaseChecker") as mock_checker_class,
+            caplog.at_level(logging.INFO),
+        ):
+            mock_checker = MagicMock()
+            mock_result = MagicMock()
+            mock_result.has_match = True
+            mock_result.matched_releases = [MagicMock()]
+            mock_result.releases = [MagicMock()]
+            mock_result.tag_result = MagicMock()
+            mock_result.tag_result.tag_applied = "4k-available"
+            mock_result.tag_result.tag_already_present = False
+            mock_result.tag_result.dry_run = False
+            mock_checker.check_movie = AsyncMock(return_value=mock_result)
+            mock_checker_class.return_value = mock_checker
 
-        try:
-            filtarr.webhook._state_manager = mock_state_manager
+            await filtarr.webhook._process_movie_check(
+                123, "Test Movie", config, state_manager=mock_state_manager
+            )
 
-            with (
-                patch("filtarr.webhook.ReleaseChecker") as mock_checker_class,
-                caplog.at_level(logging.INFO),
-            ):
-                mock_checker = MagicMock()
-                mock_result = MagicMock()
-                mock_result.has_match = True
-                mock_result.matched_releases = [MagicMock()]
-                mock_result.releases = [MagicMock()]
-                mock_result.tag_result = MagicMock()
-                mock_result.tag_result.tag_applied = "4k-available"
-                mock_result.tag_result.tag_already_present = False
-                mock_result.tag_result.dry_run = False
-                mock_checker.check_movie = AsyncMock(return_value=mock_result)
-                mock_checker_class.return_value = mock_checker
+            # Verify state was recorded
+            mock_state_manager.record_check.assert_called_once_with(
+                "movie",
+                123,
+                True,
+                "4k-available",
+            )
 
-                await filtarr.webhook._process_movie_check(123, "Test Movie", config)
-
-                # Verify state was recorded
-                mock_state_manager.record_check.assert_called_once_with(
-                    "movie",
-                    123,
-                    True,
-                    "4k-available",
-                )
-
-                # Verify log message includes tag info (new format)
-                assert any(
-                    "Check result:" in record.getMessage()
-                    and "available" in record.getMessage()
-                    and "4k-available" in record.getMessage()
-                    for record in caplog.records
-                )
-        finally:
-            filtarr.webhook._state_manager = original_state_manager
+            # Verify log message includes tag info (new format)
+            assert any(
+                "Check result:" in record.getMessage()
+                and "available" in record.getMessage()
+                and "4k-available" in record.getMessage()
+                for record in caplog.records
+            )
 
     @pytest.mark.asyncio
     async def test_series_check_records_result_in_state(
@@ -1361,46 +1339,41 @@ class TestStateRecording:
         mock_state_manager = MagicMock()
         mock_state_manager.get_cached_result.return_value = None
 
-        original_state_manager = filtarr.webhook._state_manager
+        with (
+            patch("filtarr.webhook.ReleaseChecker") as mock_checker_class,
+            caplog.at_level(logging.INFO),
+        ):
+            mock_checker = MagicMock()
+            mock_result = MagicMock()
+            mock_result.has_match = False
+            mock_result.matched_releases = []
+            mock_result.releases = [MagicMock(), MagicMock()]
+            mock_result.tag_result = MagicMock()
+            mock_result.tag_result.tag_applied = "4k-unavailable"
+            mock_result.tag_result.tag_already_present = False
+            mock_result.tag_result.dry_run = False
+            mock_checker.check_series = AsyncMock(return_value=mock_result)
+            mock_checker_class.return_value = mock_checker
 
-        try:
-            filtarr.webhook._state_manager = mock_state_manager
+            await filtarr.webhook._process_series_check(
+                456, "Breaking Bad", config, state_manager=mock_state_manager
+            )
 
-            with (
-                patch("filtarr.webhook.ReleaseChecker") as mock_checker_class,
-                caplog.at_level(logging.INFO),
-            ):
-                mock_checker = MagicMock()
-                mock_result = MagicMock()
-                mock_result.has_match = False
-                mock_result.matched_releases = []
-                mock_result.releases = [MagicMock(), MagicMock()]
-                mock_result.tag_result = MagicMock()
-                mock_result.tag_result.tag_applied = "4k-unavailable"
-                mock_result.tag_result.tag_already_present = False
-                mock_result.tag_result.dry_run = False
-                mock_checker.check_series = AsyncMock(return_value=mock_result)
-                mock_checker_class.return_value = mock_checker
+            # Verify state was recorded
+            mock_state_manager.record_check.assert_called_once_with(
+                "series",
+                456,
+                False,
+                "4k-unavailable",
+            )
 
-                await filtarr.webhook._process_series_check(456, "Breaking Bad", config)
-
-                # Verify state was recorded
-                mock_state_manager.record_check.assert_called_once_with(
-                    "series",
-                    456,
-                    False,
-                    "4k-unavailable",
-                )
-
-                # Verify log message includes tag info (new format)
-                assert any(
-                    "Check result:" in record.getMessage()
-                    and "unavailable" in record.getMessage()
-                    and "4k-unavailable" in record.getMessage()
-                    for record in caplog.records
-                )
-        finally:
-            filtarr.webhook._state_manager = original_state_manager
+            # Verify log message includes tag info (new format)
+            assert any(
+                "Check result:" in record.getMessage()
+                and "unavailable" in record.getMessage()
+                and "4k-unavailable" in record.getMessage()
+                for record in caplog.records
+            )
 
 
 class TestStateManagerInitialization:
@@ -1416,33 +1389,26 @@ class TestStateManagerInitialization:
 
         mock_state_manager = MagicMock()
 
-        original_state_manager = filtarr.webhook._state_manager
+        with (
+            patch(
+                "filtarr.state.StateManager", return_value=mock_state_manager
+            ) as mock_state_class,
+            patch.object(uvicorn, "run") as mock_uvicorn_run,
+            caplog.at_level(logging.INFO),
+        ):
+            filtarr.webhook.run_server(config=full_config, scheduler_enabled=False)
 
-        try:
-            with (
-                patch(
-                    "filtarr.state.StateManager", return_value=mock_state_manager
-                ) as mock_state_class,
-                patch.object(uvicorn, "run") as mock_uvicorn_run,
-                caplog.at_level(logging.INFO),
-            ):
-                filtarr.webhook.run_server(config=full_config, scheduler_enabled=False)
+            # Verify StateManager was created with correct path
+            mock_state_class.assert_called_once_with(full_config.state.path)
 
-                # Verify StateManager was created with correct path
-                mock_state_class.assert_called_once_with(full_config.state.path)
+            # Verify ensure_initialized was called
+            mock_state_manager.ensure_initialized.assert_called_once()
 
-                # Verify ensure_initialized was called
-                mock_state_manager.ensure_initialized.assert_called_once()
+            # Server should be started
+            mock_uvicorn_run.assert_called_once()
 
-                # Server should be started
-                mock_uvicorn_run.assert_called_once()
-
-                # Verify log message about state initialization
-                assert any(
-                    "State file initialized" in record.getMessage() for record in caplog.records
-                )
-        finally:
-            filtarr.webhook._state_manager = original_state_manager
+            # Verify log message about state initialization
+            assert any("State file initialized" in record.getMessage() for record in caplog.records)
 
     def test_state_ttl_disabled_logging(
         self, full_config: Config, caplog: pytest.LogCaptureFixture
@@ -1461,22 +1427,15 @@ class TestStateManagerInitialization:
 
         mock_state_manager = MagicMock()
 
-        original_state_manager = filtarr.webhook._state_manager
+        with (
+            patch("filtarr.state.StateManager", return_value=mock_state_manager),
+            patch.object(uvicorn, "run"),
+            caplog.at_level(logging.INFO),
+        ):
+            filtarr.webhook.run_server(config=config, scheduler_enabled=False)
 
-        try:
-            with (
-                patch("filtarr.state.StateManager", return_value=mock_state_manager),
-                patch.object(uvicorn, "run"),
-                caplog.at_level(logging.INFO),
-            ):
-                filtarr.webhook.run_server(config=config, scheduler_enabled=False)
-
-                # Verify log message about TTL being disabled
-                assert any(
-                    "State TTL: disabled" in record.getMessage() for record in caplog.records
-                )
-        finally:
-            filtarr.webhook._state_manager = original_state_manager
+            # Verify log message about TTL being disabled
+            assert any("State TTL: disabled" in record.getMessage() for record in caplog.records)
 
     def test_state_ttl_enabled_logging(
         self, full_config: Config, caplog: pytest.LogCaptureFixture
@@ -1495,22 +1454,15 @@ class TestStateManagerInitialization:
 
         mock_state_manager = MagicMock()
 
-        original_state_manager = filtarr.webhook._state_manager
+        with (
+            patch("filtarr.state.StateManager", return_value=mock_state_manager),
+            patch.object(uvicorn, "run"),
+            caplog.at_level(logging.INFO),
+        ):
+            filtarr.webhook.run_server(config=config, scheduler_enabled=False)
 
-        try:
-            with (
-                patch("filtarr.state.StateManager", return_value=mock_state_manager),
-                patch.object(uvicorn, "run"),
-                caplog.at_level(logging.INFO),
-            ):
-                filtarr.webhook.run_server(config=config, scheduler_enabled=False)
-
-                # Verify log message about TTL hours
-                assert any(
-                    "State TTL: 48 hours" in record.getMessage() for record in caplog.records
-                )
-        finally:
-            filtarr.webhook._state_manager = original_state_manager
+            # Verify log message about TTL hours
+            assert any("State TTL: 48 hours" in record.getMessage() for record in caplog.records)
 
 
 class TestSchedulerLifecycle:
@@ -1532,36 +1484,29 @@ class TestSchedulerLifecycle:
 
         mock_state_manager = MagicMock()
 
-        # Store original scheduler manager
-        original_scheduler = filtarr.webhook._scheduler_manager
+        with (
+            patch(
+                "filtarr.scheduler.SchedulerManager", return_value=mock_scheduler_manager
+            ) as mock_scheduler_class,
+            patch(
+                "filtarr.state.StateManager", return_value=mock_state_manager
+            ) as mock_state_class,
+            patch("filtarr.webhook.create_app"),
+            patch("uvicorn.Config"),
+            patch("uvicorn.Server") as mock_server_class,
+        ):
+            # Mock server.serve() to not actually run
+            mock_server = MagicMock()
+            mock_server.serve = AsyncMock()
+            mock_server_class.return_value = mock_server
 
-        try:
-            with (
-                patch(
-                    "filtarr.scheduler.SchedulerManager", return_value=mock_scheduler_manager
-                ) as mock_scheduler_class,
-                patch(
-                    "filtarr.state.StateManager", return_value=mock_state_manager
-                ) as mock_state_class,
-                patch("filtarr.webhook.create_app"),
-                patch("uvicorn.Config"),
-                patch("uvicorn.Server") as mock_server_class,
-            ):
-                # Mock server.serve() to not actually run
-                mock_server = MagicMock()
-                mock_server.serve = AsyncMock()
-                mock_server_class.return_value = mock_server
+            # Run the server briefly
+            filtarr.webhook.run_server(config=config, scheduler_enabled=True)
 
-                # Run the server briefly
-                filtarr.webhook.run_server(config=config, scheduler_enabled=True)
-
-                # Verify scheduler was initialized
-                mock_state_class.assert_called_once()
-                mock_scheduler_class.assert_called_once_with(config, mock_state_manager)
-                mock_scheduler_manager.start.assert_called_once()
-
-        finally:
-            filtarr.webhook._scheduler_manager = original_scheduler
+            # Verify scheduler was initialized
+            mock_state_class.assert_called_once()
+            mock_scheduler_class.assert_called_once_with(config, mock_state_manager)
+            mock_scheduler_manager.start.assert_called_once()
 
     def test_scheduler_import_error_continues_without_scheduler(
         self, full_config: Config, caplog: pytest.LogCaptureFixture
@@ -1580,7 +1525,6 @@ class TestSchedulerLifecycle:
             scheduler=SchedulerConfig(enabled=True),
         )
 
-        original_scheduler = filtarr.webhook._scheduler_manager
         original_import = builtins.__import__
 
         def mock_import(
@@ -1595,25 +1539,21 @@ class TestSchedulerLifecycle:
                 raise ImportError(f"No module named '{name}'")
             return original_import(name, globals_, locals_, fromlist, level)
 
-        try:
-            with (
-                patch.object(builtins, "__import__", side_effect=mock_import),
-                patch.object(uvicorn, "run") as mock_uvicorn_run,
-                caplog.at_level(logging.WARNING),
-            ):
-                filtarr.webhook.run_server(config=config, scheduler_enabled=True)
+        with (
+            patch.object(builtins, "__import__", side_effect=mock_import),
+            patch.object(uvicorn, "run") as mock_uvicorn_run,
+            caplog.at_level(logging.WARNING),
+        ):
+            filtarr.webhook.run_server(config=config, scheduler_enabled=True)
 
-                # Server should still be started (without scheduler)
-                mock_uvicorn_run.assert_called_once()
+            # Server should still be started (without scheduler)
+            mock_uvicorn_run.assert_called_once()
 
-                # Should have logged warning about scheduler dependencies
-                assert any(
-                    "Scheduler dependencies not installed" in record.getMessage()
-                    for record in caplog.records
-                )
-
-        finally:
-            filtarr.webhook._scheduler_manager = original_scheduler
+            # Should have logged warning about scheduler dependencies
+            assert any(
+                "Scheduler dependencies not installed" in record.getMessage()
+                for record in caplog.records
+            )
 
     def test_scheduler_start_import_error(
         self, full_config: Config, caplog: pytest.LogCaptureFixture
@@ -1637,33 +1577,27 @@ class TestSchedulerLifecycle:
 
         mock_state_manager = MagicMock()
 
-        original_scheduler = filtarr.webhook._scheduler_manager
+        with (
+            patch("filtarr.scheduler.SchedulerManager", return_value=mock_scheduler_manager),
+            patch("filtarr.state.StateManager", return_value=mock_state_manager),
+            patch("filtarr.webhook.create_app"),
+            patch("uvicorn.Config"),
+            patch("uvicorn.Server") as mock_server_class,
+            caplog.at_level(logging.DEBUG),
+        ):
+            mock_server = MagicMock()
+            mock_server.serve = AsyncMock()
+            mock_server_class.return_value = mock_server
 
-        try:
-            with (
-                patch("filtarr.scheduler.SchedulerManager", return_value=mock_scheduler_manager),
-                patch("filtarr.state.StateManager", return_value=mock_state_manager),
-                patch("filtarr.webhook.create_app"),
-                patch("uvicorn.Config"),
-                patch("uvicorn.Server") as mock_server_class,
-                caplog.at_level(logging.DEBUG),
-            ):
-                mock_server = MagicMock()
-                mock_server.serve = AsyncMock()
-                mock_server_class.return_value = mock_server
+            filtarr.webhook.run_server(config=config, scheduler_enabled=True)
 
-                filtarr.webhook.run_server(config=config, scheduler_enabled=True)
+            # Scheduler start should have been attempted
+            mock_scheduler_manager.start.assert_called_once()
 
-                # Scheduler start should have been attempted
-                mock_scheduler_manager.start.assert_called_once()
-
-                # Error should be logged
-                assert any(
-                    "Failed to start scheduler" in record.getMessage() for record in caplog.records
-                )
-
-        finally:
-            filtarr.webhook._scheduler_manager = original_scheduler
+            # Error should be logged
+            assert any(
+                "Failed to start scheduler" in record.getMessage() for record in caplog.records
+            )
 
     def test_scheduler_start_value_error(
         self, full_config: Config, caplog: pytest.LogCaptureFixture
@@ -1687,30 +1621,24 @@ class TestSchedulerLifecycle:
 
         mock_state_manager = MagicMock()
 
-        original_scheduler = filtarr.webhook._scheduler_manager
+        with (
+            patch("filtarr.scheduler.SchedulerManager", return_value=mock_scheduler_manager),
+            patch("filtarr.state.StateManager", return_value=mock_state_manager),
+            patch("filtarr.webhook.create_app"),
+            patch("uvicorn.Config"),
+            patch("uvicorn.Server") as mock_server_class,
+            caplog.at_level(logging.DEBUG),
+        ):
+            mock_server = MagicMock()
+            mock_server.serve = AsyncMock()
+            mock_server_class.return_value = mock_server
 
-        try:
-            with (
-                patch("filtarr.scheduler.SchedulerManager", return_value=mock_scheduler_manager),
-                patch("filtarr.state.StateManager", return_value=mock_state_manager),
-                patch("filtarr.webhook.create_app"),
-                patch("uvicorn.Config"),
-                patch("uvicorn.Server") as mock_server_class,
-                caplog.at_level(logging.DEBUG),
-            ):
-                mock_server = MagicMock()
-                mock_server.serve = AsyncMock()
-                mock_server_class.return_value = mock_server
+            filtarr.webhook.run_server(config=config, scheduler_enabled=True)
 
-                filtarr.webhook.run_server(config=config, scheduler_enabled=True)
-
-                # Error should be logged
-                assert any(
-                    "Failed to start scheduler" in record.getMessage() for record in caplog.records
-                )
-
-        finally:
-            filtarr.webhook._scheduler_manager = original_scheduler
+            # Error should be logged
+            assert any(
+                "Failed to start scheduler" in record.getMessage() for record in caplog.records
+            )
 
     def test_scheduler_start_runtime_error(
         self, full_config: Config, caplog: pytest.LogCaptureFixture
@@ -1734,30 +1662,24 @@ class TestSchedulerLifecycle:
 
         mock_state_manager = MagicMock()
 
-        original_scheduler = filtarr.webhook._scheduler_manager
+        with (
+            patch("filtarr.scheduler.SchedulerManager", return_value=mock_scheduler_manager),
+            patch("filtarr.state.StateManager", return_value=mock_state_manager),
+            patch("filtarr.webhook.create_app"),
+            patch("uvicorn.Config"),
+            patch("uvicorn.Server") as mock_server_class,
+            caplog.at_level(logging.DEBUG),
+        ):
+            mock_server = MagicMock()
+            mock_server.serve = AsyncMock()
+            mock_server_class.return_value = mock_server
 
-        try:
-            with (
-                patch("filtarr.scheduler.SchedulerManager", return_value=mock_scheduler_manager),
-                patch("filtarr.state.StateManager", return_value=mock_state_manager),
-                patch("filtarr.webhook.create_app"),
-                patch("uvicorn.Config"),
-                patch("uvicorn.Server") as mock_server_class,
-                caplog.at_level(logging.DEBUG),
-            ):
-                mock_server = MagicMock()
-                mock_server.serve = AsyncMock()
-                mock_server_class.return_value = mock_server
+            filtarr.webhook.run_server(config=config, scheduler_enabled=True)
 
-                filtarr.webhook.run_server(config=config, scheduler_enabled=True)
-
-                # Error should be logged (RuntimeError uses different message)
-                assert any(
-                    "Scheduler runtime error" in record.getMessage() for record in caplog.records
-                )
-
-        finally:
-            filtarr.webhook._scheduler_manager = original_scheduler
+            # Error should be logged (RuntimeError uses different message)
+            assert any(
+                "Scheduler runtime error" in record.getMessage() for record in caplog.records
+            )
 
     def test_scheduler_shutdown_cancelled_error(
         self, full_config: Config, caplog: pytest.LogCaptureFixture
@@ -1780,31 +1702,25 @@ class TestSchedulerLifecycle:
 
         mock_state_manager = MagicMock()
 
-        original_scheduler = filtarr.webhook._scheduler_manager
+        with (
+            patch("filtarr.scheduler.SchedulerManager", return_value=mock_scheduler_manager),
+            patch("filtarr.state.StateManager", return_value=mock_state_manager),
+            patch("filtarr.webhook.create_app"),
+            patch("uvicorn.Config"),
+            patch("uvicorn.Server") as mock_server_class,
+            caplog.at_level(logging.DEBUG),
+        ):
+            mock_server = MagicMock()
+            mock_server.serve = AsyncMock()
+            mock_server_class.return_value = mock_server
 
-        try:
-            with (
-                patch("filtarr.scheduler.SchedulerManager", return_value=mock_scheduler_manager),
-                patch("filtarr.state.StateManager", return_value=mock_state_manager),
-                patch("filtarr.webhook.create_app"),
-                patch("uvicorn.Config"),
-                patch("uvicorn.Server") as mock_server_class,
-                caplog.at_level(logging.DEBUG),
-            ):
-                mock_server = MagicMock()
-                mock_server.serve = AsyncMock()
-                mock_server_class.return_value = mock_server
+            filtarr.webhook.run_server(config=config, scheduler_enabled=True)
 
-                filtarr.webhook.run_server(config=config, scheduler_enabled=True)
-
-                # Debug message should be logged
-                assert any(
-                    "Scheduler stop cancelled during shutdown" in record.getMessage()
-                    for record in caplog.records
-                )
-
-        finally:
-            filtarr.webhook._scheduler_manager = original_scheduler
+            # Debug message should be logged
+            assert any(
+                "Scheduler stop cancelled during shutdown" in record.getMessage()
+                for record in caplog.records
+            )
 
     def test_scheduler_shutdown_runtime_error(
         self, full_config: Config, caplog: pytest.LogCaptureFixture
@@ -1828,31 +1744,25 @@ class TestSchedulerLifecycle:
 
         mock_state_manager = MagicMock()
 
-        original_scheduler = filtarr.webhook._scheduler_manager
+        with (
+            patch("filtarr.scheduler.SchedulerManager", return_value=mock_scheduler_manager),
+            patch("filtarr.state.StateManager", return_value=mock_state_manager),
+            patch("filtarr.webhook.create_app"),
+            patch("uvicorn.Config"),
+            patch("uvicorn.Server") as mock_server_class,
+            caplog.at_level(logging.WARNING),
+        ):
+            mock_server = MagicMock()
+            mock_server.serve = AsyncMock()
+            mock_server_class.return_value = mock_server
 
-        try:
-            with (
-                patch("filtarr.scheduler.SchedulerManager", return_value=mock_scheduler_manager),
-                patch("filtarr.state.StateManager", return_value=mock_state_manager),
-                patch("filtarr.webhook.create_app"),
-                patch("uvicorn.Config"),
-                patch("uvicorn.Server") as mock_server_class,
-                caplog.at_level(logging.WARNING),
-            ):
-                mock_server = MagicMock()
-                mock_server.serve = AsyncMock()
-                mock_server_class.return_value = mock_server
+            filtarr.webhook.run_server(config=config, scheduler_enabled=True)
 
-                filtarr.webhook.run_server(config=config, scheduler_enabled=True)
-
-                # Warning should be logged
-                assert any(
-                    "Error during scheduler shutdown" in record.getMessage()
-                    for record in caplog.records
-                )
-
-        finally:
-            filtarr.webhook._scheduler_manager = original_scheduler
+            # Warning should be logged
+            assert any(
+                "Error during scheduler shutdown" in record.getMessage()
+                for record in caplog.records
+            )
 
 
 class TestFormatCheckOutcome:
@@ -1946,41 +1856,36 @@ class TestWebhookLogFormat:
         mock_state_manager = MagicMock()
         mock_state_manager.get_cached_result.return_value = None
 
-        original_state_manager = filtarr.webhook._state_manager
+        with (
+            patch("filtarr.webhook.ReleaseChecker") as mock_checker_class,
+            caplog.at_level(logging.INFO),
+        ):
+            mock_checker = MagicMock()
+            mock_result = MagicMock()
+            mock_result.has_match = True
+            mock_result.matched_releases = [MagicMock()]
+            mock_result.releases = [MagicMock()]
+            mock_result.tag_result = MagicMock()
+            mock_result.tag_result.tag_applied = "4k-available"
+            mock_result.tag_result.tag_already_present = False
+            mock_result.tag_result.dry_run = False
+            mock_checker.check_movie = AsyncMock(return_value=mock_result)
+            mock_checker_class.return_value = mock_checker
 
-        try:
-            filtarr.webhook._state_manager = mock_state_manager
+            await filtarr.webhook._process_movie_check(
+                123, "The Matrix", full_config, state_manager=mock_state_manager
+            )
 
-            with (
-                patch("filtarr.webhook.ReleaseChecker") as mock_checker_class,
-                caplog.at_level(logging.INFO),
-            ):
-                mock_checker = MagicMock()
-                mock_result = MagicMock()
-                mock_result.has_match = True
-                mock_result.matched_releases = [MagicMock()]
-                mock_result.releases = [MagicMock()]
-                mock_result.tag_result = MagicMock()
-                mock_result.tag_result.tag_applied = "4k-available"
-                mock_result.tag_result.tag_already_present = False
-                mock_result.tag_result.dry_run = False
-                mock_checker.check_movie = AsyncMock(return_value=mock_result)
-                mock_checker_class.return_value = mock_checker
-
-                await filtarr.webhook._process_movie_check(123, "The Matrix", full_config)
-
-                # Verify log format: "Webhook: Radarr check - Movie Title"
-                assert any(
-                    "Webhook: Radarr check - The Matrix" in record.getMessage()
-                    for record in caplog.records
-                )
-                # Verify log format: "Check result: 4K available, tagged"
-                assert any(
-                    "Check result: 4K available, tag applied" in record.getMessage()
-                    for record in caplog.records
-                )
-        finally:
-            filtarr.webhook._state_manager = original_state_manager
+            # Verify log format: "Webhook: Radarr check - Movie Title"
+            assert any(
+                "Webhook: Radarr check - The Matrix" in record.getMessage()
+                for record in caplog.records
+            )
+            # Verify log format: "Check result: 4K available, tagged"
+            assert any(
+                "Check result: 4K available, tag applied" in record.getMessage()
+                for record in caplog.records
+            )
 
     @pytest.mark.asyncio
     async def test_sonarr_webhook_log_format(
@@ -1992,41 +1897,36 @@ class TestWebhookLogFormat:
         mock_state_manager = MagicMock()
         mock_state_manager.get_cached_result.return_value = None
 
-        original_state_manager = filtarr.webhook._state_manager
+        with (
+            patch("filtarr.webhook.ReleaseChecker") as mock_checker_class,
+            caplog.at_level(logging.INFO),
+        ):
+            mock_checker = MagicMock()
+            mock_result = MagicMock()
+            mock_result.has_match = False
+            mock_result.matched_releases = []
+            mock_result.releases = [MagicMock()]
+            mock_result.tag_result = MagicMock()
+            mock_result.tag_result.tag_applied = "4k-unavailable"
+            mock_result.tag_result.tag_already_present = False
+            mock_result.tag_result.dry_run = False
+            mock_checker.check_series = AsyncMock(return_value=mock_result)
+            mock_checker_class.return_value = mock_checker
 
-        try:
-            filtarr.webhook._state_manager = mock_state_manager
+            await filtarr.webhook._process_series_check(
+                456, "Breaking Bad", full_config, state_manager=mock_state_manager
+            )
 
-            with (
-                patch("filtarr.webhook.ReleaseChecker") as mock_checker_class,
-                caplog.at_level(logging.INFO),
-            ):
-                mock_checker = MagicMock()
-                mock_result = MagicMock()
-                mock_result.has_match = False
-                mock_result.matched_releases = []
-                mock_result.releases = [MagicMock()]
-                mock_result.tag_result = MagicMock()
-                mock_result.tag_result.tag_applied = "4k-unavailable"
-                mock_result.tag_result.tag_already_present = False
-                mock_result.tag_result.dry_run = False
-                mock_checker.check_series = AsyncMock(return_value=mock_result)
-                mock_checker_class.return_value = mock_checker
-
-                await filtarr.webhook._process_series_check(456, "Breaking Bad", full_config)
-
-                # Verify log format: "Webhook: Sonarr check - Series Title"
-                assert any(
-                    "Webhook: Sonarr check - Breaking Bad" in record.getMessage()
-                    for record in caplog.records
-                )
-                # Verify log format: "Check result: 4K not available, tagged"
-                assert any(
-                    "Check result: 4K not available, tag applied" in record.getMessage()
-                    for record in caplog.records
-                )
-        finally:
-            filtarr.webhook._state_manager = original_state_manager
+            # Verify log format: "Webhook: Sonarr check - Series Title"
+            assert any(
+                "Webhook: Sonarr check - Breaking Bad" in record.getMessage()
+                for record in caplog.records
+            )
+            # Verify log format: "Check result: 4K not available, tagged"
+            assert any(
+                "Check result: 4K not available, tag applied" in record.getMessage()
+                for record in caplog.records
+            )
 
     @pytest.mark.asyncio
     async def test_webhook_error_log_format(
@@ -2035,31 +1935,26 @@ class TestWebhookLogFormat:
         """Webhook error logs should use clean format."""
         import logging
 
-        # Reset state manager to None to ensure ReleaseChecker is called
-        original_state_manager = filtarr.webhook._state_manager
+        with (
+            patch("filtarr.webhook.ReleaseChecker") as mock_checker_class,
+            caplog.at_level(logging.ERROR),
+        ):
+            mock_checker = MagicMock()
+            mock_checker.check_movie = AsyncMock(
+                side_effect=httpx.ConnectError("Connection refused")
+            )
+            mock_checker_class.return_value = mock_checker
 
-        try:
-            filtarr.webhook._state_manager = None
+            # Pass state_manager=None to skip TTL check
+            await filtarr.webhook._process_movie_check(
+                123, "Test Movie", full_config, state_manager=None
+            )
 
-            with (
-                patch("filtarr.webhook.ReleaseChecker") as mock_checker_class,
-                caplog.at_level(logging.ERROR),
-            ):
-                mock_checker = MagicMock()
-                mock_checker.check_movie = AsyncMock(
-                    side_effect=httpx.ConnectError("Connection refused")
-                )
-                mock_checker_class.return_value = mock_checker
-
-                await filtarr.webhook._process_movie_check(123, "Test Movie", full_config)
-
-                # Verify error log format: "Webhook error: Movie Title - connection failed"
-                assert any(
-                    "Webhook error: Test Movie - connection failed" in record.getMessage()
-                    for record in caplog.records
-                )
-        finally:
-            filtarr.webhook._state_manager = original_state_manager
+            # Verify error log format: "Webhook error: Movie Title - connection failed"
+            assert any(
+                "Webhook error: Test Movie - connection failed" in record.getMessage()
+                for record in caplog.records
+            )
 
     @pytest.mark.asyncio
     async def test_webhook_timeout_error_log_format(
@@ -2068,31 +1963,24 @@ class TestWebhookLogFormat:
         """Webhook timeout error logs should use clean format."""
         import logging
 
-        # Reset state manager to None to ensure ReleaseChecker is called
-        original_state_manager = filtarr.webhook._state_manager
+        with (
+            patch("filtarr.webhook.ReleaseChecker") as mock_checker_class,
+            caplog.at_level(logging.ERROR),
+        ):
+            mock_checker = MagicMock()
+            mock_checker.check_movie = AsyncMock(side_effect=httpx.ReadTimeout("Read timed out"))
+            mock_checker_class.return_value = mock_checker
 
-        try:
-            filtarr.webhook._state_manager = None
+            # Pass state_manager=None to skip TTL check
+            await filtarr.webhook._process_movie_check(
+                123, "Test Movie", full_config, state_manager=None
+            )
 
-            with (
-                patch("filtarr.webhook.ReleaseChecker") as mock_checker_class,
-                caplog.at_level(logging.ERROR),
-            ):
-                mock_checker = MagicMock()
-                mock_checker.check_movie = AsyncMock(
-                    side_effect=httpx.ReadTimeout("Read timed out")
-                )
-                mock_checker_class.return_value = mock_checker
-
-                await filtarr.webhook._process_movie_check(123, "Test Movie", full_config)
-
-                # Verify error log format: "Webhook error: Movie Title - connection timed out"
-                assert any(
-                    "Webhook error: Test Movie - connection timed out" in record.getMessage()
-                    for record in caplog.records
-                )
-        finally:
-            filtarr.webhook._state_manager = original_state_manager
+            # Verify error log format: "Webhook error: Movie Title - connection timed out"
+            assert any(
+                "Webhook error: Test Movie - connection timed out" in record.getMessage()
+                for record in caplog.records
+            )
 
 
 class TestFormatNetworkError:
@@ -2177,6 +2065,133 @@ class TestOutputJsonEvent:
         assert output["none_value"] is None
 
 
+class TestDependencyInjection:
+    """Tests for FastAPI dependency injection and app.state usage."""
+
+    def test_app_state_has_scheduler_manager_attribute(self, full_config: Config) -> None:
+        """App should store scheduler_manager in app.state, not as global."""
+        app = filtarr.webhook.create_app(full_config)
+
+        # app.state should have a scheduler_manager attribute (may be None initially)
+        assert hasattr(app.state, "scheduler_manager")
+
+    def test_app_state_has_state_manager_attribute(self, full_config: Config) -> None:
+        """App should store state_manager in app.state, not as global."""
+        app = filtarr.webhook.create_app(full_config)
+
+        # app.state should have a state_manager attribute (may be None initially)
+        assert hasattr(app.state, "state_manager")
+
+    def test_app_state_has_output_format_attribute(self, full_config: Config) -> None:
+        """App should store output_format in app.state, not as global."""
+        app = filtarr.webhook.create_app(full_config)
+
+        # app.state should have an output_format attribute
+        assert hasattr(app.state, "output_format")
+
+    def test_no_global_scheduler_manager(self) -> None:
+        """Module should NOT have global _scheduler_manager variable."""
+        # After refactoring, this global should not exist
+        assert not hasattr(filtarr.webhook, "_scheduler_manager")
+
+    def test_no_global_state_manager(self) -> None:
+        """Module should NOT have global _state_manager variable."""
+        # After refactoring, this global should not exist
+        assert not hasattr(filtarr.webhook, "_state_manager")
+
+    def test_no_global_output_format(self) -> None:
+        """Module should NOT have global _output_format variable."""
+        # After refactoring, this global should not exist
+        assert not hasattr(filtarr.webhook, "_output_format")
+
+    def test_status_endpoint_uses_app_state(self, full_config: Config) -> None:
+        """Status endpoint should access scheduler_manager from app.state."""
+        app = filtarr.webhook.create_app(full_config)
+
+        # Set scheduler_manager on app.state
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_running = True
+        mock_scheduler.get_all_schedules.return_value = [
+            MagicMock(enabled=True),
+        ]
+        mock_scheduler.get_running_schedules.return_value = {"test-schedule"}
+        mock_scheduler.get_history.return_value = []
+
+        app.state.scheduler_manager = mock_scheduler
+
+        client = TestClient(app)
+        response = client.get("/status")
+
+        assert response.status_code == 200
+        data = response.json()
+        # Should show scheduler as enabled since we set it on app.state
+        assert data["scheduler"]["enabled"] is True
+        assert data["scheduler"]["running"] is True
+
+    def test_multiple_app_instances_have_isolated_state(self, full_config: Config) -> None:
+        """Multiple app instances should have isolated state (no shared globals)."""
+        app1 = filtarr.webhook.create_app(full_config)
+        app2 = filtarr.webhook.create_app(full_config)
+
+        # Set different state on each app
+        mock_scheduler1 = MagicMock()
+        mock_scheduler1.is_running = True
+        mock_scheduler1.get_all_schedules.return_value = [MagicMock(enabled=True)]
+        mock_scheduler1.get_running_schedules.return_value = set()
+        mock_scheduler1.get_history.return_value = []
+
+        mock_scheduler2 = MagicMock()
+        mock_scheduler2.is_running = False
+        mock_scheduler2.get_all_schedules.return_value = []
+        mock_scheduler2.get_running_schedules.return_value = set()
+        mock_scheduler2.get_history.return_value = []
+
+        app1.state.scheduler_manager = mock_scheduler1
+        app2.state.scheduler_manager = mock_scheduler2
+
+        client1 = TestClient(app1)
+        client2 = TestClient(app2)
+
+        response1 = client1.get("/status")
+        response2 = client2.get("/status")
+
+        # Each app should reflect its own state
+        data1 = response1.json()
+        data2 = response2.json()
+
+        # app1 has scheduler running
+        assert data1["scheduler"]["running"] is True
+        # app2 has scheduler not running
+        assert data2["scheduler"]["running"] is False
+
+    def test_test_isolation_between_runs(self, full_config: Config) -> None:
+        """Tests should not leak state between runs."""
+        # Create app and set state
+        app = filtarr.webhook.create_app(full_config)
+        app.state.output_format = "json"
+
+        # Create a new app - should have default state
+        app_new = filtarr.webhook.create_app(full_config)
+
+        # New app should have default output_format, not "json"
+        # Note: default is "text" according to the implementation
+        assert app_new.state.output_format == "text"
+
+    def test_create_app_accepts_initial_state_manager(self, full_config: Config) -> None:
+        """create_app should accept optional state_manager parameter."""
+        mock_state_manager = MagicMock()
+
+        app = filtarr.webhook.create_app(full_config, state_manager=mock_state_manager)
+
+        assert app.state.state_manager is mock_state_manager
+
+    def test_create_app_accepts_initial_output_format(self, full_config: Config) -> None:
+        """create_app should accept optional output_format parameter."""
+        app = filtarr.webhook.create_app(full_config, output_format="json")
+
+        assert app.state.output_format == "json"
+
+
 class TestWebhookJsonOutputMode:
     """Tests for webhook JSON output mode."""
 
@@ -2185,141 +2200,114 @@ class TestWebhookJsonOutputMode:
         self, full_config: Config, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """Radarr webhook should output JSON events when output_format is json."""
-        original_format = filtarr.webhook._output_format
-        original_state_manager = filtarr.webhook._state_manager
+        with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
+            mock_checker = MagicMock()
+            mock_result = MagicMock()
+            mock_result.has_match = True
+            mock_result.matched_releases = [MagicMock()]
+            mock_result.releases = [MagicMock()]
+            mock_result.tag_result = MagicMock()
+            mock_result.tag_result.tag_applied = "4k-available"
+            mock_result.tag_result.tag_already_present = False
+            mock_result.tag_result.dry_run = False
+            mock_checker.check_movie = AsyncMock(return_value=mock_result)
+            mock_checker_class.return_value = mock_checker
 
-        try:
-            # Set JSON output mode
-            filtarr.webhook._output_format = "json"
-            filtarr.webhook._state_manager = None
+            # Pass output_format as parameter (no global state)
+            await filtarr.webhook._process_movie_check(
+                123, "Test Movie", full_config, state_manager=None, output_format="json"
+            )
 
-            with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
-                mock_checker = MagicMock()
-                mock_result = MagicMock()
-                mock_result.has_match = True
-                mock_result.matched_releases = [MagicMock()]
-                mock_result.releases = [MagicMock()]
-                mock_result.tag_result = MagicMock()
-                mock_result.tag_result.tag_applied = "4k-available"
-                mock_result.tag_result.tag_already_present = False
-                mock_result.tag_result.dry_run = False
-                mock_checker.check_movie = AsyncMock(return_value=mock_result)
-                mock_checker_class.return_value = mock_checker
+        captured = capsys.readouterr()
+        lines = captured.out.strip().split("\n")
 
-                await filtarr.webhook._process_movie_check(123, "Test Movie", full_config)
+        # Should have two JSON events: webhook_received and check_complete
+        assert len(lines) == 2
 
-            captured = capsys.readouterr()
-            lines = captured.out.strip().split("\n")
+        # Parse and verify webhook_received event
+        received_event = json.loads(lines[0])
+        assert received_event["event"] == "webhook_received"
+        assert received_event["source"] == "radarr"
+        assert received_event["title"] == "Test Movie"
 
-            # Should have two JSON events: webhook_received and check_complete
-            assert len(lines) == 2
-
-            # Parse and verify webhook_received event
-            received_event = json.loads(lines[0])
-            assert received_event["event"] == "webhook_received"
-            assert received_event["source"] == "radarr"
-            assert received_event["title"] == "Test Movie"
-
-            # Parse and verify check_complete event
-            complete_event = json.loads(lines[1])
-            assert complete_event["event"] == "check_complete"
-            assert complete_event["title"] == "Test Movie"
-            assert complete_event["available"] is True
-            assert complete_event["tag_applied"] == "4k-available"
-        finally:
-            # Reset to default
-            filtarr.webhook._output_format = original_format
-            filtarr.webhook._state_manager = original_state_manager
+        # Parse and verify check_complete event
+        complete_event = json.loads(lines[1])
+        assert complete_event["event"] == "check_complete"
+        assert complete_event["title"] == "Test Movie"
+        assert complete_event["available"] is True
+        assert complete_event["tag_applied"] == "4k-available"
 
     @pytest.mark.asyncio
     async def test_sonarr_webhook_json_output_mode(
         self, full_config: Config, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """Sonarr webhook should output JSON events when output_format is json."""
-        original_format = filtarr.webhook._output_format
-        original_state_manager = filtarr.webhook._state_manager
+        with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
+            mock_checker = MagicMock()
+            mock_result = MagicMock()
+            mock_result.has_match = False
+            mock_result.matched_releases = []
+            mock_result.releases = [MagicMock()]
+            mock_result.tag_result = MagicMock()
+            mock_result.tag_result.tag_applied = "4k-unavailable"
+            mock_result.tag_result.tag_already_present = False
+            mock_result.tag_result.dry_run = False
+            mock_checker.check_series = AsyncMock(return_value=mock_result)
+            mock_checker_class.return_value = mock_checker
 
-        try:
-            # Set JSON output mode
-            filtarr.webhook._output_format = "json"
-            filtarr.webhook._state_manager = None
+            # Pass output_format as parameter (no global state)
+            await filtarr.webhook._process_series_check(
+                456, "Breaking Bad", full_config, state_manager=None, output_format="json"
+            )
 
-            with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
-                mock_checker = MagicMock()
-                mock_result = MagicMock()
-                mock_result.has_match = False
-                mock_result.matched_releases = []
-                mock_result.releases = [MagicMock()]
-                mock_result.tag_result = MagicMock()
-                mock_result.tag_result.tag_applied = "4k-unavailable"
-                mock_result.tag_result.tag_already_present = False
-                mock_result.tag_result.dry_run = False
-                mock_checker.check_series = AsyncMock(return_value=mock_result)
-                mock_checker_class.return_value = mock_checker
+        captured = capsys.readouterr()
+        lines = captured.out.strip().split("\n")
 
-                await filtarr.webhook._process_series_check(456, "Breaking Bad", full_config)
+        # Should have two JSON events: webhook_received and check_complete
+        assert len(lines) == 2
 
-            captured = capsys.readouterr()
-            lines = captured.out.strip().split("\n")
+        # Parse and verify webhook_received event
+        received_event = json.loads(lines[0])
+        assert received_event["event"] == "webhook_received"
+        assert received_event["source"] == "sonarr"
+        assert received_event["title"] == "Breaking Bad"
 
-            # Should have two JSON events: webhook_received and check_complete
-            assert len(lines) == 2
-
-            # Parse and verify webhook_received event
-            received_event = json.loads(lines[0])
-            assert received_event["event"] == "webhook_received"
-            assert received_event["source"] == "sonarr"
-            assert received_event["title"] == "Breaking Bad"
-
-            # Parse and verify check_complete event
-            complete_event = json.loads(lines[1])
-            assert complete_event["event"] == "check_complete"
-            assert complete_event["title"] == "Breaking Bad"
-            assert complete_event["available"] is False
-            assert complete_event["tag_applied"] == "4k-unavailable"
-        finally:
-            # Reset to default
-            filtarr.webhook._output_format = original_format
-            filtarr.webhook._state_manager = original_state_manager
+        # Parse and verify check_complete event
+        complete_event = json.loads(lines[1])
+        assert complete_event["event"] == "check_complete"
+        assert complete_event["title"] == "Breaking Bad"
+        assert complete_event["available"] is False
+        assert complete_event["tag_applied"] == "4k-unavailable"
 
     @pytest.mark.asyncio
     async def test_json_output_mode_no_tag_applied(
         self, full_config: Config, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """JSON output should handle case when no tag is applied."""
-        original_format = filtarr.webhook._output_format
-        original_state_manager = filtarr.webhook._state_manager
+        with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
+            mock_checker = MagicMock()
+            mock_result = MagicMock()
+            mock_result.has_match = True
+            mock_result.matched_releases = [MagicMock()]
+            mock_result.releases = [MagicMock()]
+            mock_result.tag_result = MagicMock()
+            mock_result.tag_result.tag_applied = None  # No tag applied
+            mock_result.tag_result.tag_already_present = False
+            mock_result.tag_result.dry_run = False
+            mock_checker.check_movie = AsyncMock(return_value=mock_result)
+            mock_checker_class.return_value = mock_checker
 
-        try:
-            # Set JSON output mode
-            filtarr.webhook._output_format = "json"
-            filtarr.webhook._state_manager = None
+            # Pass output_format as parameter (no global state)
+            await filtarr.webhook._process_movie_check(
+                123, "Test Movie", full_config, state_manager=None, output_format="json"
+            )
 
-            with patch("filtarr.webhook.ReleaseChecker") as mock_checker_class:
-                mock_checker = MagicMock()
-                mock_result = MagicMock()
-                mock_result.has_match = True
-                mock_result.matched_releases = [MagicMock()]
-                mock_result.releases = [MagicMock()]
-                mock_result.tag_result = MagicMock()
-                mock_result.tag_result.tag_applied = None  # No tag applied
-                mock_result.tag_result.tag_already_present = False
-                mock_result.tag_result.dry_run = False
-                mock_checker.check_movie = AsyncMock(return_value=mock_result)
-                mock_checker_class.return_value = mock_checker
+        captured = capsys.readouterr()
+        lines = captured.out.strip().split("\n")
 
-                await filtarr.webhook._process_movie_check(123, "Test Movie", full_config)
-
-            captured = capsys.readouterr()
-            lines = captured.out.strip().split("\n")
-
-            # Parse and verify check_complete event
-            complete_event = json.loads(lines[1])
-            assert complete_event["tag_applied"] is None
-        finally:
-            # Reset to default
-            filtarr.webhook._output_format = original_format
-            filtarr.webhook._state_manager = original_state_manager
+        # Parse and verify check_complete event
+        complete_event = json.loads(lines[1])
+        assert complete_event["tag_applied"] is None
 
     def test_run_server_json_output_mode_server_started_event(
         self, full_config: Config, capsys: pytest.CaptureFixture[str]
@@ -2327,44 +2315,39 @@ class TestWebhookJsonOutputMode:
         """run_server should output server_started JSON event when output_format is json."""
         import uvicorn
 
-        original_format = filtarr.webhook._output_format
+        mock_state_manager = MagicMock()
 
-        try:
-            mock_state_manager = MagicMock()
+        with (
+            patch("filtarr.state.StateManager", return_value=mock_state_manager),
+            patch.object(uvicorn, "run"),
+        ):
+            filtarr.webhook.run_server(
+                config=full_config,
+                scheduler_enabled=False,
+                output_format="json",
+                host="0.0.0.0",
+                port=8080,
+            )
 
-            with (
-                patch("filtarr.state.StateManager", return_value=mock_state_manager),
-                patch.object(uvicorn, "run"),
-            ):
-                filtarr.webhook.run_server(
-                    config=full_config,
-                    scheduler_enabled=False,
-                    output_format="json",
-                    host="0.0.0.0",
-                    port=8080,
-                )
+        captured = capsys.readouterr()
+        # Find the server_started event in the output
+        lines = [line for line in captured.out.strip().split("\n") if line]
 
-            captured = capsys.readouterr()
-            # Find the server_started event in the output
-            lines = [line for line in captured.out.strip().split("\n") if line]
+        # Find the JSON line (should be first non-empty line with JSON)
+        server_started = None
+        for line in lines:
+            try:
+                parsed = json.loads(line)
+                if parsed.get("event") == "server_started":
+                    server_started = parsed
+                    break
+            except json.JSONDecodeError:
+                continue
 
-            # Find the JSON line (should be first non-empty line with JSON)
-            server_started = None
-            for line in lines:
-                try:
-                    parsed = json.loads(line)
-                    if parsed.get("event") == "server_started":
-                        server_started = parsed
-                        break
-                except json.JSONDecodeError:
-                    continue
-
-            assert server_started is not None
-            assert server_started["event"] == "server_started"
-            assert server_started["host"] == "0.0.0.0"
-            assert server_started["port"] == 8080
-            assert server_started["radarr_configured"] is True
-            assert server_started["sonarr_configured"] is True
-            assert server_started["scheduler_enabled"] is False
-        finally:
-            filtarr.webhook._output_format = original_format
+        assert server_started is not None
+        assert server_started["event"] == "server_started"
+        assert server_started["host"] == "0.0.0.0"
+        assert server_started["port"] == 8080
+        assert server_started["radarr_configured"] is True
+        assert server_started["sonarr_configured"] is True
+        assert server_started["scheduler_enabled"] is False
