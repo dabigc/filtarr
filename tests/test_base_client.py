@@ -978,6 +978,161 @@ class TestCacheStampedeProtection:
             assert call_count == 1, f"Expected 1 API call, got {call_count}"
 
 
+class TestRetryableHTTPError:
+    """Tests for RetryableHTTPError exception class."""
+
+    def test_status_code_property_returns_response_status(self) -> None:
+        """RetryableHTTPError.status_code should return the response's status code."""
+        from filtarr.clients.base import RetryableHTTPError
+
+        # Create a mock response with a specific status code
+        response = Response(429, json={"error": "Too Many Requests"})
+        error = RetryableHTTPError("Rate limited", response=response, retry_after=5.0)
+
+        assert error.status_code == 429
+
+    def test_status_code_property_for_5xx_errors(self) -> None:
+        """RetryableHTTPError.status_code should work for 5xx error codes."""
+        from filtarr.clients.base import RetryableHTTPError
+
+        response = Response(503, json={"error": "Service Unavailable"})
+        error = RetryableHTTPError("Server error", response=response)
+
+        assert error.status_code == 503
+
+    def test_retry_after_stored_correctly(self) -> None:
+        """RetryableHTTPError should store retry_after value."""
+        from filtarr.clients.base import RetryableHTTPError
+
+        response = Response(429, json={"error": "Rate limited"})
+        error = RetryableHTTPError("Rate limited", response=response, retry_after=10.5)
+
+        assert error.retry_after == 10.5
+
+    def test_retry_after_defaults_to_none(self) -> None:
+        """RetryableHTTPError.retry_after should default to None."""
+        from filtarr.clients.base import RetryableHTTPError
+
+        response = Response(500, json={"error": "Server error"})
+        error = RetryableHTTPError("Server error", response=response)
+
+        assert error.retry_after is None
+
+
+class TestRetryPredicate:
+    """Tests for RetryPredicate class."""
+
+    def test_returns_false_when_outcome_is_none(self) -> None:
+        """RetryPredicate should return False when retry_state.outcome is None."""
+        from unittest.mock import MagicMock
+
+        from filtarr.clients.base import RetryPredicate
+
+        predicate = RetryPredicate()
+
+        # Create a mock retry state with outcome = None
+        retry_state = MagicMock()
+        retry_state.outcome = None
+
+        result = predicate(retry_state)
+
+        assert result is False
+
+    def test_returns_false_when_no_exception(self) -> None:
+        """RetryPredicate should return False when outcome has no exception."""
+        from unittest.mock import MagicMock
+
+        from filtarr.clients.base import RetryPredicate
+
+        predicate = RetryPredicate()
+
+        # Create a mock retry state where outcome.exception() returns None
+        retry_state = MagicMock()
+        retry_state.outcome.exception.return_value = None
+
+        result = predicate(retry_state)
+
+        assert result is False
+
+    def test_returns_true_for_connect_error(self) -> None:
+        """RetryPredicate should return True for ConnectError."""
+        from unittest.mock import MagicMock
+
+        from filtarr.clients.base import RetryPredicate
+
+        predicate = RetryPredicate()
+
+        retry_state = MagicMock()
+        retry_state.outcome.exception.return_value = ConnectError("Connection refused")
+
+        result = predicate(retry_state)
+
+        assert result is True
+
+    def test_returns_true_for_connect_timeout(self) -> None:
+        """RetryPredicate should return True for ConnectTimeout."""
+        from unittest.mock import MagicMock
+
+        from filtarr.clients.base import RetryPredicate
+
+        predicate = RetryPredicate()
+
+        retry_state = MagicMock()
+        retry_state.outcome.exception.return_value = ConnectTimeout("Connection timeout")
+
+        result = predicate(retry_state)
+
+        assert result is True
+
+    def test_returns_true_for_read_timeout(self) -> None:
+        """RetryPredicate should return True for ReadTimeout."""
+        from unittest.mock import MagicMock
+
+        from filtarr.clients.base import RetryPredicate
+
+        predicate = RetryPredicate()
+
+        retry_state = MagicMock()
+        retry_state.outcome.exception.return_value = ReadTimeout("Read timeout")
+
+        result = predicate(retry_state)
+
+        assert result is True
+
+    def test_returns_true_for_retryable_http_error(self) -> None:
+        """RetryPredicate should return True for RetryableHTTPError."""
+        from unittest.mock import MagicMock
+
+        from filtarr.clients.base import RetryableHTTPError, RetryPredicate
+
+        predicate = RetryPredicate()
+
+        response = Response(503, json={"error": "Service Unavailable"})
+        retry_state = MagicMock()
+        retry_state.outcome.exception.return_value = RetryableHTTPError(
+            "Server error", response=response
+        )
+
+        result = predicate(retry_state)
+
+        assert result is True
+
+    def test_returns_false_for_other_exceptions(self) -> None:
+        """RetryPredicate should return False for non-retryable exceptions."""
+        from unittest.mock import MagicMock
+
+        from filtarr.clients.base import RetryPredicate
+
+        predicate = RetryPredicate()
+
+        retry_state = MagicMock()
+        retry_state.outcome.exception.return_value = ValueError("Some other error")
+
+        result = predicate(retry_state)
+
+        assert result is False
+
+
 class TestConnectionPoolConfiguration:
     """Tests for explicit connection pool configuration (Task 4.5)."""
 

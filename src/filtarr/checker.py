@@ -153,7 +153,7 @@ def select_seasons_to_check(
         # Use a set to deduplicate if they overlap
         return sorted({first, middle, last})
 
-    return sorted_seasons
+    return sorted_seasons  # pragma: no cover  # Defensive: all enum values handled above
 
 
 class ReleaseChecker:

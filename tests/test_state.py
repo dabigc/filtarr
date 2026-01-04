@@ -903,10 +903,16 @@ class TestWriteBatching:
             assert record.tag_applied == f"tag-{i}"
 
     def test_configurable_batch_size(self, tmp_path: Path) -> None:
-        """Should respect custom batch size configuration."""
+        """Should respect custom batch size configuration.
+
+        Batching logic in _maybe_save():
+        - Each record_check() increments _pending_writes
+        - When _pending_writes >= batch_size, save occurs and counter resets to 0
+        - With batch_size=3: saves occur on checks 3, 6, 9, etc.
+        """
         state_path = tmp_path / "state.json"
 
-        # Test with batch_size=3
+        # Test with batch_size=3: saves should occur on every 3rd record_check()
         manager = StateManager(state_path, batch_size=3)
 
         save_count = 0
@@ -919,29 +925,35 @@ class TestWriteBatching:
 
         manager._do_save = mock_save  # type: ignore[method-assign]
 
-        # 2 checks - no write
+        # Checks 1-2: pending_writes goes 0->1->2, no save yet (2 < 3)
         manager.record_check("movie", 1, True, None)
         manager.record_check("movie", 2, True, None)
-        assert save_count == 0
+        assert save_count == 0, "No save should occur before reaching batch_size"
 
-        # 3rd check triggers write
+        # Check 3: pending_writes goes 2->3, triggers save (3 >= 3), resets to 0
         manager.record_check("movie", 3, True, None)
-        assert save_count == 1
+        assert save_count == 1, "First save should occur on 3rd check"
 
-        # 4th and 5th checks - no write
+        # Checks 4-5: pending_writes goes 0->1->2, no save yet (counter was reset)
         manager.record_check("movie", 4, True, None)
         manager.record_check("movie", 5, True, None)
-        assert save_count == 1
+        assert save_count == 1, "No additional save - only 2 pending after reset"
 
-        # 6th check triggers write
+        # Check 6: pending_writes goes 2->3, triggers second save
         manager.record_check("movie", 6, True, None)
-        assert save_count == 2
+        assert save_count == 2, "Second save should occur on 6th check"
 
     def test_default_batch_size_is_100(self, tmp_path: Path) -> None:
-        """Should use batch_size=100 as default."""
+        """Should use batch_size=100 as default.
+
+        This is a separate test from test_configurable_batch_size - it verifies
+        the default constructor value, not runtime batching behavior.
+        """
         state_path = tmp_path / "state.json"
+        # Create manager without explicit batch_size to test default
         manager = StateManager(state_path)
 
+        # Default batch_size should be 100 (configured in StateManager.__init__)
         assert manager.batch_size == 100
 
     def test_batch_size_one_writes_every_check(self, tmp_path: Path) -> None:

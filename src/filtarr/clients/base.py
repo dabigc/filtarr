@@ -490,7 +490,7 @@ class BaseArrClient:
                 elapsed,
             )
             e.response.raise_for_status()
-            raise  # This line is never reached, but needed for type checking
+            raise  # pragma: no cover  # Unreachable: raise_for_status always raises
         except Exception:
             elapsed = time.monotonic() - start_time
             logger.warning(
