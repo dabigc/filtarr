@@ -330,8 +330,13 @@ class TestParseRelease:
 
         assert release.is_4k() is True
 
-    def test_parse_release_4k_detection_via_title(self) -> None:
-        """Should detect 4K from title when quality name does not indicate 4K."""
+    def test_parse_release_4k_detection_relies_on_quality_not_title(self) -> None:
+        """4K detection relies on Quality, not title parsing.
+
+        When quality is 'Unknown', we trust Radarr/Sonarr's quality parsing
+        rather than doing our own title matching which causes false positives
+        (e.g., release groups like '4K4U' being detected as 4K content).
+        """
         item = {
             "guid": "4k-title",
             "title": "Movie.2024.2160p.WEB-DL",
@@ -340,7 +345,8 @@ class TestParseRelease:
 
         release = BaseArrClient._parse_release(item)
 
-        assert release.is_4k() is True
+        # Quality is "Unknown", so this is NOT considered 4K
+        assert release.is_4k() is False
 
 
 class TestTimingLogging:

@@ -44,11 +44,14 @@ class Release(BaseModel):
     quality: Quality
 
     def is_4k(self) -> bool:
-        """Check if this release is 4K based on quality or title."""
-        if self.quality.is_4k():
-            return True
-        title_lower = self.title.lower()
-        return "2160p" in title_lower or "4k" in title_lower
+        """Check if this release is 4K based on quality.
+
+        We rely on Radarr/Sonarr's quality parsing rather than doing our own
+        title matching. Their parsers are mature and purpose-built for this,
+        while naive title matching causes false positives (e.g., release
+        groups like '4K4U' or '4K77' being detected as 4K content).
+        """
+        return self.quality.is_4k()
 
     def matches_criteria(self, criteria: SearchCriteria | Callable[[Release], bool]) -> bool:
         """Check if this release matches the given criteria.

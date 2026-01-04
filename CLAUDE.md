@@ -218,7 +218,7 @@ When contributing, maintain these security patterns:
 
 - Radarr API v3: `/api/v3/release?movieId={id}` - search for releases
 - Sonarr API v3: `/api/v3/release?seriesId={id}` - search for releases
-- 4K detection: Look for "2160p" in quality name or release title
+- 4K detection: Relies on the `quality.name` field from Radarr/Sonarr (e.g., "Bluray-2160p", "WEBDL-4K"). We trust their mature parsing instead of doing our own title matching, which avoids false positives from release group names like "4K4U" or "4K77".
 - API key passed via `X-Api-Key` header
 
 ## Testing Strategy
