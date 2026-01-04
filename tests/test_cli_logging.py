@@ -1,13 +1,25 @@
 """Tests for CLI global logging configuration."""
 
 import logging
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from typer.testing import CliRunner
 
+from filtarr.checker import SamplingStrategy, SearchResult
 from filtarr.cli import app
+from filtarr.config import Config, RadarrConfig, SonarrConfig
 
 runner = CliRunner()
+
+
+def _create_mock_state_manager() -> MagicMock:
+    """Create a mock StateManager for testing."""
+    mock = MagicMock()
+    mock.record_check = MagicMock()
+    mock.get_stale_unavailable_items = MagicMock(return_value=[])
+    mock.is_recently_checked = MagicMock(return_value=False)
+    mock.get_cached_result = MagicMock(return_value=None)
+    return mock
 
 
 class TestGlobalLogLevel:
@@ -140,10 +152,24 @@ class TestCleanLogOutput:
 
     def test_batch_output_is_clean_at_info(self) -> None:
         """At INFO level, batch output should not include httpx log messages."""
-        result = runner.invoke(
-            app,
-            ["--log-level", "info", "check", "batch", "--all-movies"],
-        )
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
+        mock_movie_result = SearchResult(item_id=123, item_type="movie", has_match=True)
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker") as mock_get_checker,
+            patch("filtarr.cli._fetch_movies_to_check") as mock_fetch,
+        ):
+            mock_checker = AsyncMock()
+            mock_checker.check_movie.return_value = mock_movie_result
+            mock_get_checker.return_value = mock_checker
+            # Return one movie to check
+            mock_fetch.return_value = ([("movie", "123")], {"movie:123"})
+
+            result = runner.invoke(
+                app,
+                ["--log-level", "info", "check", "batch", "--all-movies"],
+            )
 
         # Verify no httpx log lines appear in output
         # httpx logs specifically contain patterns like "HTTP Request:" or "httpx - INFO"
@@ -155,10 +181,25 @@ class TestCleanLogOutput:
 
     def test_check_movie_output_is_clean_at_info(self) -> None:
         """At INFO level, check movie output should not include httpx log messages."""
-        result = runner.invoke(
-            app,
-            ["--log-level", "info", "check", "movie", "123"],
-        )
+        mock_result = SearchResult(item_id=123, item_type="movie", has_match=True)
+        mock_config = Config(radarr=RadarrConfig(url="http://localhost:7878", api_key="key"))
+
+        async def mock_check_movie(_movie_id: int, **_kwargs: object) -> SearchResult:
+            return mock_result
+
+        mock_checker = MagicMock()
+        mock_checker.check_movie = mock_check_movie
+        mock_state_manager = _create_mock_state_manager()
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+        ):
+            result = runner.invoke(
+                app,
+                ["--log-level", "info", "check", "movie", "123"],
+            )
 
         # Verify no httpx log lines appear in output (specific log patterns)
         # Note: We don't check for "httpx" generally as it may appear in error
@@ -169,10 +210,30 @@ class TestCleanLogOutput:
 
     def test_check_series_output_is_clean_at_info(self) -> None:
         """At INFO level, check series output should not include httpx log messages."""
-        result = runner.invoke(
-            app,
-            ["--log-level", "info", "check", "series", "456"],
+        mock_result = SearchResult(
+            item_id=456,
+            item_type="series",
+            has_match=True,
+            strategy_used=SamplingStrategy.RECENT,
         )
+        mock_config = Config(sonarr=SonarrConfig(url="http://localhost:8989", api_key="key"))
+
+        async def mock_check_series(_series_id: int, **_kwargs: object) -> SearchResult:
+            return mock_result
+
+        mock_checker = MagicMock()
+        mock_checker.check_series = mock_check_series
+        mock_state_manager = _create_mock_state_manager()
+
+        with (
+            patch("filtarr.cli.Config.load", return_value=mock_config),
+            patch("filtarr.cli.get_checker", return_value=mock_checker),
+            patch("filtarr.cli.get_state_manager", return_value=mock_state_manager),
+        ):
+            result = runner.invoke(
+                app,
+                ["--log-level", "info", "check", "series", "456"],
+            )
 
         # Verify no httpx log lines appear in output (specific log patterns)
         assert "HTTP Request:" not in result.output
