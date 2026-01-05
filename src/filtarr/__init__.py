@@ -99,7 +99,7 @@ from filtarr.clients.radarr import RadarrClient
 from filtarr.clients.sonarr import SonarrClient
 from filtarr.criteria import ResultType, SearchCriteria
 
-__version__ = "2.1.0"
+__version__ = "3.0.0"
 
 __all__ = [
     "MediaType",
