@@ -65,8 +65,62 @@ def _validate_url(url: str, allow_http_localhost: bool = True) -> str:
     return url.rstrip("/")
 
 
-@dataclass
-class RadarrConfig:
+@dataclass(repr=False)
+class ArrConfig:
+    """Base configuration for *arr services (Radarr, Sonarr).
+
+    This base class contains all shared validation and security logic.
+    Subclasses only need to set _service_name for proper repr output.
+
+    Attributes:
+        url: Server URL (must be HTTPS for remote servers)
+        api_key: API key for authentication
+        allow_insecure: If True, allow HTTP for non-localhost URLs (not recommended)
+    """
+
+    url: str
+    api_key: str
+    allow_insecure: bool = False
+
+    def __post_init__(self) -> None:
+        """Validate URL after initialization."""
+        if self.allow_insecure:
+            # When allow_insecure is True, just validate scheme and normalize
+            parsed = urlparse(self.url)
+            if parsed.scheme not in ("http", "https"):
+                raise ConfigurationError(f"Invalid URL scheme: {parsed.scheme}")
+            self.url = self.url.rstrip("/")
+
+            # Emit security warning for non-localhost HTTP URLs
+            if parsed.scheme == "http":
+                is_localhost = parsed.hostname in ("localhost", "127.0.0.1", "::1")
+                if not is_localhost:
+                    warnings.warn(
+                        f"Using HTTP with allow_insecure=True for {parsed.hostname} "
+                        f"is a security risk. API credentials may be intercepted. "
+                        f"Use HTTPS for remote servers.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+        else:
+            # Normal validation: HTTPS required for non-localhost
+            self.url = _validate_url(self.url, allow_http_localhost=True)
+
+    def _get_service_name(self) -> str:
+        """Return the service name for repr. Overridden by subclasses."""
+        return self.__class__.__name__
+
+    def __repr__(self) -> str:
+        """Return string representation with masked API key."""
+        return f"{self._get_service_name()}(url={self.url!r}, api_key='***')"
+
+    def __str__(self) -> str:
+        """Return string representation with masked API key."""
+        return self.__repr__()
+
+
+@dataclass(repr=False)
+class RadarrConfig(ArrConfig):
     """Radarr connection configuration.
 
     Attributes:
@@ -75,33 +129,9 @@ class RadarrConfig:
         allow_insecure: If True, allow HTTP for non-localhost URLs (not recommended)
     """
 
-    url: str
-    api_key: str
-    allow_insecure: bool = False
 
-    def __post_init__(self) -> None:
-        """Validate URL after initialization."""
-        if self.allow_insecure:
-            # When allow_insecure is True, just validate scheme and normalize
-            parsed = urlparse(self.url)
-            if parsed.scheme not in ("http", "https"):
-                raise ConfigurationError(f"Invalid URL scheme: {parsed.scheme}")
-            self.url = self.url.rstrip("/")
-        else:
-            # Normal validation: HTTPS required for non-localhost
-            self.url = _validate_url(self.url, allow_http_localhost=True)
-
-    def __repr__(self) -> str:
-        """Return string representation with masked API key."""
-        return f"RadarrConfig(url={self.url!r}, api_key='***')"
-
-    def __str__(self) -> str:
-        """Return string representation with masked API key."""
-        return self.__repr__()
-
-
-@dataclass
-class SonarrConfig:
+@dataclass(repr=False)
+class SonarrConfig(ArrConfig):
     """Sonarr connection configuration.
 
     Attributes:
@@ -109,30 +139,6 @@ class SonarrConfig:
         api_key: Sonarr API key
         allow_insecure: If True, allow HTTP for non-localhost URLs (not recommended)
     """
-
-    url: str
-    api_key: str
-    allow_insecure: bool = False
-
-    def __post_init__(self) -> None:
-        """Validate URL after initialization."""
-        if self.allow_insecure:
-            # When allow_insecure is True, just validate scheme and normalize
-            parsed = urlparse(self.url)
-            if parsed.scheme not in ("http", "https"):
-                raise ConfigurationError(f"Invalid URL scheme: {parsed.scheme}")
-            self.url = self.url.rstrip("/")
-        else:
-            # Normal validation: HTTPS required for non-localhost
-            self.url = _validate_url(self.url, allow_http_localhost=True)
-
-    def __repr__(self) -> str:
-        """Return string representation with masked API key."""
-        return f"SonarrConfig(url={self.url!r}, api_key='***')"
-
-    def __str__(self) -> str:
-        """Return string representation with masked API key."""
-        return self.__repr__()
 
 
 @dataclass

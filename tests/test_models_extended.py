@@ -370,8 +370,13 @@ class TestReleaseIs4k:
 
         assert release.is_4k() is True
 
-    def test_is_4k_from_title_2160p(self) -> None:
-        """Should be 4K if title contains 2160p."""
+    def test_is_4k_from_title_2160p_not_trusted(self) -> None:
+        """Title-based 4K detection is intentionally disabled to avoid false positives.
+
+        After commit cea9572, we only trust quality.name from Radarr/Sonarr for 4K
+        detection. Title patterns like "2160p" are not used because release group
+        names (e.g., "4K4U", "4K77") can cause false positives.
+        """
         release = Release(
             guid="test",
             title="Movie.2024.2160p.WEB-DL",
@@ -380,10 +385,15 @@ class TestReleaseIs4k:
             quality=Quality(id=0, name="Unknown"),
         )
 
-        assert release.is_4k() is True
+        # Title-based detection is no longer used - only quality.name is trusted
+        assert release.is_4k() is False
 
-    def test_is_4k_from_title_4k(self) -> None:
-        """Should be 4K if title contains 4K."""
+    def test_is_4k_from_title_4k_not_trusted(self) -> None:
+        """Title-based 4K detection is intentionally disabled to avoid false positives.
+
+        Pattern "4K" in title is not used for detection as it can appear in
+        release group names like "4K4U" or project names like "4K77".
+        """
         release = Release(
             guid="test",
             title="Movie.2024.4K.WEB-DL",
@@ -392,10 +402,15 @@ class TestReleaseIs4k:
             quality=Quality(id=0, name="Unknown"),
         )
 
-        assert release.is_4k() is True
+        # Title-based detection is no longer used - only quality.name is trusted
+        assert release.is_4k() is False
 
-    def test_is_4k_case_insensitive_title(self) -> None:
-        """Should detect 4K in title case-insensitively."""
+    def test_is_4k_title_ignored_quality_name_required(self) -> None:
+        """4K detection requires quality.name to indicate 4K, not just the title.
+
+        This test verifies that even with "4k" in the title, the is_4k() method
+        returns False when quality.name doesn't indicate 4K resolution.
+        """
         release = Release(
             guid="test",
             title="Movie.2024.4k.web-dl",
@@ -404,7 +419,8 @@ class TestReleaseIs4k:
             quality=Quality(id=0, name="Unknown"),
         )
 
-        assert release.is_4k() is True
+        # Title-based detection is no longer used - only quality.name is trusted
+        assert release.is_4k() is False
 
     def test_is_not_4k(self) -> None:
         """Should return False when neither quality nor title indicate 4K."""

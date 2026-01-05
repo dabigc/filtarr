@@ -538,3 +538,262 @@ class TestSeriesApiCaching:
 
         assert series.id == 123
         assert series.tags == [1, 2]
+
+
+class TestSeasonParsing:
+    """Tests for season parsing consistency across all methods.
+
+    Season parsing logic is duplicated in get_all_series, get_series, and update_series.
+    These tests verify identical behavior across all three methods to support the
+    extraction of this logic into a shared helper method.
+    """
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_get_series_parses_seasons_with_statistics(self) -> None:
+        """Should parse season statistics correctly in get_series."""
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200,
+                json={
+                    "id": 123,
+                    "title": "Test Show",
+                    "year": 2024,
+                    "monitored": True,
+                    "seasons": [
+                        {
+                            "seasonNumber": 1,
+                            "monitored": True,
+                            "statistics": {
+                                "episodeCount": 10,
+                                "episodeFileCount": 8,
+                            },
+                        },
+                        {
+                            "seasonNumber": 2,
+                            "monitored": False,
+                            "statistics": {
+                                "episodeCount": 12,
+                                "episodeFileCount": 12,
+                            },
+                        },
+                    ],
+                    "tags": [],
+                },
+            )
+        )
+
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
+            series = await client.get_series(123)
+
+        assert len(series.seasons) == 2
+        assert series.seasons[0].season_number == 1
+        assert series.seasons[0].monitored is True
+        assert series.seasons[0].episode_count == 10
+        assert series.seasons[0].episode_file_count == 8
+        assert series.seasons[1].season_number == 2
+        assert series.seasons[1].monitored is False
+        assert series.seasons[1].episode_count == 12
+        assert series.seasons[1].episode_file_count == 12
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_get_series_missing_statistics(self) -> None:
+        """Should handle missing statistics in get_series."""
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200,
+                json={
+                    "id": 123,
+                    "title": "Test Show",
+                    "year": 2024,
+                    "monitored": True,
+                    "seasons": [
+                        {
+                            "seasonNumber": 1,
+                            "monitored": True,
+                            # No statistics field
+                        },
+                    ],
+                    "tags": [],
+                },
+            )
+        )
+
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
+            series = await client.get_series(123)
+
+        assert len(series.seasons) == 1
+        assert series.seasons[0].season_number == 1
+        assert series.seasons[0].episode_count == 0
+        assert series.seasons[0].episode_file_count == 0
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_get_series_empty_seasons(self) -> None:
+        """Should handle empty seasons list in get_series."""
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200,
+                json={
+                    "id": 123,
+                    "title": "Test Show",
+                    "year": 2024,
+                    "monitored": True,
+                    "seasons": [],
+                    "tags": [],
+                },
+            )
+        )
+
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
+            series = await client.get_series(123)
+
+        assert series.seasons == []
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_update_series_parses_seasons_with_statistics(self) -> None:
+        """Should parse season statistics correctly in update_series."""
+        series_data = {
+            "id": 123,
+            "title": "Test Show",
+            "year": 2024,
+            "monitored": True,
+            "seasons": [
+                {
+                    "seasonNumber": 1,
+                    "monitored": True,
+                    "statistics": {
+                        "episodeCount": 10,
+                        "episodeFileCount": 8,
+                    },
+                },
+                {
+                    "seasonNumber": 2,
+                    "monitored": False,
+                    "statistics": {
+                        "episodeCount": 12,
+                        "episodeFileCount": 12,
+                    },
+                },
+            ],
+            "tags": [],
+        }
+        respx.put("http://127.0.0.1:8989/api/v3/series/123").mock(
+            return_value=Response(200, json=series_data)
+        )
+
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
+            series = await client.update_series(series_data)
+
+        assert len(series.seasons) == 2
+        assert series.seasons[0].season_number == 1
+        assert series.seasons[0].monitored is True
+        assert series.seasons[0].episode_count == 10
+        assert series.seasons[0].episode_file_count == 8
+        assert series.seasons[1].season_number == 2
+        assert series.seasons[1].monitored is False
+        assert series.seasons[1].episode_count == 12
+        assert series.seasons[1].episode_file_count == 12
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_update_series_missing_statistics(self) -> None:
+        """Should handle missing statistics in update_series."""
+        series_data = {
+            "id": 123,
+            "title": "Test Show",
+            "year": 2024,
+            "monitored": True,
+            "seasons": [
+                {
+                    "seasonNumber": 1,
+                    "monitored": True,
+                    # No statistics field
+                },
+            ],
+            "tags": [],
+        }
+        respx.put("http://127.0.0.1:8989/api/v3/series/123").mock(
+            return_value=Response(200, json=series_data)
+        )
+
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
+            series = await client.update_series(series_data)
+
+        assert len(series.seasons) == 1
+        assert series.seasons[0].season_number == 1
+        assert series.seasons[0].episode_count == 0
+        assert series.seasons[0].episode_file_count == 0
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_all_methods_parse_seasons_identically(self) -> None:
+        """Verify all three methods produce identical Season objects for same input.
+
+        This test validates that get_all_series, get_series, and update_series
+        all parse the same season data identically.
+        """
+        season_data = [
+            {
+                "seasonNumber": 1,
+                "monitored": True,
+                "statistics": {
+                    "episodeCount": 10,
+                    "episodeFileCount": 8,
+                },
+            },
+            {
+                "seasonNumber": 0,  # Specials
+                "monitored": False,
+                "statistics": {
+                    "episodeCount": 3,
+                    "episodeFileCount": 2,
+                },
+            },
+        ]
+
+        base_series = {
+            "id": 123,
+            "title": "Test Show",
+            "year": 2024,
+            "monitored": True,
+            "seasons": season_data,
+            "tags": [],
+        }
+
+        # Mock all endpoints
+        respx.get("http://127.0.0.1:8989/api/v3/series").mock(
+            return_value=Response(200, json=[base_series])
+        )
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
+            return_value=Response(200, json=base_series)
+        )
+        respx.put("http://127.0.0.1:8989/api/v3/series/123").mock(
+            return_value=Response(200, json=base_series)
+        )
+
+        async with SonarrClient("http://127.0.0.1:8989", "test-api-key") as client:
+            # Get seasons from all three methods
+            all_series = await client.get_all_series()
+            single_series = await client.get_series(123)
+            updated_series = await client.update_series(base_series)
+
+        # Verify all methods produce identical season objects
+        for series in [all_series[0], single_series, updated_series]:
+            assert len(series.seasons) == 2
+
+            # Check first season (season 1)
+            s1 = series.seasons[0]
+            assert s1.season_number == 1
+            assert s1.monitored is True
+            assert s1.episode_count == 10
+            assert s1.episode_file_count == 8
+
+            # Check second season (specials - season 0)
+            s0 = series.seasons[1]
+            assert s0.season_number == 0
+            assert s0.monitored is False
+            assert s0.episode_count == 3
+            assert s0.episode_file_count == 2

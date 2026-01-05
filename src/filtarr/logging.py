@@ -65,8 +65,10 @@ class SensitiveDataFilter(logging.Filter):
     credentials in log messages to prevent accidental exposure.
 
     Patterns detected:
-        - api_key=... or api-key=...
+        - Authorization: Bearer ... headers
         - X-Api-Key: ... headers
+        - api_key=... or api-key=...
+        - URL-encoded api_key%3D... (both %3d and %3D)
         - "api_key": "..." in JSON-style strings
 
     Example
@@ -80,8 +82,12 @@ class SensitiveDataFilter(logging.Filter):
     """
 
     PATTERNS: ClassVar[list[tuple[re.Pattern[str], str]]] = [
+        # Match Authorization Bearer header (must come first for priority)
+        (re.compile(r'Authorization["\s:=]+["\']?Bearer\s+[\w.-]+', re.I), "Authorization: ***"),
         # Match X-Api-Key header style (must come before generic api_key pattern)
         (re.compile(r'X-Api-Key["\s:=]+["\']?[\w-]+', re.I), "X-Api-Key: ***"),
+        # Match URL-encoded api_key (e.g., api_key%3Dsecret or api-key%3dsecret)
+        (re.compile(r"api[_-]?key%3[dD][\w%-]+", re.I), "api_key=***"),
         # Match api_key or api-key followed by = or : and optional quotes, then value
         (re.compile(r'api[_-]?key["\s:=]+["\']?[\w-]+', re.I), "api_key=***"),
     ]

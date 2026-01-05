@@ -14,11 +14,12 @@ lazy client creation (creates/destroys client per operation).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import date
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Any
 
 from filtarr.clients.radarr import RadarrClient
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
     from typing import Self
 
     from filtarr.models.common import Release
+    from filtarr.models.radarr import Movie
     from filtarr.models.sonarr import Episode
 
 logger = logging.getLogger(__name__)
@@ -56,12 +58,27 @@ class SamplingStrategy(Enum):
     ALL = "all"
 
 
+class MediaType(StrEnum):
+    """Type of media item.
+
+    Uses StrEnum for automatic string serialization, making it compatible
+    with JSON output without explicit conversion.
+
+    Attributes:
+        MOVIE: A movie item (Radarr)
+        SERIES: A TV series item (Sonarr)
+    """
+
+    MOVIE = "movie"
+    SERIES = "series"
+
+
 @dataclass
 class SearchResult:
     """Result of a release search/availability check."""
 
     item_id: int
-    item_type: str  # "movie" or "series"
+    item_type: MediaType
     has_match: bool
     result_type: ResultType = ResultType.FOUR_K
     item_name: str | None = None
@@ -136,7 +153,7 @@ def select_seasons_to_check(
         # Use a set to deduplicate if they overlap
         return sorted({first, middle, last})
 
-    return sorted_seasons
+    return sorted_seasons  # pragma: no cover  # Defensive: all enum values handled above
 
 
 class ReleaseChecker:
@@ -165,6 +182,9 @@ class ReleaseChecker:
         timeout: float = 120.0,
         tag_config: TagConfig | None = None,
         tagger: ReleaseTagger | None = None,
+        *,
+        radarr_client: RadarrClient | None = None,
+        sonarr_client: SonarrClient | None = None,
     ) -> None:
         """Initialize the release checker.
 
@@ -176,6 +196,12 @@ class ReleaseChecker:
             timeout: Request timeout in seconds (default 120.0)
             tag_config: Configuration for tagging (optional)
             tagger: Custom ReleaseTagger instance (optional, created from tag_config if not provided)
+            radarr_client: Pre-created RadarrClient instance (optional). If provided,
+                takes precedence over radarr_url/radarr_api_key. Caller is responsible
+                for managing the client's lifecycle (it will NOT be closed on __aexit__).
+            sonarr_client: Pre-created SonarrClient instance (optional). If provided,
+                takes precedence over sonarr_url/sonarr_api_key. Caller is responsible
+                for managing the client's lifecycle (it will NOT be closed on __aexit__).
         """
         self._radarr_config = (
             (radarr_url, radarr_api_key) if radarr_url and radarr_api_key else None
@@ -188,8 +214,11 @@ class ReleaseChecker:
         self._tagger = tagger or ReleaseTagger(self._tag_config)
 
         # Connection pooling: store client instances for reuse
-        self._radarr_client: RadarrClient | None = None
-        self._sonarr_client: SonarrClient | None = None
+        # Track which clients were injected vs created internally
+        self._radarr_client: RadarrClient | None = radarr_client
+        self._sonarr_client: SonarrClient | None = sonarr_client
+        self._radarr_client_injected: bool = radarr_client is not None
+        self._sonarr_client_injected: bool = sonarr_client is not None
         self._in_context: bool = False
 
     async def __aenter__(self) -> Self:
@@ -197,15 +226,20 @@ class ReleaseChecker:
 
         When used as a context manager, clients are created once and reused
         across all operations, providing connection pooling benefits.
+
+        If clients were injected via constructor, they are used as-is without
+        creating new ones.
         """
         self._in_context = True
 
-        if self._radarr_config:
+        # Only create Radarr client if not injected and config is available
+        if not self._radarr_client_injected and self._radarr_config:
             url, api_key = self._radarr_config
             self._radarr_client = RadarrClient(url, api_key, timeout=self._timeout)
             await self._radarr_client.__aenter__()
 
-        if self._sonarr_config:
+        # Only create Sonarr client if not injected and config is available
+        if not self._sonarr_client_injected and self._sonarr_config:
             url, api_key = self._sonarr_config
             self._sonarr_client = SonarrClient(url, api_key, timeout=self._timeout)
             await self._sonarr_client.__aenter__()
@@ -218,14 +252,20 @@ class ReleaseChecker:
         exc_val: BaseException | None,
         exc_tb: Any,
     ) -> None:
-        """Exit async context manager, cleaning up pooled clients."""
+        """Exit async context manager, cleaning up pooled clients.
+
+        Only internally-created clients are closed. Injected clients are left
+        intact for the caller to manage.
+        """
         self._in_context = False
 
-        if self._radarr_client:
+        # Only close and clear Radarr client if it was created internally
+        if self._radarr_client and not self._radarr_client_injected:
             await self._radarr_client.__aexit__(exc_type, exc_val, exc_tb)
             self._radarr_client = None
 
-        if self._sonarr_client:
+        # Only close and clear Sonarr client if it was created internally
+        if self._sonarr_client and not self._sonarr_client_injected:
             await self._sonarr_client.__aexit__(exc_type, exc_val, exc_tb)
             self._sonarr_client = None
 
@@ -234,16 +274,18 @@ class ReleaseChecker:
 
     @asynccontextmanager
     async def _get_radarr_client(self) -> AsyncIterator[RadarrClient]:
-        """Get a Radarr client, using pooled client if in context.
+        """Get a Radarr client, using pooled/injected client if available.
 
-        When used within an async context manager, returns the pooled client.
-        Otherwise, creates a temporary client for the operation.
+        Client selection priority:
+        1. If an injected client exists, use it directly
+        2. If in context with a pooled client, use the pooled client
+        3. Otherwise, create a temporary client for this operation
 
         Yields:
             RadarrClient instance
         """
-        if self._in_context and self._radarr_client:
-            # Use pooled client
+        # Use injected or pooled client if available
+        if self._radarr_client:
             yield self._radarr_client
         else:
             # Create temporary client (backward compatibility)
@@ -255,16 +297,18 @@ class ReleaseChecker:
 
     @asynccontextmanager
     async def _get_sonarr_client(self) -> AsyncIterator[SonarrClient]:
-        """Get a Sonarr client, using pooled client if in context.
+        """Get a Sonarr client, using pooled/injected client if available.
 
-        When used within an async context manager, returns the pooled client.
-        Otherwise, creates a temporary client for the operation.
+        Client selection priority:
+        1. If an injected client exists, use it directly
+        2. If in context with a pooled client, use the pooled client
+        3. Otherwise, create a temporary client for this operation
 
         Yields:
             SonarrClient instance
         """
-        if self._in_context and self._sonarr_client:
-            # Use pooled client
+        # Use injected or pooled client if available
+        if self._sonarr_client:
             yield self._sonarr_client
         else:
             # Create temporary client (backward compatibility)
@@ -281,6 +325,104 @@ class ReleaseChecker:
         after creating new tags or if tags may have been modified externally.
         """
         self._tagger.clear_tag_cache()
+
+    def _get_matcher_and_result_type(
+        self, criteria: SearchCriteria | Callable[[Release], bool]
+    ) -> tuple[Callable[[Release], bool], ResultType]:
+        """Get the matcher function and result type for the given criteria.
+
+        Args:
+            criteria: Search criteria - either a SearchCriteria enum or custom callable
+
+        Returns:
+            Tuple of (matcher_function, result_type)
+        """
+        if isinstance(criteria, SearchCriteria):
+            matcher = get_matcher_for_criteria(criteria)
+            result_type = ResultType(criteria.value)
+        else:
+            matcher = criteria
+            result_type = ResultType.CUSTOM
+        return matcher, result_type
+
+    async def _apply_tags_if_needed(
+        self,
+        client: RadarrClient | SonarrClient,
+        item_id: int,
+        has_match: bool,
+        criteria: SearchCriteria | Callable[[Release], bool],
+        apply_tags: bool,
+        dry_run: bool,
+        *,
+        is_movie: bool,
+    ) -> TagResult | None:
+        """Apply tags to an item if tagging is enabled.
+
+        Args:
+            client: The Radarr or Sonarr client
+            item_id: The movie or series ID
+            has_match: Whether a match was found
+            criteria: The search criteria used
+            apply_tags: Whether to apply tags
+            dry_run: If True, don't actually apply tags
+            is_movie: True for movies, False for series
+
+        Returns:
+            TagResult if tags were applied, None otherwise
+        """
+        if not apply_tags:
+            return None
+
+        # Only pass criteria to tagging if it's a SearchCriteria enum
+        tag_criteria = criteria if isinstance(criteria, SearchCriteria) else SearchCriteria.FOUR_K
+
+        if is_movie:
+            return await self._tagger.apply_movie_tags(
+                client, item_id, has_match, tag_criteria, dry_run
+            )
+        return await self._tagger.apply_series_tags(
+            client, item_id, has_match, tag_criteria, dry_run
+        )
+
+    async def _check_movie_impl(
+        self,
+        movie: Movie,
+        releases: list[Release],
+        client: RadarrClient,
+        criteria: SearchCriteria | Callable[[Release], bool],
+        apply_tags: bool,
+        dry_run: bool,
+    ) -> SearchResult:
+        """Internal implementation for checking movie releases.
+
+        Args:
+            movie: The movie object
+            releases: List of releases for the movie
+            client: The Radarr client (needed for tagging)
+            criteria: Search criteria - either a SearchCriteria enum or custom callable
+            apply_tags: Whether to apply tags to the movie
+            dry_run: If True, don't actually apply tags
+
+        Returns:
+            SearchResult with availability information
+        """
+        matcher, result_type = self._get_matcher_and_result_type(criteria)
+        has_match = any(matcher(r) for r in releases)
+
+        tag_result = await self._apply_tags_if_needed(
+            client, movie.id, has_match, criteria, apply_tags, dry_run, is_movie=True
+        )
+
+        return SearchResult(
+            item_id=movie.id,
+            item_type=MediaType.MOVIE,
+            has_match=has_match,
+            result_type=result_type,
+            item_name=movie.title,
+            releases=releases,
+            tag_result=tag_result,
+            _criteria=criteria,
+        )
 
     async def check_movie(
         self,
@@ -302,47 +444,32 @@ class ReleaseChecker:
             SearchResult with availability information
 
         Raises:
-            ValueError: If Radarr is not configured
+            ValueError: If Radarr is not configured (neither injected nor URL config)
         """
-        if not self._radarr_config:
+        if not self._radarr_client and not self._radarr_config:
             raise ValueError("Radarr is not configured")
 
         async with self._get_radarr_client() as client:
-            # Get movie info for the name
             movie = await client.get_movie(movie_id)
-            movie_name = movie.title if movie else None
-
             releases = await client.get_movie_releases(movie_id)
 
-            # Determine matcher based on criteria
-            if isinstance(criteria, SearchCriteria):
-                matcher = get_matcher_for_criteria(criteria)
-                result_type = ResultType(criteria.value)
-            else:
-                matcher = criteria
-                result_type = ResultType.CUSTOM
-
-            has_match = any(matcher(r) for r in releases)
-
-            tag_result: TagResult | None = None
-            if apply_tags:
-                # Only pass criteria to tagging if it's a SearchCriteria enum
-                tag_criteria = (
-                    criteria if isinstance(criteria, SearchCriteria) else SearchCriteria.FOUR_K
-                )
-                tag_result = await self._tagger.apply_movie_tags(
-                    client, movie_id, has_match, tag_criteria, dry_run
+            # Handle case where movie is not found
+            if movie is None:
+                matcher, result_type = self._get_matcher_and_result_type(criteria)
+                has_match = any(matcher(r) for r in releases)
+                return SearchResult(
+                    item_id=movie_id,
+                    item_type=MediaType.MOVIE,
+                    has_match=has_match,
+                    result_type=result_type,
+                    item_name=None,
+                    releases=releases,
+                    tag_result=None,
+                    _criteria=criteria,
                 )
 
-            return SearchResult(
-                item_id=movie_id,
-                item_type="movie",
-                has_match=has_match,
-                result_type=result_type,
-                item_name=movie_name,
-                releases=releases,
-                tag_result=tag_result,
-                _criteria=criteria,
+            return await self._check_movie_impl(
+                movie, releases, client, criteria, apply_tags, dry_run
             )
 
     async def check_movie_by_name(
@@ -367,7 +494,7 @@ class ReleaseChecker:
         Raises:
             ValueError: If Radarr is not configured or movie not found
         """
-        if not self._radarr_config:
+        if not self._radarr_client and not self._radarr_config:
             raise ValueError("Radarr is not configured")
 
         async with self._get_radarr_client() as client:
@@ -376,35 +503,8 @@ class ReleaseChecker:
                 raise ValueError(f"Movie not found: {name}")
             releases = await client.get_movie_releases(movie.id)
 
-            # Determine matcher based on criteria
-            if isinstance(criteria, SearchCriteria):
-                matcher = get_matcher_for_criteria(criteria)
-                result_type = ResultType(criteria.value)
-            else:
-                matcher = criteria
-                result_type = ResultType.CUSTOM
-
-            has_match = any(matcher(r) for r in releases)
-
-            tag_result: TagResult | None = None
-            if apply_tags:
-                # Only pass criteria to tagging if it's a SearchCriteria enum
-                tag_criteria = (
-                    criteria if isinstance(criteria, SearchCriteria) else SearchCriteria.FOUR_K
-                )
-                tag_result = await self._tagger.apply_movie_tags(
-                    client, movie.id, has_match, tag_criteria, dry_run
-                )
-
-            return SearchResult(
-                item_id=movie.id,
-                item_type="movie",
-                has_match=has_match,
-                result_type=result_type,
-                item_name=movie.title,
-                releases=releases,
-                tag_result=tag_result,
-                _criteria=criteria,
+            return await self._check_movie_impl(
+                movie, releases, client, criteria, apply_tags, dry_run
             )
 
     async def search_movies(self, term: str) -> list[tuple[int, str, int]]:
@@ -419,7 +519,7 @@ class ReleaseChecker:
         Raises:
             ValueError: If Radarr is not configured
         """
-        if not self._radarr_config:
+        if not self._radarr_client and not self._radarr_config:
             raise ValueError("Radarr is not configured")
 
         async with self._get_radarr_client() as client:
@@ -456,7 +556,7 @@ class ReleaseChecker:
         Raises:
             ValueError: If Sonarr is not configured or if movie-only criteria is used
         """
-        if not self._sonarr_config:
+        if not self._sonarr_client and not self._sonarr_config:
             raise ValueError("Sonarr is not configured")
 
         # Enforce movie-only criteria restriction
@@ -465,13 +565,7 @@ class ReleaseChecker:
                 f"{criteria.name} criteria is only applicable to movies, not TV series"
             )
 
-        # Determine matcher based on criteria
-        if isinstance(criteria, SearchCriteria):
-            matcher = get_matcher_for_criteria(criteria)
-            result_type = ResultType(criteria.value)
-        else:
-            matcher = criteria
-            result_type = ResultType.CUSTOM
+        matcher, result_type = self._get_matcher_and_result_type(criteria)
 
         async with self._get_sonarr_client() as client:
             # Get series info for the name
@@ -487,17 +581,12 @@ class ReleaseChecker:
 
             if not aired_episodes:
                 # No aired episodes - return empty result
-                tag_result: TagResult | None = None
-                if apply_tags:
-                    tag_criteria = (
-                        criteria if isinstance(criteria, SearchCriteria) else SearchCriteria.FOUR_K
-                    )
-                    tag_result = await self._tagger.apply_series_tags(
-                        client, series_id, False, tag_criteria, dry_run
-                    )
+                tag_result = await self._apply_tags_if_needed(
+                    client, series_id, False, criteria, apply_tags, dry_run, is_movie=False
+                )
                 return SearchResult(
                     item_id=series_id,
-                    item_type="series",
+                    item_type=MediaType.SERIES,
                     has_match=False,
                     result_type=result_type,
                     item_name=series_name,
@@ -523,63 +612,59 @@ class ReleaseChecker:
             episodes_checked: list[int] = []
             seasons_checked: list[int] = []
 
-            # For each selected season, find the latest episode and check it
+            # Collect episodes to check from each season
+            episodes_to_check: list[tuple[int, Episode]] = []  # (season_number, episode)
             for season_number in seasons_to_sample:
                 season_episodes = episodes_by_season.get(season_number, [])
                 if not season_episodes:
                     continue
-
                 # Get the latest aired episode in this season
                 latest_in_season = max(season_episodes, key=lambda e: e.air_date or date.min)
+                episodes_to_check.append((season_number, latest_in_season))
 
-                # Check releases for this episode
-                releases = await client.get_episode_releases(latest_in_season.id)
-                episodes_checked.append(latest_in_season.id)
+            # Fetch all episode releases in parallel
+            async def fetch_episode_releases(
+                episode_id: int,
+            ) -> tuple[int, list[Release] | None]:
+                """Fetch releases for an episode, returning empty list on error."""
+                try:
+                    releases = await client.get_episode_releases(episode_id)
+                    return (episode_id, releases)
+                except Exception as e:
+                    logger.warning(f"Failed to fetch releases for episode {episode_id}: {e}")
+                    return (episode_id, None)
+
+            # Create tasks for all episode release fetches
+            fetch_tasks = [fetch_episode_releases(episode.id) for _, episode in episodes_to_check]
+
+            # Execute all fetches in parallel
+            results = await asyncio.gather(*fetch_tasks)
+
+            # Process results in season order
+            has_match = False
+            for (season_number, _episode), (episode_id, releases) in zip(
+                episodes_to_check, results, strict=True
+            ):
+                if releases is None:
+                    # Skip failed fetches but continue processing others
+                    continue
+
+                episodes_checked.append(episode_id)
                 seasons_checked.append(season_number)
-
-                # Check if any matching releases found
-                match_found = any(matcher(r) for r in releases)
                 all_releases.extend(releases)
 
-                # Short-circuit if match found
-                if match_found:
-                    tag_result = None
-                    if apply_tags:
-                        tag_criteria = (
-                            criteria
-                            if isinstance(criteria, SearchCriteria)
-                            else SearchCriteria.FOUR_K
-                        )
-                        tag_result = await self._tagger.apply_series_tags(
-                            client, series_id, True, tag_criteria, dry_run
-                        )
-                    return SearchResult(
-                        item_id=series_id,
-                        item_type="series",
-                        has_match=True,
-                        result_type=result_type,
-                        item_name=series_name,
-                        releases=all_releases,
-                        episodes_checked=episodes_checked,
-                        seasons_checked=seasons_checked,
-                        strategy_used=strategy,
-                        tag_result=tag_result,
-                        _criteria=criteria,
-                    )
+                # Check if any matching releases found
+                if any(matcher(r) for r in releases):
+                    has_match = True
 
-            # No match found after checking all sampled episodes
-            tag_result = None
-            if apply_tags:
-                tag_criteria = (
-                    criteria if isinstance(criteria, SearchCriteria) else SearchCriteria.FOUR_K
-                )
-                tag_result = await self._tagger.apply_series_tags(
-                    client, series_id, False, tag_criteria, dry_run
-                )
+            # Apply tags and return result
+            tag_result = await self._apply_tags_if_needed(
+                client, series_id, has_match, criteria, apply_tags, dry_run, is_movie=False
+            )
             return SearchResult(
                 item_id=series_id,
-                item_type="series",
-                has_match=False,
+                item_type=MediaType.SERIES,
+                has_match=has_match,
                 result_type=result_type,
                 item_name=series_name,
                 releases=all_releases,
@@ -616,7 +701,7 @@ class ReleaseChecker:
         Raises:
             ValueError: If Sonarr is not configured, series not found, or movie-only criteria
         """
-        if not self._sonarr_config:
+        if not self._sonarr_client and not self._sonarr_config:
             raise ValueError("Sonarr is not configured")
 
         # Enforce movie-only criteria restriction
@@ -652,7 +737,7 @@ class ReleaseChecker:
         Raises:
             ValueError: If Sonarr is not configured
         """
-        if not self._sonarr_config:
+        if not self._sonarr_client and not self._sonarr_config:
             raise ValueError("Sonarr is not configured")
 
         async with self._get_sonarr_client() as client:

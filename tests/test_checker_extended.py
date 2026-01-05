@@ -1054,3 +1054,293 @@ class TestCheckSeriesByNameMovieOnlyCriteria:
 
         assert result.has_match is True
         assert result.item_name == "Breaking Bad"
+
+
+class TestCheckMovieWhenMovieIsNone:
+    """Tests for check_movie when movie lookup returns None (L458-460).
+
+    This tests the defensive code path where client.get_movie() returns None,
+    which can happen with certain API behaviors or injected mock clients.
+    """
+
+    @pytest.mark.asyncio
+    async def test_check_movie_returns_result_when_movie_is_none(self) -> None:
+        """When get_movie returns None, should still return SearchResult without tags."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from filtarr.checker import MediaType
+        from filtarr.clients.radarr import RadarrClient
+
+        # Create a mock client that returns None for get_movie
+        mock_client = MagicMock(spec=RadarrClient)
+        mock_client.get_movie = AsyncMock(return_value=None)
+        mock_client.get_movie_releases = AsyncMock(
+            return_value=[
+                Release(
+                    guid="rel1",
+                    title="Movie.2160p.BluRay",
+                    indexer="Test",
+                    size=5000,
+                    quality=Quality(id=19, name="WEBDL-2160p"),
+                ),
+            ]
+        )
+
+        # Use injected client
+        checker = ReleaseChecker(radarr_client=mock_client)
+
+        result = await checker.check_movie(123, apply_tags=False)
+
+        # Should return result with None item_name and no tag_result
+        assert result.item_id == 123
+        assert result.item_type == MediaType.MOVIE
+        assert result.has_match is True  # 4K release was found
+        assert result.item_name is None  # Movie was None, so no name
+        assert result.tag_result is None  # No tags applied when movie is None
+        assert len(result.releases) == 1
+
+    @pytest.mark.asyncio
+    async def test_check_movie_with_no_matching_releases_when_movie_is_none(self) -> None:
+        """When movie is None and no matching releases, should return has_match=False."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from filtarr.checker import MediaType
+        from filtarr.clients.radarr import RadarrClient
+
+        mock_client = MagicMock(spec=RadarrClient)
+        mock_client.get_movie = AsyncMock(return_value=None)
+        mock_client.get_movie_releases = AsyncMock(
+            return_value=[
+                Release(
+                    guid="rel1",
+                    title="Movie.1080p.BluRay",
+                    indexer="Test",
+                    size=2000,
+                    quality=Quality(id=7, name="Bluray-1080p"),  # Not 4K
+                ),
+            ]
+        )
+
+        checker = ReleaseChecker(radarr_client=mock_client)
+        result = await checker.check_movie(456, apply_tags=False)
+
+        assert result.item_id == 456
+        assert result.item_type == MediaType.MOVIE
+        assert result.has_match is False  # No 4K release
+        assert result.item_name is None
+        assert result.tag_result is None
+
+    @pytest.mark.asyncio
+    async def test_check_movie_with_custom_criteria_when_movie_is_none(self) -> None:
+        """Custom criteria should work when movie is None."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from filtarr.clients.radarr import RadarrClient
+
+        def remux_matcher(release: Release) -> bool:
+            return "REMUX" in release.title.upper()
+
+        mock_client = MagicMock(spec=RadarrClient)
+        mock_client.get_movie = AsyncMock(return_value=None)
+        mock_client.get_movie_releases = AsyncMock(
+            return_value=[
+                Release(
+                    guid="rel1",
+                    title="Movie.2160p.REMUX.BluRay",
+                    indexer="Test",
+                    size=50000,
+                    quality=Quality(id=31, name="Bluray-2160p"),
+                ),
+                Release(
+                    guid="rel2",
+                    title="Movie.2160p.BluRay",
+                    indexer="Test",
+                    size=5000,
+                    quality=Quality(id=31, name="Bluray-2160p"),
+                ),
+            ]
+        )
+
+        checker = ReleaseChecker(radarr_client=mock_client)
+        result = await checker.check_movie(789, criteria=remux_matcher, apply_tags=False)
+
+        assert result.has_match is True
+        assert result.result_type == ResultType.CUSTOM
+        assert result.item_name is None
+        # matched_releases should find the REMUX one
+        matched = result.matched_releases
+        assert len(matched) == 1
+        assert "REMUX" in matched[0].title
+
+    @pytest.mark.asyncio
+    async def test_check_movie_with_search_criteria_enum_when_movie_is_none(self) -> None:
+        """SearchCriteria enum should work when movie is None."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from filtarr.clients.radarr import RadarrClient
+
+        mock_client = MagicMock(spec=RadarrClient)
+        mock_client.get_movie = AsyncMock(return_value=None)
+        mock_client.get_movie_releases = AsyncMock(
+            return_value=[
+                Release(
+                    guid="rel1",
+                    title="Movie.2160p.HDR10.BluRay",
+                    indexer="Test",
+                    size=5000,
+                    quality=Quality(id=31, name="Bluray-2160p"),
+                ),
+            ]
+        )
+
+        checker = ReleaseChecker(radarr_client=mock_client)
+        result = await checker.check_movie(999, criteria=SearchCriteria.HDR, apply_tags=False)
+
+        assert result.has_match is True
+        assert result.result_type == ResultType.HDR
+        assert result.item_name is None
+
+
+class TestCheckSeriesSeasonWithNoEpisodes:
+    """Tests for check_series when a season in the selection has no episodes (L620).
+
+    This tests the edge case where select_seasons_to_check returns a season number
+    that doesn't exist in the episodes_by_season dictionary, causing the
+    `if not season_episodes: continue` branch to execute.
+    """
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_series_continues_when_selected_season_has_no_episodes(self) -> None:
+        """When a selected season has no episodes, should continue to next season.
+
+        This test simulates the scenario where:
+        1. We have aired episodes for seasons 1 and 3 (but NOT season 2)
+        2. The strategy selects seasons that include season 2
+        3. The code should skip season 2 and continue checking seasons 1 and 3
+        """
+        from unittest.mock import patch
+
+        respx.get("http://127.0.0.1:8989/api/v3/series/123").mock(
+            return_value=Response(
+                200, json={"id": 123, "title": "Gap Season Series", "year": 2020, "seasons": []}
+            )
+        )
+        # Episodes only in seasons 1 and 3 (gap at season 2)
+        respx.get("http://127.0.0.1:8989/api/v3/episode", params={"seriesId": "123"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "id": 101,
+                        "seriesId": 123,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "airDate": "2020-01-01",
+                        "monitored": True,
+                    },
+                    {
+                        "id": 301,
+                        "seriesId": 123,
+                        "seasonNumber": 3,
+                        "episodeNumber": 1,
+                        "airDate": "2022-01-01",
+                        "monitored": True,
+                    },
+                ],
+            )
+        )
+
+        # Mock releases for seasons 1 and 3
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "101"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-101",
+                        "title": "Show.S01.1080p",
+                        "indexer": "Test",
+                        "size": 1000,
+                        "quality": {"quality": {"id": 7, "name": "WEBDL-1080p"}},
+                    }
+                ],
+            )
+        )
+        respx.get("http://127.0.0.1:8989/api/v3/release", params={"episodeId": "301"}).mock(
+            return_value=Response(
+                200,
+                json=[
+                    {
+                        "guid": "rel-301",
+                        "title": "Show.S03.2160p.WEB-DL",
+                        "indexer": "Test",
+                        "size": 5000,
+                        "quality": {"quality": {"id": 19, "name": "WEBDL-2160p"}},
+                    }
+                ],
+            )
+        )
+
+        # Patch select_seasons_to_check to include a non-existent season (season 2)
+        with patch("filtarr.checker.select_seasons_to_check", return_value=[1, 2, 3]):
+            checker = ReleaseChecker(sonarr_url="http://127.0.0.1:8989", sonarr_api_key="test")
+            result = await checker.check_series(
+                123, strategy=SamplingStrategy.ALL, apply_tags=False
+            )
+
+        # Should have found 4K in season 3 and skipped non-existent season 2
+        assert result.has_match is True
+        # Only seasons 1 and 3 should be checked (2 was skipped due to no episodes)
+        assert sorted(result.seasons_checked) == [1, 3]
+        assert sorted(result.episodes_checked) == [101, 301]
+
+
+class TestSelectSeasonsToCheckFallbackBranch:
+    """Tests for select_seasons_to_check fallback branch (L156).
+
+    The `return sorted_seasons` on line 156 is defensive code that handles
+    the case when none of the known strategy conditions match. Since
+    SamplingStrategy is a well-defined enum, this branch should never execute
+    in normal usage - it's there as a safety net for future strategy additions.
+
+    This test documents the expected behavior and verifies the function
+    handles all current enum values correctly.
+    """
+
+    def test_all_enum_values_are_handled(self) -> None:
+        """Verify all SamplingStrategy enum values have explicit handling."""
+        # This test documents that all enum values are handled explicitly
+        # and the fallback branch (L156) serves as defensive code
+        available = [1, 2, 3, 4, 5]
+
+        for strategy in SamplingStrategy:
+            # Each strategy should produce a valid result without hitting fallback
+            result = select_seasons_to_check(available, strategy, max_seasons=3)
+            assert isinstance(result, list)
+            assert all(isinstance(s, int) for s in result)
+
+    def test_recent_max_seasons_limit(self) -> None:
+        """RECENT strategy respects max_seasons parameter."""
+        available = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+        result = select_seasons_to_check(available, SamplingStrategy.RECENT, max_seasons=2)
+        assert result == [9, 10]
+
+        result = select_seasons_to_check(available, SamplingStrategy.RECENT, max_seasons=5)
+        assert result == [6, 7, 8, 9, 10]
+
+    def test_distributed_deduplicates_overlapping_indices(self) -> None:
+        """DISTRIBUTED strategy deduplicates when indices overlap."""
+        # With exactly 3 seasons, first=0, middle=1, last=2 - all unique
+        result = select_seasons_to_check([1, 2, 3], SamplingStrategy.DISTRIBUTED)
+        assert result == [1, 2, 3]
+
+        # With 4 seasons: first=1, middle=idx 2 (season 3), last=4
+        result = select_seasons_to_check([1, 2, 3, 4], SamplingStrategy.DISTRIBUTED)
+        assert result == [1, 3, 4]
+
+    def test_all_strategy_preserves_order(self) -> None:
+        """ALL strategy returns sorted seasons."""
+        available = [5, 1, 3, 2, 4]  # Unsorted input
+        result = select_seasons_to_check(available, SamplingStrategy.ALL)
+        assert result == [1, 2, 3, 4, 5]

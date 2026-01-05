@@ -806,3 +806,281 @@ class TestEnsureInitialized:
         record = manager2.get_check("movie", 123)
         assert record is not None
         assert record.result == "available"
+
+
+class TestWriteBatching:
+    """Tests for write batching functionality (Task 4.3)."""
+
+    def test_writes_are_batched_after_n_checks(self, tmp_path: Path) -> None:
+        """Should batch writes - N checks before actual disk write."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path, batch_size=5)
+
+        # Track how many times save was actually called
+        save_count = 0
+        original_save = manager._do_save
+
+        def mock_save() -> None:
+            nonlocal save_count
+            save_count += 1
+            original_save()
+
+        manager._do_save = mock_save  # type: ignore[method-assign]
+
+        # Record 4 checks (should not trigger write yet)
+        for i in range(4):
+            manager.record_check("movie", i, True, None)
+
+        # Should not have written to disk yet (batch_size=5)
+        assert save_count == 0
+
+        # 5th check should trigger write
+        manager.record_check("movie", 4, True, None)
+        assert save_count == 1
+
+    def test_flush_forces_immediate_write(self, tmp_path: Path) -> None:
+        """Should force immediate write when flush() is called."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path, batch_size=100)
+
+        # Record some checks (not enough to trigger batch)
+        for i in range(5):
+            manager.record_check("movie", i, True, None)
+
+        # File should not exist yet (no writes)
+        assert not state_path.exists()
+
+        # Force flush
+        manager.flush()
+
+        # Now file should exist with all data
+        assert state_path.exists()
+
+        # Reload and verify all data is there
+        manager2 = StateManager(state_path)
+        for i in range(5):
+            record = manager2.get_check("movie", i)
+            assert record is not None
+            assert record.result == "available"
+
+    def test_context_exit_flushes_pending_writes(self, tmp_path: Path) -> None:
+        """Should flush pending writes on context manager exit."""
+        state_path = tmp_path / "state.json"
+
+        # Use context manager
+        with StateManager(state_path, batch_size=100) as manager:
+            for i in range(10):
+                manager.record_check("movie", i, True, None)
+            # Not enough to trigger batch write
+
+        # After exit, all data should be persisted
+        assert state_path.exists()
+
+        manager2 = StateManager(state_path)
+        for i in range(10):
+            record = manager2.get_check("movie", i)
+            assert record is not None
+
+    def test_no_data_loss_on_explicit_flush(self, tmp_path: Path) -> None:
+        """Should preserve all data after flush - no data loss."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path, batch_size=100)
+
+        # Record many checks
+        for i in range(50):
+            manager.record_check("movie", i, i % 2 == 0, f"tag-{i}")
+
+        # Flush
+        manager.flush()
+
+        # Reload and verify ALL data is preserved
+        manager2 = StateManager(state_path)
+        for i in range(50):
+            record = manager2.get_check("movie", i)
+            assert record is not None, f"Record for movie {i} missing"
+            expected_result = "available" if i % 2 == 0 else "unavailable"
+            assert record.result == expected_result
+            assert record.tag_applied == f"tag-{i}"
+
+    def test_configurable_batch_size(self, tmp_path: Path) -> None:
+        """Should respect custom batch size configuration.
+
+        Batching logic in _maybe_save():
+        - Each record_check() increments _pending_writes
+        - When _pending_writes >= batch_size, save occurs and counter resets to 0
+        - With batch_size=3: saves occur on checks 3, 6, 9, etc.
+        """
+        state_path = tmp_path / "state.json"
+
+        # Test with batch_size=3: saves should occur on every 3rd record_check()
+        manager = StateManager(state_path, batch_size=3)
+
+        save_count = 0
+        original_save = manager._do_save
+
+        def mock_save() -> None:
+            nonlocal save_count
+            save_count += 1
+            original_save()
+
+        manager._do_save = mock_save  # type: ignore[method-assign]
+
+        # Checks 1-2: pending_writes goes 0->1->2, no save yet (2 < 3)
+        manager.record_check("movie", 1, True, None)
+        manager.record_check("movie", 2, True, None)
+        assert save_count == 0, "No save should occur before reaching batch_size"
+
+        # Check 3: pending_writes goes 2->3, triggers save (3 >= 3), resets to 0
+        manager.record_check("movie", 3, True, None)
+        assert save_count == 1, "First save should occur on 3rd check"
+
+        # Checks 4-5: pending_writes goes 0->1->2, no save yet (counter was reset)
+        manager.record_check("movie", 4, True, None)
+        manager.record_check("movie", 5, True, None)
+        assert save_count == 1, "No additional save - only 2 pending after reset"
+
+        # Check 6: pending_writes goes 2->3, triggers second save
+        manager.record_check("movie", 6, True, None)
+        assert save_count == 2, "Second save should occur on 6th check"
+
+    def test_default_batch_size_is_100(self, tmp_path: Path) -> None:
+        """Should use batch_size=100 as default.
+
+        This is a separate test from test_configurable_batch_size - it verifies
+        the default constructor value, not runtime batching behavior.
+        """
+        state_path = tmp_path / "state.json"
+        # Create manager without explicit batch_size to test default
+        manager = StateManager(state_path)
+
+        # Default batch_size should be 100 (configured in StateManager.__init__)
+        assert manager.batch_size == 100
+
+    def test_batch_size_one_writes_every_check(self, tmp_path: Path) -> None:
+        """Should write on every check when batch_size=1."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path, batch_size=1)
+
+        save_count = 0
+        original_save = manager._do_save
+
+        def mock_save() -> None:
+            nonlocal save_count
+            save_count += 1
+            original_save()
+
+        manager._do_save = mock_save  # type: ignore[method-assign]
+
+        manager.record_check("movie", 1, True, None)
+        assert save_count == 1
+
+        manager.record_check("movie", 2, True, None)
+        assert save_count == 2
+
+    def test_flush_resets_pending_count(self, tmp_path: Path) -> None:
+        """Should reset pending count after flush."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path, batch_size=5)
+
+        save_count = 0
+        original_save = manager._do_save
+
+        def mock_save() -> None:
+            nonlocal save_count
+            save_count += 1
+            original_save()
+
+        manager._do_save = mock_save  # type: ignore[method-assign]
+
+        # Record 3 checks
+        for i in range(3):
+            manager.record_check("movie", i, True, None)
+
+        # Flush (should reset pending count)
+        manager.flush()
+        assert save_count == 1
+
+        # Record 4 more checks (should not trigger yet - reset to 0)
+        for i in range(4):
+            manager.record_check("movie", 100 + i, True, None)
+        assert save_count == 1
+
+        # 5th check should trigger
+        manager.record_check("movie", 200, True, None)
+        assert save_count == 2
+
+    def test_pending_writes_property(self, tmp_path: Path) -> None:
+        """Should track number of pending (unflushed) writes."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path, batch_size=10)
+
+        assert manager.pending_writes == 0
+
+        manager.record_check("movie", 1, True, None)
+        assert manager.pending_writes == 1
+
+        manager.record_check("movie", 2, True, None)
+        assert manager.pending_writes == 2
+
+        manager.flush()
+        assert manager.pending_writes == 0
+
+    def test_batch_progress_update_also_batched(self, tmp_path: Path) -> None:
+        """Should batch writes for batch progress updates too."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path, batch_size=5)
+
+        save_count = 0
+        original_save = manager._do_save
+
+        def mock_save() -> None:
+            nonlocal save_count
+            save_count += 1
+            original_save()
+
+        manager._do_save = mock_save  # type: ignore[method-assign]
+
+        manager.start_batch("test-batch", "movie", 100)
+        # start_batch should write immediately (important state)
+        assert save_count == 1
+
+        # Batch progress updates should be batched
+        for i in range(4):
+            manager.update_batch_progress(i)
+        assert save_count == 1  # Still 1 (batched)
+
+        manager.update_batch_progress(4)
+        assert save_count == 2  # 5th update triggers write
+
+    def test_clear_batch_writes_immediately(self, tmp_path: Path) -> None:
+        """Should write immediately when clearing batch (important state change)."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path, batch_size=100)
+
+        manager.start_batch("test-batch", "movie", 100)
+
+        save_count = 0
+        original_save = manager._do_save
+
+        def mock_save() -> None:
+            nonlocal save_count
+            save_count += 1
+            original_save()
+
+        manager._do_save = mock_save  # type: ignore[method-assign]
+
+        manager.clear_batch_progress()
+        assert save_count == 1  # Immediate write
+
+    def test_has_pending_writes(self, tmp_path: Path) -> None:
+        """Should report whether there are pending unflushed writes."""
+        state_path = tmp_path / "state.json"
+        manager = StateManager(state_path, batch_size=10)
+
+        assert manager.has_pending_writes is False
+
+        manager.record_check("movie", 1, True, None)
+        assert manager.has_pending_writes is True
+
+        manager.flush()
+        assert manager.has_pending_writes is False
