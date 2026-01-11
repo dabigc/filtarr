@@ -221,6 +221,18 @@ When contributing, maintain these security patterns:
 - 4K detection: Relies on the `quality.name` field from Radarr/Sonarr (e.g., "Bluray-2160p", "WEBDL-4K"). We trust their mature parsing instead of doing our own title matching, which avoids false positives from release group names like "4K4U" or "4K77".
 - API key passed via `X-Api-Key` header
 
+## Versioning Policy
+
+This project follows conservative semantic versioning. See [docs/VERSIONING.md](docs/VERSIONING.md) for the full policy.
+
+**Key points:**
+- Currently at v3.x as baseline (accepts this despite pre-1.0 maturity in spirit)
+- Breaking changes (`feat!:`, `fix!:`) should be **exceptionally rare**
+- Use deprecation warnings before removing any public API
+- Most changes should use `feat:` or `fix:` without the `!` suffix
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for commit message guidelines.
+
 ## Testing Strategy
 
 - Use `respx` for mocking httpx requests
