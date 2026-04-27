@@ -20,7 +20,7 @@ jobs:
       pr: ${{ steps.release.outputs.pr }}
       pr_branch: ${{ steps.release.outputs.prs && fromJson(steps.release.outputs.prs)[0].headBranchName || '' }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
