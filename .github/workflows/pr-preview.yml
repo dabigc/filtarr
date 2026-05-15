@@ -36,11 +36,15 @@ jobs:
     steps:
       - name: Resolve PR number
         id: pr
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "number=${{ inputs.pr_number }}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "number=$INPUT_PR_NUMBER" >> "$GITHUB_OUTPUT"
           else
-            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+            echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout repository
@@ -83,7 +87,7 @@ jobs:
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:pr-${{ steps.pr.outputs.number }}
             ```
 
-            Built from ${{ github.sha }}
+            Built from ${{ github.event.pull_request.head.sha || github.sha }}
           comment-tag: pr-preview
 
   cleanup:
@@ -93,8 +97,12 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'deploy-preview')
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    concurrency:
+      group: pr-preview-cleanup-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     steps:
       - name: Delete preview image from GHCR
+        id: delete
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_TAG: pr-${{ github.event.pull_request.number }}
@@ -109,12 +117,14 @@ jobs:
             gh api --method DELETE \
               "/users/$OWNER/packages/container/$PACKAGE/versions/$VERSION_ID"
             echo "Deleted preview image $PR_TAG (version $VERSION_ID)"
+            echo "deleted=true" >> "$GITHUB_OUTPUT"
           else
             echo "No preview image found for $PR_TAG — nothing to clean up"
+            echo "deleted=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Comment on PR
-        if: success()
+        if: steps.delete.outputs.deleted == 'true'
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.pull_request.number }}
