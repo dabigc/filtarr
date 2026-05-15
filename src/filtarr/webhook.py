@@ -320,7 +320,7 @@ def create_app(
     app = FastAPI(
         title="Filtarr Webhook Server",
         description="Receive Radarr/Sonarr webhooks and check 4K availability",
-        version="3.0.0",  # x-release-please-version
+        version="3.0.1",  # x-release-please-version
     )
 
     # Store state on app.state for proper isolation (no global mutable state)
