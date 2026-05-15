@@ -85,3 +85,39 @@ jobs:
 
             Built from ${{ github.sha }}
           comment-tag: pr-preview
+
+  cleanup:
+    name: Cleanup Preview Image
+    if: >-
+      github.event.action == 'closed' &&
+      contains(github.event.pull_request.labels.*.name, 'deploy-preview')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Delete preview image from GHCR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_TAG: pr-${{ github.event.pull_request.number }}
+          OWNER: ${{ github.repository_owner }}
+          PACKAGE: ${{ github.event.repository.name }}
+        run: |
+          VERSION_ID=$(gh api --paginate \
+            "/users/$OWNER/packages/container/$PACKAGE/versions" \
+            --jq ".[] | select(.metadata.container.tags[] == \"$PR_TAG\") | .id")
+
+          if [ -n "$VERSION_ID" ]; then
+            gh api --method DELETE \
+              "/users/$OWNER/packages/container/$PACKAGE/versions/$VERSION_ID"
+            echo "Deleted preview image $PR_TAG (version $VERSION_ID)"
+          else
+            echo "No preview image found for $PR_TAG — nothing to clean up"
+          fi
+
+      - name: Comment on PR
+        if: success()
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            Preview image `pr-${{ github.event.pull_request.number }}` has been cleaned up.
+          comment-tag: pr-preview
