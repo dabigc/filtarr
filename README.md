@@ -1,12 +1,13 @@
 # Filtarr
 
+**Filter out the noise to your secondary Radarr and Sonarr instances.**
+
 [![CI](https://github.com/dabigc/filtarr/actions/workflows/ci.yml/badge.svg?event=pull_request)](https://github.com/dabigc/filtarr/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/filtarr.svg)](https://pypi.org/project/filtarr/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Docker](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://github.com/dabigc/filtarr/pkgs/container/filtarr)
-[![codecov](https://codecov.io/gh/dabigc/filtarr/branch/main/graph/badge.svg)](https://codecov.io/gh/dabigc/filtarr)
+
+![filtarr in the terminal](docs/demo.gif)
 
 **Running multiple Radarr/Sonarr instances?** You know the problem: your 4K instance fills up with movies that will *never* be available in 4K, your indexers get hammered searching for releases that don't exist, and tools like [Huntarr](https://github.com/plexguide/Huntarr.io) waste API calls hunting for content you'll never find.
 
@@ -82,6 +83,12 @@
 - **Docker Ready**: Official image at `ghcr.io/dabigc/filtarr`
 
 ## Quick Start
+
+The thirty-second look, no config needed:
+
+```bash
+uvx --from "filtarr[cli]" filtarr --help
+```
 
 ### 1. Install
 
@@ -884,6 +891,10 @@ uv run ruff format src tests
 # Type check
 uv run mypy src
 ```
+
+## Author
+
+Built and maintained by [Cole Conrad](https://dabigc.com).
 
 ## License
 
